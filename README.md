@@ -1,0 +1,2 @@
+# contrapuntus
+JavaScript counterpoint composer 
