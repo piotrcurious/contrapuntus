@@ -1,0 +1,1759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Contrapunctus — a Game-of-Life-structured counterpoint automaton</title>
+<style>
+  :root{
+    --ink:#0d0f14;
+    --panel:#141922;
+    --panel-raised:#1a2029;
+    --line:#2a3244;
+    --line-soft:#1c222d;
+    --paper:#e9e6dd;
+    --muted:#8992a3;
+    --muted-dim:#5b6274;
+    --melody:#e8935c;
+    --mid:#5fc9b8;
+    --bass:#a58ef0;
+    --chaos:#8fe388;
+    --cool:#6b93d6;
+    --warm:#d6684a;
+    --accent:#c9a15a;
+    --radius:6px;
+    --serif: Georgia, 'Iowan Old Style', 'Palatino Linotype', 'Times New Roman', serif;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, Roboto, sans-serif;
+    --mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(ellipse at 20% -10%, #1a2130 0%, transparent 55%),
+      radial-gradient(ellipse at 100% 0%, #171c26 0%, transparent 50%),
+      var(--ink);
+    color:var(--paper);
+    font-family:var(--sans);
+    line-height:1.45;
+    min-height:100vh;
+  }
+  #app{max-width:1180px; margin:0 auto; padding:18px 16px 60px;}
+  a{color:var(--accent);}
+
+  header.nameplate{
+    display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:14px;
+    padding:18px 20px;
+    background:linear-gradient(180deg, var(--panel-raised), var(--panel));
+    border:1px solid var(--line); border-radius:var(--radius); margin-bottom:14px;
+    animation:riseIn .5s ease both;
+  }
+  .brand{display:flex; flex-direction:column; gap:2px; min-width:220px;}
+  .brand h1{font-family:var(--serif); font-weight:400; font-size:24px; letter-spacing:0.3px; margin:0; color:var(--paper);}
+  .brand .tagline{font-size:11.5px; color:var(--muted); letter-spacing:0.5px; text-transform:uppercase;}
+  .transport{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .transport .tempo-wrap{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted);}
+  .transport .tempo-wrap input[type=range]{width:100px;}
+  #tempoVal{font-family:var(--mono); color:var(--paper); width:2.4em; display:inline-block; text-align:right;}
+
+  button{
+    font-family:var(--sans); font-size:13px; color:var(--paper);
+    background:var(--panel-raised); border:1px solid var(--line);
+    border-radius:var(--radius); padding:8px 14px; cursor:pointer;
+    transition:border-color .15s ease, background .15s ease, transform .05s ease;
+  }
+  button:hover{border-color:var(--accent); background:#1f2632;}
+  button:active{transform:translateY(1px);}
+  button:focus-visible, select:focus-visible, input:focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+  button.primary{border-color:var(--accent); color:var(--accent); background:#1c1710;}
+  button.primary:hover{background:#241c12;}
+  button.small{padding:4px 9px; font-size:11px;}
+  button:disabled{opacity:.35; cursor:not-allowed;}
+
+  section.controls{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:14px;}
+  @media (max-width:860px){ section.controls{grid-template-columns:1fr;} }
+  .module{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px 16px; animation:riseIn .5s ease both;}
+  .module h2{font-family:var(--serif); font-weight:400; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); margin:0 0 12px; padding-bottom:8px; border-bottom:1px solid var(--line-soft);}
+  .field{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:10px;}
+  .field:last-child{margin-bottom:0;}
+  .field label.field-label{font-size:12.5px; color:var(--muted); flex:1;}
+  .field select{font-family:var(--mono); font-size:12px; color:var(--paper); background:var(--panel-raised); border:1px solid var(--line); border-radius:4px; padding:5px 6px; max-width:150px;}
+  .field .slidewrap{display:flex; align-items:center; gap:8px; flex:1.4;}
+  .field input[type=range]{flex:1; accent-color:var(--accent);}
+  .field .val{font-family:var(--mono); font-size:11.5px; color:var(--paper); width:2.6em; text-align:right;}
+  .field.checkbox{gap:8px; justify-content:flex-start;}
+  .field.checkbox input{accent-color:var(--accent);}
+  .field.checkbox label{font-size:12.5px; color:var(--paper); cursor:pointer;}
+
+  section.bars-panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:16px; margin-bottom:14px; animation:riseIn .55s ease both;}
+  .bars-panel h2{font-family:var(--serif); font-weight:400; font-size:13px; letter-spacing:1.2px; text-transform:uppercase; color:var(--muted); margin:0 0 10px;}
+  #barsStrip{display:flex; gap:3px; margin-bottom:10px; flex-wrap:wrap;}
+  .bar-head{flex:1; min-width:34px; text-align:center; padding:6px 2px; font-family:var(--mono); font-size:11px; color:var(--muted); background:var(--panel-raised); border:1px solid var(--line); border-radius:4px; cursor:pointer; user-select:none; position:relative;}
+  .bar-head:hover{border-color:var(--accent);}
+  .bar-head.selected{border-color:var(--accent); color:var(--accent); background:#201a12;}
+  .bar-head .dots{display:flex; gap:2px; justify-content:center; margin-top:3px; height:5px;}
+  .bar-head .dot{width:4px; height:4px; border-radius:50%; background:transparent;}
+
+  #rhythmGrid{display:flex; flex-direction:column; gap:5px; margin-bottom:6px;}
+  .rhythm-row{display:flex; align-items:center; gap:8px;}
+  .rhythm-row .voice-tag{width:64px; flex-shrink:0; font-size:11px; color:var(--muted); display:flex; align-items:center; gap:5px;}
+  .swatch{width:8px; height:8px; border-radius:2px; display:inline-block;}
+  .rhythm-row .cells{display:flex; gap:2px; flex:1; flex-wrap:nowrap; overflow-x:auto;}
+  .cell{flex:1; min-width:11px; height:22px; background:var(--panel-raised); border:1px solid var(--line-soft); border-radius:3px; cursor:pointer;}
+  .cell.bar-start{border-left:1px solid var(--line);}
+  .cell.on.melody{background:var(--melody); border-color:var(--melody);}
+  .cell.on.mid{background:var(--mid); border-color:var(--mid);}
+  .cell.on.bass{background:var(--bass); border-color:var(--bass);}
+  .cell.seeded{box-shadow:0 0 0 2px var(--accent) inset;}
+  .rhythm-row .presets{display:flex; gap:3px; flex-shrink:0;}
+
+  #barEditor{margin-top:10px; padding-top:12px; border-top:1px solid var(--line-soft); display:flex; flex-wrap:wrap; align-items:center; gap:16px;}
+  #barEditor.hidden{display:none;}
+  #barEditor .grp{display:flex; align-items:center; gap:8px;}
+  #barEditor .grp label{font-size:11.5px; color:var(--muted);}
+  #barEditor select{font-family:var(--mono); font-size:12px; background:var(--panel-raised); color:var(--paper); border:1px solid var(--line); border-radius:4px; padding:4px 6px;}
+  .phase-btn{padding:5px 10px; font-size:11px;}
+  .phase-btn.active[data-phase="consonant"]{border-color:var(--cool); color:var(--cool); background:#131b26;}
+  .phase-btn.active[data-phase="dissonant"]{border-color:var(--warm); color:var(--warm); background:#241814;}
+  .phase-btn.active[data-phase="neutral"]{border-color:var(--muted); color:var(--paper);}
+
+  .hint{font-size:11.5px; color:var(--muted-dim); margin:10px 0 0;}
+  .hint kbd{font-family:var(--mono); background:var(--panel-raised); border:1px solid var(--line); border-radius:3px; padding:1px 4px;}
+
+  section.viz-grid{display:grid; grid-template-columns:1fr 1fr; grid-template-areas:"roll roll" "auto auto" "chord life"; gap:12px; margin-bottom:14px;}
+  @media (max-width:860px){ section.viz-grid{grid-template-columns:1fr; grid-template-areas:"roll" "auto" "chord" "life";} }
+  .viz-panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px 14px; position:relative; animation:riseIn .6s ease both;}
+  .viz-panel.wide{grid-area:roll;}
+  .viz-panel.automaton{grid-area:auto;}
+  .viz-panel.chord{grid-area:chord;}
+  .viz-panel.life{grid-area:life;}
+  .viz-panel h2{font-family:var(--serif); font-weight:400; font-size:13px; letter-spacing:1px; margin:0 0 2px; color:var(--paper); display:flex; align-items:baseline; gap:8px; flex-wrap:wrap;}
+  .viz-panel h2 .sub{font-family:var(--sans); font-size:10.5px; color:var(--muted-dim); text-transform:none; letter-spacing:0;}
+  .viz-panel .canvas-wrap{position:relative; margin-top:8px;}
+  .gl-labels{position:absolute; inset:0; pointer-events:none;}
+  .gl-labels .chord-node-label{position:absolute; transform:translate(-50%,-50%); font-family:var(--mono); font-size:9.5px; font-weight:600; color:#0d0f14; white-space:nowrap; letter-spacing:.2px;}
+  .gl-labels .seg-label{position:absolute; top:2px; font-family:var(--mono); font-size:9.5px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:1px 3px; border-radius:2px;}
+  canvas{display:block; width:100%; border-radius:4px; background:#0a0c11;}
+  #pianoRollCanvas{height:300px;}
+  #chordCircleCanvas{height:280px;}
+  .legend{display:flex; gap:14px; margin-top:8px; flex-wrap:wrap;}
+  .legend .item{display:flex; align-items:center; gap:5px; font-size:10.5px; color:var(--muted);}
+
+  .sweep-strip{display:flex; gap:1px; height:30px; margin:10px 0 3px; cursor:pointer; border-radius:3px; overflow:hidden;}
+  .sweep-cell{flex:1; position:relative;}
+  .sweep-cell.current{box-shadow:0 0 0 2px var(--accent) inset;}
+  .sweep-labels{display:flex; justify-content:space-between; font-family:var(--mono); font-size:10px; color:var(--muted-dim); margin-bottom:12px;}
+  .readout{font-family:var(--mono); font-size:11.5px; color:var(--paper); background:var(--panel-raised); border:1px solid var(--line-soft); border-radius:4px; padding:9px 11px; margin:4px 0 12px; line-height:1.65;}
+  .readout .k{color:var(--muted);}
+  .rule-editors{display:flex; gap:22px; flex-wrap:wrap; align-items:flex-start; margin-top:4px;}
+  .rule-block h3{font-family:var(--sans); font-size:10.5px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:0 0 7px; font-weight:600;}
+  .chord-rule-grid{display:grid; grid-template-columns:repeat(12,15px); grid-template-rows:repeat(5,15px); gap:1px;}
+  .rule-cell{width:15px; height:15px; background:var(--panel-raised); border:1px solid var(--line-soft); cursor:pointer; border-radius:2px;}
+  .rule-cell.legal{background:var(--cool);}
+  .rule-cell.override{box-shadow:0 0 0 1.5px var(--accent) inset;}
+  .voice-rule-grids{display:flex; gap:12px;}
+  .voice-rule-grid{display:grid; grid-template-columns:repeat(3,15px); grid-template-rows:repeat(5,15px); gap:1px;}
+  .voice-rule-grid .rule-cell.legal{background:var(--bass);}
+  .rule-axis-label{font-family:var(--mono); font-size:9px; color:var(--muted-dim);}
+  details.mini-life{margin-top:14px;}
+  details.mini-life summary{cursor:pointer; font-size:11px; color:var(--muted); list-style:none; padding:4px 0;}
+  details.mini-life summary::-webkit-details-marker{display:none;}
+  details.mini-life summary::before{content:"▸ "; color:var(--accent);}
+  details.mini-life[open] summary::before{content:"▾ ";}
+  .mini-life-grid{display:grid; gap:1px; margin:8px 0;}
+  .mini-life-cell{background:var(--panel-raised); border-radius:1px; aspect-ratio:1;}
+  .mini-life-cell.alive{background:var(--chaos);}
+
+  details.explainer{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:4px 16px; animation:riseIn .65s ease both;}
+  details.explainer summary{cursor:pointer; padding:12px 0; font-family:var(--serif); font-size:13px; color:var(--muted); letter-spacing:.4px; list-style:none;}
+  details.explainer summary::-webkit-details-marker{display:none;}
+  details.explainer summary::before{content:"▸ "; color:var(--accent);}
+  details.explainer[open] summary::before{content:"▾ ";}
+  .explainer .body{padding-bottom:16px; font-size:13px; color:var(--paper);}
+  .explainer .body h3{font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--muted); margin:16px 0 6px;}
+  .explainer .body h3:first-child{margin-top:0;}
+  .explainer .body p{margin:0 0 8px; color:#c7c4bb;}
+  .explainer .body code{font-family:var(--mono); background:var(--panel-raised); padding:1px 5px; border-radius:3px; font-size:12px;}
+
+  footer{text-align:center; font-size:11px; color:var(--muted-dim); margin-top:18px;}
+  @keyframes riseIn{ from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);} }
+  @media (prefers-reduced-motion: reduce){ *{animation:none !important; transition:none !important;} }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="nameplate">
+    <div class="brand">
+      <h1>Contrapunctus</h1>
+      <div class="tagline">a Game-of-Life-structured counterpoint automaton</div>
+    </div>
+    <div class="transport">
+      <button id="btnRegenerate" class="primary">⟳ Recompute</button>
+      <button id="btnPlay">▶ Play</button>
+      <button id="btnStop" disabled>■ Stop</button>
+      <div class="tempo-wrap">
+        <span>Tempo</span>
+        <input type="range" id="tempoSlider" min="40" max="200" value="96">
+        <span id="tempoVal">96</span><span>bpm</span>
+      </div>
+    </div>
+  </header>
+
+  <section class="controls">
+    <div class="module">
+      <h2>Harmonic Material</h2>
+      <div class="field"><label class="field-label" for="rootSelect">Root</label><select id="rootSelect"></select></div>
+      <div class="field"><label class="field-label" for="scaleSelect">Scale</label><select id="scaleSelect"></select></div>
+      <div class="field"><label class="field-label" for="barsSelect">Bars</label>
+        <select id="barsSelect"><option value="4">4</option><option value="8" selected>8</option><option value="12">12</option><option value="16">16</option></select>
+      </div>
+      <div class="field"><label class="field-label" for="stepsPerBarSelect">Grid</label>
+        <select id="stepsPerBarSelect"><option value="4">quarters</option><option value="8" selected>eighths</option><option value="16">sixteenths</option></select>
+      </div>
+      <div class="field"><label class="field-label" for="harmRhythmSelect">Harmonic rhythm</label>
+        <select id="harmRhythmSelect"><option value="bar" selected>1 chord / bar</option><option value="half">2 chords / bar</option></select>
+      </div>
+    </div>
+
+    <div class="module">
+      <h2>Rule Permissiveness</h2>
+      <div class="field"><label class="field-label" for="tensionSlider">Target tension (τ center)</label>
+        <div class="slidewrap"><input type="range" id="tensionSlider" min="0" max="100" value="30"><span class="val" id="tensionVal">30</span></div></div>
+      <div class="field"><label class="field-label" for="lambdaChordSlider">λ — chord rule (harmony)</label>
+        <div class="slidewrap"><input type="range" id="lambdaChordSlider" min="0" max="100" value="38"><span class="val" id="lambdaChordVal">38</span></div></div>
+      <div class="field"><label class="field-label" for="lambdaVoiceSlider">λ — voice rule (counterpoint)</label>
+        <div class="slidewrap"><input type="range" id="lambdaVoiceSlider" min="0" max="100" value="46"><span class="val" id="lambdaVoiceVal">46</span></div></div>
+      <p class="hint" style="margin-top:8px">λ = fraction of the rule table set to "legal" — low λ freezes the walk into short loops, high λ opens it toward chaos. See the sweep below.</p>
+    </div>
+
+    <div class="module">
+      <h2>Techniques</h2>
+      <div class="field checkbox"><input type="checkbox" id="chkSecondaryDom"><label for="chkSecondaryDom">Extended vocabulary (secondary dominants + applied leading-tones)</label></div>
+      <p class="hint" style="margin-top:-4px">Roughly triples the reachable chord space (~7 → ~18-20), which is what actually gives the automaton room to be complex or chaotic rather than provably short-cycling.</p>
+      <div class="field checkbox"><input type="checkbox" id="chkWalkingBass"><label for="chkWalkingBass">Walking bass</label></div>
+      <div class="field"><label class="field-label" for="arpSelect">Melody arpeggiator</label>
+        <select id="arpSelect"><option value="none" selected>Off</option><option value="up">Up</option><option value="down">Down</option><option value="updown">Up / Down</option><option value="downup">Down / Up</option><option value="random">Scrambled</option></select>
+      </div>
+    </div>
+  </section>
+
+  <section class="bars-panel">
+    <h2>Bars &amp; Rhythm</h2>
+    <div id="barsStrip"></div>
+    <div id="rhythmGrid"></div>
+    <div id="barEditor" class="hidden">
+      <div class="grp"><label id="barEditorLabel">Bar —</label></div>
+      <div class="grp"><label for="barEditorScale">Scale</label><select id="barEditorScale"></select></div>
+      <div class="grp"><label for="barEditorTension">Tension</label><input type="range" id="barEditorTension" min="0" max="100" value="30"><span class="val" id="barEditorTensionVal" style="font-family:var(--mono); font-size:11px;">30</span></div>
+      <div class="grp">
+        <button class="phase-btn small" data-phase="consonant">Consonant</button>
+        <button class="phase-btn small" data-phase="neutral">Neutral</button>
+        <button class="phase-btn small" data-phase="dissonant">Dissonant</button>
+      </div>
+      <div class="grp"><button class="small" id="barEditorClear">Clear override</button></div>
+    </div>
+    <p class="hint">Click a bar number to select it (<kbd>shift</kbd>+click for a range) and override its scale, tension target or phase. Click bar 1's melody lane on the piano roll to seed your own opening notes — snapped to the current scale.</p>
+  </section>
+
+  <section class="viz-grid">
+    <div class="viz-panel wide">
+      <h2>Three Voices <span class="sub" id="seedHint">click bar 1 / melody lane to seed notes</span></h2>
+      <div class="canvas-wrap"><canvas id="pianoRollCanvas"></canvas><div class="gl-labels" id="chordStrip"></div></div>
+      <div class="legend">
+        <span class="item"><span class="swatch" style="background:var(--melody)"></span>melody</span>
+        <span class="item"><span class="swatch" style="background:var(--mid)"></span>mid voice</span>
+        <span class="item"><span class="swatch" style="background:var(--bass)"></span>bass</span>
+        <span class="item"><span class="swatch" style="background:var(--muted-dim)"></span>faint = rule forced a fallback (dead end)</span>
+      </div>
+    </div>
+
+    <div class="viz-panel automaton">
+      <h2>Compositional Automaton <span class="sub">rule tables + rule-space sweep — this is the actual chaos engine</span></h2>
+
+      <div class="rule-axis-label">λ<sub>chord</sub> sweep at fixed root/scale — click any cell to jump there (0.0 → 1.0, left to right)</div>
+      <div class="sweep-strip" id="sweepStrip"></div>
+      <div class="sweep-labels"><span>0.0 — frozen</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1.0 — unconstrained</span></div>
+
+      <div class="readout" id="dynamicsReadout"></div>
+
+      <div class="rule-editors">
+        <div class="rule-block">
+          <h3>Chord rule — RULE_CHORD[d][τ]</h3>
+          <div class="rule-axis-label">columns = fifths-step d (0–11), rows = tension bucket τ (much‑lower…much‑higher)</div>
+          <div class="chord-rule-grid" id="chordRuleGrid"></div>
+        </div>
+        <div class="rule-block">
+          <h3>Voice rule — RULE_VOICE[κ][μ][φ]</h3>
+          <div class="rule-axis-label">3 blocks = consonant-neighbor count κ (0,1,2) · rows = motion μ · cols = fit φ</div>
+          <div class="voice-rule-grids" id="voiceRuleGrids"></div>
+        </div>
+      </div>
+      <p class="hint">Click any cell to flip it as a manual override (shown with a ring). This is the correct place to test "sensitive dependence" — not an unrelated grid.</p>
+
+      <details class="mini-life">
+        <summary>Compare: literal Conway's Game of Life (reference only — does not drive the music)</summary>
+        <p class="hint" style="margin-top:2px">Shown only so the structural parallel is concrete: same idea (local rule, simple neighbor statistic, deterministic iteration → emergent order/chaos), different domain.</p>
+        <div class="mini-life-grid" id="miniLifeGrid"></div>
+        <div style="display:flex; gap:6px;"><button class="small" id="btnMiniLifeStep">Step</button><button class="small" id="btnMiniLifeReseed">Reseed</button><span class="readout" id="miniLifePop" style="padding:4px 8px; margin:0;"></span></div>
+      </details>
+    </div>
+
+    <div class="viz-panel chord">
+      <h2>Harmonic Field <span class="sub">legal transitions under the current rule</span></h2>
+      <div class="canvas-wrap"><canvas id="chordCircleCanvas"></canvas><div class="gl-labels" id="chordLabels"></div></div>
+      <div class="legend">
+        <span class="item"><span class="swatch" style="background:var(--cool)"></span>consonant</span>
+        <span class="item"><span class="swatch" style="background:var(--warm)"></span>dissonant</span>
+        <span class="item">edge = legal under RULE_CHORD</span>
+      </div>
+    </div>
+    <div class="viz-panel life">
+      <h2>Detected Structure <span class="sub">period / transient / sensitivity / sequence ("glider")</span></h2>
+      <div class="readout" id="structureReadout" style="margin-top:8px;"></div>
+      <p class="hint">A "sequence" here (a melodic/harmonic cell repeating at a shifted pitch level) is the exact compositional analogue of a Life glider: a local pattern preserved by the rule but translated.</p>
+    </div>
+  </section>
+
+  <details class="explainer">
+    <summary>How this works</summary>
+    <div class="body" id="explainerBody"></div>
+  </details>
+
+  <footer>Self-contained · no network calls · fully deterministic given root/scale/rules/seed — regenerating with nothing changed reproduces the same piece</footer>
+</div>
+
+<script>
+(function(){
+"use strict";
+
+/* =====================================================================
+   1. MUSIC THEORY CORE
+   ===================================================================== */
+
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+const SCALES = {
+  Ionian:        [0,2,4,5,7,9,11],
+  Dorian:        [0,2,3,5,7,9,10],
+  Phrygian:      [0,1,3,5,7,8,10],
+  Lydian:        [0,2,4,6,7,9,11],
+  Mixolydian:    [0,2,4,5,7,9,10],
+  Aeolian:       [0,2,3,5,7,8,10],
+  Locrian:       [0,1,3,5,6,8,10],
+  HarmonicMinor: [0,2,3,5,7,8,11],
+  MelodicMinor:  [0,2,3,5,7,9,11],
+  WholeTone:     [0,2,4,6,8,10],
+  OctatonicHW:   [0,1,3,4,6,7,9,10],
+  OctatonicWH:   [0,2,3,5,6,8,9,11],
+  MajorPentatonic:[0,2,4,7,9],
+  MinorPentatonic:[0,3,5,7,10],
+  Blues:         [0,3,5,6,7,10],
+};
+const SCALE_LABELS = {
+  Ionian:'Ionian (Major)', Dorian:'Dorian', Phrygian:'Phrygian', Lydian:'Lydian',
+  Mixolydian:'Mixolydian', Aeolian:'Aeolian (Nat. Minor)', Locrian:'Locrian',
+  HarmonicMinor:'Harmonic Minor', MelodicMinor:'Melodic Minor',
+  WholeTone:'Whole Tone', OctatonicHW:'Octatonic (H-W)', OctatonicWH:'Octatonic (W-H)',
+  MajorPentatonic:'Major Pentatonic', MinorPentatonic:'Minor Pentatonic', Blues:'Blues',
+};
+const SCALE_ORDER = ['Ionian','Dorian','Phrygian','Lydian','Mixolydian','Aeolian','Locrian',
+  'HarmonicMinor','MelodicMinor','WholeTone','OctatonicHW','OctatonicWH',
+  'MajorPentatonic','MinorPentatonic','Blues'];
+
+const CHORD_TEMPLATES = {
+  '0':'1', '0,7':'5', '0,5':'sus4nt',
+  '0,4,7':'maj', '0,3,7':'min', '0,3,6':'dim', '0,4,8':'aug',
+  '0,2,7':'sus2', '0,5,7':'sus4',
+  '0,4,7,11':'maj7', '0,4,7,10':'dom7', '0,3,7,10':'min7',
+  '0,3,6,10':'m7b5', '0,3,6,9':'dim7', '0,3,7,11':'minMaj7',
+  '0,4,8,10':'aug7', '0,4,8,11':'augMaj7',
+  '0,2,5,7':'add9nt', '0,2,4,7':'addNine',
+};
+const ROMAN_BASE = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'];
+
+function midiToFreq(m){ return 440*Math.pow(2,(m-69)/12); }
+function midiToName(m){ const pc=((Math.round(m)%12)+12)%12; return NOTE_NAMES[pc]+(Math.floor(m/12)-1); }
+function pcOf(x){ return ((Math.round(x)%12)+12)%12; }
+function clamp01(x){ return Math.max(0,Math.min(1,x)); }
+function intervalClass(x){ const s=((Math.round(x)%12)+12)%12; return Math.min(s,12-s); }
+
+const CONSONANCE_BY_IC = [1.0,0.05,0.25,0.65,0.75,0.9,0.15];
+
+function chordTension(tones){
+  const pcs=[...new Set(tones.map(pcOf))];
+  if(pcs.length<2) return 0;
+  let sum=0,count=0;
+  for(let i=0;i<pcs.length;i++) for(let j=i+1;j<pcs.length;j++){
+    const ic=intervalClass(pcs[j]-pcs[i]);
+    sum += 1-CONSONANCE_BY_IC[ic]; count++;
+  }
+  return sum/count;
+}
+function chordQuality(tones){
+  const root=tones[0];
+  const intervals=[...new Set(tones.map(t=>((t-root+120)%12)))].sort((a,b)=>a-b);
+  return CHORD_TEMPLATES[intervals.join(',')] || 'complex';
+}
+function romanNumeral(degree, quality){
+  if(degree<0) return '?';
+  const base = ROMAN_BASE[degree] || ('d'+degree);
+  switch(quality){
+    case 'dim': return base.toLowerCase()+'°';
+    case 'dim7': return base.toLowerCase()+'°7';
+    case 'm7b5': return base.toLowerCase()+'ø7';
+    case 'min': return base.toLowerCase();
+    case 'min7': return base.toLowerCase()+'7';
+    case 'minMaj7': return base.toLowerCase()+'(maj7)';
+    case 'maj7': return base+'maj7';
+    case 'dom7': return base+'7';
+    case 'aug': return base+'+';
+    case 'aug7': return base+'+7';
+    case 'augMaj7': return base+'+maj7';
+    case 'sus2': return base+'sus2';
+    case 'sus4': return base+'sus4';
+    case '5': return base+'5';
+    case '1': return base;
+    default: return base+'*';
+  }
+}
+function annotateChord(chord){
+  chord.quality = chordQuality(chord.tones);
+  if(chord.isSecondaryDominant) chord.roman = 'V7/'+chord.resolvesToRoman;
+  else if(chord.isSecondaryLeadingTone) chord.roman = 'vii°7/'+chord.resolvesToRoman;
+  else chord.roman = romanNumeral(chord.degree, chord.quality);
+  chord.tensionVal = chordTension(chord.tones);
+  return chord;
+}
+// Extends the plain diatonic set with the two classic tonicization devices --
+// an applied dominant (V7/x) and applied leading-tone diminished 7th (vii°7/x)
+// for every diatonic target -- as full standing vocabulary members, not a
+// special-cased escape hatch. This roughly triples the reachable chord
+// state space (7 -> ~18-20 for a standard 7-note scale), which matters
+// for the dynamics analysis below: a finite deterministic walk must cycle
+// within (vocabulary size) steps no matter what, so a richer vocabulary is
+// the only real way to obtain longer transients/periods and more varied
+// glider-like sequences to discover.
+function buildExtendedVocabulary(rootPc, scaleSteps){
+  const diatonic = buildDiatonicChords(rootPc, scaleSteps);
+  const out = diatonic.slice();
+  const seen = new Set(diatonic.map(c=>c.rootPc+':'+c.tones.join(',')));
+  function tryAdd(chord){
+    const key=chord.rootPc+':'+chord.tones.join(',');
+    if(seen.has(key)) return;
+    seen.add(key); out.push(chord);
+  }
+  for(const target of diatonic){
+    if(target.degree!==0){
+      const domRootPc=(target.rootPc+7)%12;
+      const domTones=[domRootPc,(domRootPc+4)%12,(domRootPc+7)%12,(domRootPc+10)%12];
+      const dom={degree:-1, rootPc:domRootPc, tones:domTones, isSecondaryDominant:true, resolvesToRoman:target.roman, ring:1};
+      annotateChord(dom); tryAdd(dom);
+    }
+    const ltRootPc=(target.rootPc+11)%12;
+    const ltTones=[ltRootPc,(ltRootPc+3)%12,(ltRootPc+6)%12,(ltRootPc+9)%12];
+    const lt={degree:-1, rootPc:ltRootPc, tones:ltTones, isSecondaryLeadingTone:true, resolvesToRoman:target.roman, ring:2};
+    annotateChord(lt); tryAdd(lt);
+  }
+  for(const c of out) if(c.ring==null) c.ring=0;
+  return out;
+}
+function chordVocabularyFor(rootPc, scaleSteps, extended){
+  return extended ? buildExtendedVocabulary(rootPc, scaleSteps) : buildDiatonicChords(rootPc, scaleSteps);
+}
+function buildDiatonicChords(rootPc, scaleSteps, chordSize){
+  chordSize = chordSize || 4;
+  const n = scaleSteps.length;
+  const chords=[];
+  for(let deg=0; deg<n; deg++){
+    const tones=[];
+    for(let k=0;k<chordSize;k++){
+      const idx=(deg+2*k)%n;
+      tones.push((rootPc+scaleSteps[idx])%12);
+    }
+    const uniqueTones=[...new Set(tones)];
+    const chord={degree:deg, rootPc:uniqueTones[0], tones:uniqueTones};
+    annotateChord(chord);
+    chords.push(chord);
+  }
+  return chords;
+}
+function voiceLeadingDistance(tonesA, tonesB){
+  const a=[...new Set(tonesA.map(pcOf))], b=[...new Set(tonesB.map(pcOf))];
+  let total=0;
+  for(const x of a){
+    let best=12;
+    for(const y of b){ const d=intervalClass(x-y); if(d<best) best=d; }
+    total+=best;
+  }
+  return total;
+}
+
+/* =====================================================================
+   2. STATE
+   ===================================================================== */
+
+const STATE = {
+  root:0, scaleName:'Ionian',
+  bars:8, stepsPerBar:8, lastStepsPerBar:8, harmonicRhythm:'bar',
+  tempo:96,
+  globalTension:0.30,
+  lambdaChord:0.38, lambdaVoice:0.46,
+  ruleChordOverrides:{},   // "d,tau" -> 0|1
+  ruleVoiceOverrides:{},   // "k,mu,phi" -> 0|1
+  secondaryDominants:false, walkingBass:false, arpVoice1:'none',
+  barOverrides:{}, selectedBars:[],
+  onsetGrid:null, seedNotes:{},
+  refLifeW:16, refLifeH:10, refLifeGrid:null,
+  composed:null,
+  audioCtx:null, masterGain:null, convolver:null, pans:null, sendGains:null,
+  playing:false, currentStep:0, currentStepFloat:0, nextStepTime:0, playStartCtxTime:0, schedulerTimer:null, rafId:null,
+};
+
+const REGISTERS = [
+  {lo:60, hi:84, center:72}, // melody
+  {lo:48, hi:72, center:60}, // mid
+  {lo:36, hi:60, center:48}, // bass
+];
+const VOICE_COLOR = [[0.910,0.576,0.361],[0.373,0.788,0.722],[0.647,0.557,0.941]];
+const VOICE_NAMES = ['melody','mid','bass'];
+
+/* =====================================================================
+   3. THE COMPOSITIONAL AUTOMATON
+   ------------------------------------------------------------------
+   Game of Life, reduced to its essential structure: a small discrete
+   neighborhood statistic (live-neighbor count 0..8), a binary rule table
+   over that statistic (B3/S23), applied uniformly and deterministically.
+   No randomness anywhere in Life's evolution -- only in its seed.
+
+   Below: the same structure, on the correct domain. "Space" is not a 2D
+   grid but the small set of interacting channels (chord, melody, mid,
+   bass); "neighbors" are (a) each channel's own immediate past and
+   (b) the concurrent state of the channels it must harmonize with.
+   ===================================================================== */
+
+// ---- chord channel: neighbor statistic = directed fifths-step d (0..11)
+//      from the previous chord's root to a candidate root, and a tension
+//      bucket tau (0..4) for how the candidate's tension sits relative to
+//      the segment's target. RULE_CHORD[d][tau] in {0,1}, exactly like
+//      Life's rule table is indexed by a small integer neighbor statistic.
+
+function directedFifths(rootA, rootB){ return ((rootA-rootB)+12)%12; }
+function tensionBucketIdx(delta){
+  if(delta<=-0.15) return 0;
+  if(delta<=-0.05) return 1;
+  if(delta<= 0.05) return 2;
+  if(delta<= 0.15) return 3;
+  return 4;
+}
+// Hand-ranked by classical root-motion strength (descending 5th strongest,
+// then descending 3rd, ascending 2nd, repetition, ascending 5th, ascending
+// 3rd, descending 2nd, remaining semitone/tritone motions weakest). This
+// ranking is only used to build the DEFAULT (lambda-derived) table --
+// any cell can be hand-overridden regardless of this ordering.
+const FUNCTIONAL_RANK_BY_D = [3,7,6,1,1,4,7,0,5,5,2,7];
+
+const CHORD_RULE_ORDER = (function(){
+  const cells=[];
+  for(let d=0; d<12; d++) for(let tau=0; tau<5; tau++) cells.push([d,tau]);
+  cells.sort((a,b)=>{
+    const ra = FUNCTIONAL_RANK_BY_D[a[0]]*5 + Math.abs(a[1]-2);
+    const rb = FUNCTIONAL_RANK_BY_D[b[0]]*5 + Math.abs(b[1]-2);
+    return ra-rb;
+  });
+  return cells;
+})();
+function chordRuleTable(lambda, overrides){
+  const table = Array.from({length:12}, ()=> new Array(5).fill(0));
+  const n = Math.round(clamp01(lambda)*CHORD_RULE_ORDER.length);
+  for(let i=0;i<n;i++){ const [d,tau]=CHORD_RULE_ORDER[i]; table[d][tau]=1; }
+  for(const key in overrides){
+    if(overrides[key]==null) continue;
+    const parts=key.split(',').map(Number);
+    table[parts[0]][parts[1]] = overrides[key];
+  }
+  return table;
+}
+
+// ---- voice channels: neighbor statistic = (kappa, mu, phi):
+//   kappa = count of already-decided concurrent voices this candidate is
+//           consonant with (0..2) -- the direct analogue of Life's
+//           live-neighbor count.
+//   mu    = motion class relative to this voice's own previous pitch
+//           (downLeap, downStep, repeat, upStep, upLeap).
+//   phi   = chord-fit class of the candidate (chromatic, scale, chord tone).
+// RULE_VOICE[kappa][mu][phi] in {0,1}.
+
+function motionClassIdx(delta){
+  if(delta<=-3) return 0;
+  if(delta<=-1) return 1;
+  if(delta===0) return 2;
+  if(delta<= 2) return 3;
+  return 4;
+}
+function chordFitClassIdx(pc, chordPCs, scalePCs){
+  if(chordPCs.includes(pc)) return 2;
+  if(scalePCs.includes(pc)) return 1;
+  return 0;
+}
+const CONSONANT_ICS = new Set([0,3,4,5]);
+function consonanceCount(candidateMidi, others){
+  let n=0;
+  for(const ov of others){ if(ov.pitch==null) continue; if(CONSONANT_ICS.has(intervalClass(candidateMidi-ov.pitch))) n++; }
+  return n;
+}
+const VOICE_RULE_ORDER = (function(){
+  const cells=[];
+  for(let k=0;k<3;k++) for(let m=0;m<5;m++) for(let f=0;f<3;f++) cells.push([k,m,f]);
+  cells.sort((a,b)=>{
+    const ra=(2-a[2])*10 + Math.abs(a[1]-2)*3 - a[0]*4;
+    const rb=(2-b[2])*10 + Math.abs(b[1]-2)*3 - b[0]*4;
+    return ra-rb;
+  });
+  return cells;
+})();
+function voiceRuleTable(lambda, overrides){
+  const table = Array.from({length:3}, ()=> Array.from({length:5}, ()=> new Array(3).fill(0)));
+  const n = Math.round(clamp01(lambda)*VOICE_RULE_ORDER.length);
+  for(let i=0;i<n;i++){ const [k,m,f]=VOICE_RULE_ORDER[i]; table[k][m][f]=1; }
+  for(const key in overrides){
+    if(overrides[key]==null) continue;
+    const parts=key.split(',').map(Number);
+    table[parts[0]][parts[1]][parts[2]] = overrides[key];
+  }
+  return table;
+}
+
+// Hard constraints -- these are "physics" (register bounds, the impossibility
+// of two voices moving in parallel perfect intervals), not part of the rule
+// table, exactly as Life's board topology is physics, not part of B/S.
+function filterParallels(candidates, ctx){
+  if(!ctx.otherVoicesAtThisStep || ctx.otherVoicesAtThisStep.length===0 || ctx.prevPitch==null) return candidates;
+  const filtered = candidates.filter(cand=>{
+    for(const ov of ctx.otherVoicesAtThisStep){
+      if(ov.pitch==null || ov.prevPitch==null) continue;
+      const prevIc=intervalClass(ctx.prevPitch-ov.prevPitch), newIc=intervalClass(cand-ov.pitch);
+      const candMotion=cand-ctx.prevPitch, ovMotion=ov.pitch-ov.prevPitch;
+      const sameDir = candMotion!==0 && ovMotion!==0 && Math.sign(candMotion)===Math.sign(ovMotion);
+      if(sameDir && prevIc===newIc && (newIc===0||newIc===5)) return false;
+    }
+    return true;
+  });
+  return filtered.length ? filtered : candidates;
+}
+
+// Deterministic pseudo-shuffle for the arpeggiator's "scrambled" pattern --
+// a fixed permutation of a fixed seed, not Math.random(); the whole
+// automaton has no per-step randomness at all.
+function deterministicShuffle(arr, seed){
+  const out=arr.slice();
+  let h=seed>>>0;
+  for(let i=out.length-1;i>0;i--){
+    h = (Math.imul(h,2654435761)+i)>>>0;
+    const j = h % (i+1);
+    const t=out[i]; out[i]=out[j]; out[j]=t;
+  }
+  return out;
+}
+function buildArpSequence(tones, pattern, seed){
+  const sorted=[...new Set(tones)].sort((a,b)=>a-b);
+  if(sorted.length===0) return [60];
+  switch(pattern){
+    case 'up': return sorted;
+    case 'down': return sorted.slice().reverse();
+    case 'updown': { const d=sorted.slice().reverse(); return sorted.concat(d.slice(1,-1)); }
+    case 'downup': { const u=sorted.slice(1,-1); return sorted.slice().reverse().concat(u); }
+    case 'random': return deterministicShuffle(sorted, seed);
+    default: return sorted;
+  }
+}
+function* arpeggiatorGenerator(seq){ let i=0; while(true){ yield seq[i%seq.length]; i++; } }
+
+function segmentToBar(segIdx){ const segsPerBar = STATE.harmonicRhythm==='bar' ? 1 : 2; return Math.floor(segIdx/segsPerBar); }
+function stepToSegment(stepIdx){ const segLen = STATE.harmonicRhythm==='bar' ? STATE.stepsPerBar : Math.floor(STATE.stepsPerBar/2); return Math.floor(stepIdx/segLen); }
+function effectiveScaleForSegment(segIdx){ const bar=segmentToBar(segIdx); const ov=STATE.barOverrides[bar]; return (ov && ov.scale) ? ov.scale : STATE.scaleName; }
+function segmentTargetTension(segIdx){
+  const bar=segmentToBar(segIdx); const ov=STATE.barOverrides[bar];
+  if(ov){
+    if(ov.phase==='consonant') return 0.20;
+    if(ov.phase==='dissonant') return 0.55;
+    if(typeof ov.tension==='number') return ov.tension;
+  }
+  return STATE.globalTension;
+}
+
+// ---- the chord walk: fully deterministic given (root, per-segment scale/
+// tension, rule table, starting chord). Exactly like a single cell's
+// trajectory through Life's rule: apply the same local rule at every step.
+function chordTieBreakCompare(current){
+  // Smallest voice-leading distance wins, EXCEPT that staying on the exact
+  // same chord (distance always 0) is deliberately pushed to the back --
+  // otherwise, the instant self-repetition becomes legal under the rule
+  // table, the deterministic walk collapses into a trivial period-1 freeze
+  // (self-repeat is always the global voice-leading-distance minimum, so an
+  // unweighted "smallest distance wins" tie-break would pick it every time
+  // it's available). Self-repetition remains available as a last resort.
+  return (a,b)=>{
+    const aSelf = a.rootPc===current.rootPc && a.quality===current.quality;
+    const bSelf = b.rootPc===current.rootPc && b.quality===current.quality;
+    if(aSelf!==bSelf) return aSelf?1:-1;
+    const va=voiceLeadingDistance(current.tones,a.tones), vb=voiceLeadingDistance(current.tones,b.tones);
+    if(va!==vb) return va-vb;
+    return a.rootPc-b.rootPc;
+  };
+}
+function* chordAutomatonWalk(totalSegments, startChord, lambdaChord, overrides, opts){
+  opts = opts || {};
+  const table = chordRuleTable(lambdaChord, overrides);
+  const vocabCache={};
+  function vocab(segIdx){
+    const sn=effectiveScaleForSegment(segIdx);
+    if(!vocabCache[sn]) vocabCache[sn]=chordVocabularyFor(STATE.root, SCALES[sn], opts.secondaryDominants);
+    return vocabCache[sn];
+  }
+  let current = startChord;
+  yield {chord:current, segIdx:0, fellBack:false, viaEscape:false};
+  for(let s=1;s<totalSegments;s++){
+    const v = vocab(s);
+    const target = segmentTargetTension(s);
+    let legal = v.filter(cand=>{
+      const d=directedFifths(current.rootPc, cand.rootPc);
+      const tIdx=tensionBucketIdx(cand.tensionVal-target);
+      return table[d][tIdx]===1;
+    });
+    let fellBack=false;
+    if(!legal || legal.length===0){
+      // true dead end -- Life's rule is total (every neighbor-count has a
+      // defined outcome, even if it's "dies"); ours is total too: fall
+      // back to the smoothest available move regardless of the rule. With
+      // the extended vocabulary this is rarer, since secondary dominants
+      // and applied leading-tones are already ordinary candidates that the
+      // rule table can legally admit on their own merits.
+      fellBack=true;
+      legal=v.slice();
+    }
+    legal.sort(chordTieBreakCompare(current));
+    current=legal[0];
+    yield {chord:current, segIdx:s, fellBack, viaEscape:current.isSecondaryDominant||current.isSecondaryLeadingTone||false};
+  }
+}
+
+function pickByVoiceRule(candidates, ctx){
+  const {prevPitch, others, chordTones, scalePCs, voiceTable, preferredRootPc} = ctx;
+  const chordPCs = chordTones.map(pcOf);
+  function classify(cand){
+    return {
+      kappa: Math.min(2, consonanceCount(cand, others||[])),
+      mu: prevPitch==null ? 2 : motionClassIdx(cand-prevPitch),
+      phi: chordFitClassIdx(pcOf(cand), chordPCs, scalePCs),
+    };
+  }
+  let legal = candidates.filter(cand=>{
+    const c=classify(cand);
+    return voiceTable[c.kappa][c.mu][c.phi]===1;
+  });
+  let fellBack=false;
+  if(legal.length===0){ legal=candidates.slice(); fellBack=true; }
+  legal.sort((a,b)=>{
+    if(preferredRootPc!=null){
+      const ar=pcOf(a)===preferredRootPc?0:1, br=pcOf(b)===preferredRootPc?0:1;
+      if(ar!==br) return ar-br;
+    }
+    const da=prevPitch==null?0:Math.abs(a-prevPitch), db=prevPitch==null?0:Math.abs(b-prevPitch);
+    const aRepeat = prevPitch!=null && da===0, bRepeat = prevPitch!=null && db===0;
+    if(aRepeat!==bRepeat) return aRepeat?1:-1;
+    if(da!==db) return da-db;
+    const pa=classify(a).phi, pb=classify(b).phi;
+    if(pa!==pb) return pb-pa;
+    return a-b;
+  });
+  const chosen=legal[0];
+  return {pitch:chosen, phi:classify(chosen).phi, fellBack};
+}
+function rangeAll(lo,hi){ const out=[]; for(let m=lo;m<=hi;m++) out.push(m); return out; }
+function isFirstOnsetInSegment(voiceIdx, onsetGrid, step, segIdx){
+  const segLen = STATE.harmonicRhythm==='bar' ? STATE.stepsPerBar : Math.floor(STATE.stepsPerBar/2);
+  const segStart=segIdx*segLen;
+  for(let s=segStart;s<step;s++){ if(onsetGrid[voiceIdx][s]) return false; }
+  return true;
+}
+function chordToneCandidatesInRange(tones, lo, hi){
+  const pcs=[...new Set(tones.map(pcOf))];
+  const out=[];
+  for(let m=lo;m<=hi;m++) if(pcs.includes(pcOf(m))) out.push(m);
+  return out;
+}
+
+function* voiceAutomatonWalk(chordSequence, onsetGrid, lambdaVoice, overrides, opts){
+  opts=opts||{};
+  const voiceTable = voiceRuleTable(lambdaVoice, overrides);
+  const totalSteps = onsetGrid[0].length;
+  const prevPitch=[null,null,null];
+  let melodyArpGen=null, melodyArpSeg=-1;
+
+  for(let step=0; step<totalSteps; step++){
+    const segIdx=stepToSegment(step);
+    const chord=chordSequence[Math.min(segIdx, chordSequence.length-1)];
+    const scaleName=effectiveScaleForSegment(segIdx);
+    const scalePCs=SCALES[scaleName].map(off=>(STATE.root+off)%12);
+    const stepStartPrev = prevPitch.slice();
+    const pitches=[null,null,null], deco=[false,false,false], fellBack=[false,false,false];
+
+    // melody
+    if(STATE.seedNotes[step]!=null){
+      pitches[0]=STATE.seedNotes[step]; prevPitch[0]=pitches[0];
+    } else if(onsetGrid[0][step]){
+      if(opts.arpVoice1 && opts.arpVoice1!=='none'){
+        if(melodyArpSeg!==segIdx){
+          const candTones=chordToneCandidatesInRange(chord.tones, REGISTERS[0].lo, REGISTERS[0].hi);
+          const toneSet=candTones.length?candTones:[REGISTERS[0].center];
+          let seq=buildArpSequence(toneSet, opts.arpVoice1, chord.rootPc*17+segIdx);
+          melodyArpGen=arpeggiatorGenerator(seq); melodyArpSeg=segIdx;
+        }
+        const chosen=melodyArpGen.next().value;
+        pitches[0]=chosen; prevPitch[0]=chosen;
+      } else {
+        const candidates = rangeAll(REGISTERS[0].lo, REGISTERS[0].hi);
+        const r = pickByVoiceRule(candidates, {prevPitch:prevPitch[0], others:[], chordTones:chord.tones, scalePCs, voiceTable});
+        pitches[0]=r.pitch; deco[0]=r.phi<2; fellBack[0]=r.fellBack; prevPitch[0]=r.pitch;
+      }
+    }
+
+    // bass
+    if(onsetGrid[2][step]){
+      const others=[]; if(pitches[0]!=null) others.push({pitch:pitches[0], prevPitch:stepStartPrev[0]});
+      let candidates = rangeAll(REGISTERS[2].lo, REGISTERS[2].hi);
+      candidates = filterParallels(candidates, {prevPitch:prevPitch[2], otherVoicesAtThisStep:others});
+      const first = isFirstOnsetInSegment(2,onsetGrid,step,segIdx);
+      const r = pickByVoiceRule(candidates, {prevPitch:prevPitch[2], others, chordTones:chord.tones, scalePCs, voiceTable,
+        preferredRootPc: first ? chord.rootPc : null});
+      pitches[2]=r.pitch; deco[2]=r.phi<2; fellBack[2]=r.fellBack; prevPitch[2]=r.pitch;
+    }
+
+    // mid
+    if(onsetGrid[1][step]){
+      const others=[];
+      if(pitches[0]!=null) others.push({pitch:pitches[0], prevPitch:stepStartPrev[0]});
+      if(pitches[2]!=null) others.push({pitch:pitches[2], prevPitch:stepStartPrev[2]});
+      let candidates = rangeAll(REGISTERS[1].lo, REGISTERS[1].hi);
+      candidates = filterParallels(candidates, {prevPitch:prevPitch[1], otherVoicesAtThisStep:others});
+      const r = pickByVoiceRule(candidates, {prevPitch:prevPitch[1], others, chordTones:chord.tones, scalePCs, voiceTable});
+      pitches[1]=r.pitch; deco[1]=r.phi<2; fellBack[1]=r.fellBack; prevPitch[1]=r.pitch;
+    }
+
+    yield {step, pitches, deco, fellBack, chord, segIdx};
+  }
+}
+
+/* =====================================================================
+   4. DYNAMICS ANALYSIS -- the combinatorics engine
+   ------------------------------------------------------------------
+   Because the walk is deterministic over a FINITE state space, it must
+   eventually recur (exactly as a Life board must reach a still life,
+   an oscillator, or -- on an infinite/large board -- run a long or
+   unbounded transient). We can therefore literally compute the
+   transient length and period, detect glider-like repeating-shifted
+   patterns, and measure sensitivity to a single rule-table flip.
+   ===================================================================== */
+
+function analyzeChordDynamics(lambdaChord, overrides, startChord, horizon, extended){
+  const table = chordRuleTable(lambdaChord, overrides);
+  const vocab = chordVocabularyFor(STATE.root, SCALES[STATE.scaleName], extended);
+  const target = STATE.globalTension; // uniform target: dynamics analysis assumes a time-invariant rule
+  let current = startChord;
+  const seen = new Map();
+  const seq = [current];
+  seen.set(current.rootPc+':'+current.quality, 0);
+  for(let i=1;i<horizon;i++){
+    let legal = vocab.filter(c=>{
+      const d=directedFifths(current.rootPc,c.rootPc), t=tensionBucketIdx(c.tensionVal-target);
+      return table[d][t]===1;
+    });
+    if(legal.length===0) legal=vocab.slice();
+    legal.sort(chordTieBreakCompare(current));
+    current=legal[0];
+    const key=current.rootPc+':'+current.quality;
+    seq.push(current);
+    if(seen.has(key)) return {transient:seen.get(key), period:i-seen.get(key), sequence:seq, cycled:true, vocabSize:vocab.length};
+    seen.set(key,i);
+  }
+  // With horizon comfortably larger than any realistic vocabulary size, this
+  // branch is a defensive fallback, not a real outcome: a deterministic walk
+  // over a finite domain of size N must revisit a state within N steps, by
+  // the pigeonhole principle -- the same reason a finite Game of Life board
+  // must also eventually repeat exactly. "Never repeats" is therefore not
+  // a meaningful definition of chaos here; see the sensitivity measure below.
+  return {transient:null, period:null, sequence:seq, cycled:false, vocabSize:vocab.length};
+}
+function measureChordRuleSensitivity(lambdaChord, overrides, flipD, flipTau, startChord, horizon, extended){
+  const tableA = chordRuleTable(lambdaChord, overrides);
+  const overridesB = Object.assign({}, overrides);
+  overridesB[flipD+','+flipTau] = tableA[flipD][flipTau] ? 0 : 1;
+  const tableB = chordRuleTable(lambdaChord, overridesB);
+  const vocab = chordVocabularyFor(STATE.root, SCALES[STATE.scaleName], extended);
+  const target = STATE.globalTension;
+  function walk(table){
+    let current=startChord; const seq=[current];
+    for(let i=1;i<horizon;i++){
+      let legal=vocab.filter(c=>{ const d=directedFifths(current.rootPc,c.rootPc), t=tensionBucketIdx(c.tensionVal-target); return table[d][t]===1; });
+      if(legal.length===0) legal=vocab.slice();
+      legal.sort(chordTieBreakCompare(current));
+      current=legal[0]; seq.push(current);
+    }
+    return seq;
+  }
+  const seqA=walk(tableA), seqB=walk(tableB);
+  let firstDivergence=-1, totalDivergent=0;
+  for(let i=0;i<horizon;i++){
+    const diff = seqA[i].rootPc!==seqB[i].rootPc || seqA[i].quality!==seqB[i].quality;
+    if(diff){ totalDivergent++; if(firstDivergence===-1) firstDivergence=i; }
+  }
+  return {firstDivergence, totalDivergent, horizon, fraction: totalDivergent/horizon};
+}
+// Chaos, properly defined for a bounded deterministic system, is NOT "never
+// repeats" (impossible here by pigeonhole -- see above) but SENSITIVE
+// DEPENDENCE on a small perturbation: this is the actual defining property
+// used in dynamical systems theory (positive Lyapunov exponent), and it is
+// what we measure via measureChordRuleSensitivity rather than via period length.
+function classifyDynamics(d, sensitivity){
+  if(!d.cycled) return 'unresolved';
+  if(d.period===1) return 'frozen';
+  const richness = d.period / Math.max(1, d.vocabSize);
+  if(richness < 0.3) return 'loop';
+  if(sensitivity!=null && sensitivity > 0.25) return 'chaotic';
+  return 'complex';
+}
+const DYNAMICS_COLOR = {
+  frozen:     [0.55,0.35,0.35],
+  loop:       [0.55,0.62,0.42],
+  complex:    [0.42,0.62,0.55],
+  chaotic:    [0.63,0.42,0.66],
+  unresolved: [0.45,0.45,0.45],
+};
+function sweepLambdaChord(steps, extended){
+  const startChord = chordVocabularyFor(STATE.root, SCALES[STATE.scaleName], extended)[0];
+  const horizon = 220; // comfortably above any realistic vocabulary size (~7 to ~20)
+  const out=[];
+  for(let i=0;i<=steps;i++){
+    const lambda=i/steps;
+    const r=analyzeChordDynamics(lambda, STATE.ruleChordOverrides, startChord, horizon, extended);
+    let sensitivity=null;
+    if(r.sequence.length>=2){
+      const d=directedFifths(r.sequence[0].rootPc, r.sequence[1].rootPc);
+      const tau=tensionBucketIdx(r.sequence[1].tensionVal-STATE.globalTension);
+      sensitivity = measureChordRuleSensitivity(lambda, STATE.ruleChordOverrides, d, tau, startChord, 80, extended).fraction;
+    }
+    out.push({lambda, transient:r.transient, period:r.period, cycled:r.cycled, vocabSize:r.vocabSize, sensitivity, cls:classifyDynamics(r, sensitivity)});
+  }
+  return out;
+}
+function detectSequences(chordSeq){
+  const d=[];
+  for(let i=1;i<chordSeq.length;i++) d.push(directedFifths(chordSeq[i-1].rootPc, chordSeq[i].rootPc));
+  let best=null;
+  for(let k=2;k<=4;k++){
+    for(let i=0;i+2*k<=d.length;i++){
+      let match=true;
+      for(let j=0;j<k;j++) if(d[i+j]!==d[i+k+j]){ match=false; break; }
+      if(match && (!best || k>best.k)) best={startIdx:i, k};
+    }
+  }
+  return best;
+}
+
+/* =====================================================================
+   5. RHYTHM GRID / SEEDING
+   ===================================================================== */
+function defaultOnsetGrid(voiceIndex, totalSteps, stepsPerBar, harmonicRhythm){
+  const grid=new Array(totalSteps).fill(false);
+  if(voiceIndex===0){ const p=Math.max(1,Math.floor(stepsPerBar/4)); for(let s=0;s<totalSteps;s+=p) grid[s]=true; }
+  else if(voiceIndex===1){ const p=Math.max(1,Math.floor(stepsPerBar/2)); for(let s=0;s<totalSteps;s+=p) grid[s]=true; }
+  else { const segLen=harmonicRhythm==='bar'?stepsPerBar:Math.max(1,Math.floor(stepsPerBar/2)); for(let s=0;s<totalSteps;s+=segLen) grid[s]=true; }
+  return grid;
+}
+function euclideanRhythm(steps,pulses){
+  const pattern=new Array(steps).fill(false);
+  let bucket=0;
+  for(let i=0;i<steps;i++){ bucket+=pulses; if(bucket>=steps){ bucket-=steps; pattern[i]=true; } }
+  return pattern;
+}
+function ensureGridsSized(){
+  const totalSteps=STATE.bars*STATE.stepsPerBar;
+  if(!STATE.onsetGrid){
+    STATE.onsetGrid=[0,1,2].map(v=>defaultOnsetGrid(v,totalSteps,STATE.stepsPerBar,STATE.harmonicRhythm));
+    STATE.lastStepsPerBar=STATE.stepsPerBar;
+    return;
+  }
+  if(STATE.stepsPerBar!==STATE.lastStepsPerBar){
+    STATE.onsetGrid=[0,1,2].map(v=>defaultOnsetGrid(v,totalSteps,STATE.stepsPerBar,STATE.harmonicRhythm));
+    STATE.seedNotes={};
+  } else {
+    STATE.onsetGrid=STATE.onsetGrid.map(old=>{
+      const out=new Array(totalSteps);
+      for(let s=0;s<totalSteps;s++) out[s]= old.length ? (old[s%old.length]||false) : false;
+      return out;
+    });
+  }
+  STATE.lastStepsPerBar=STATE.stepsPerBar;
+}
+
+/* =====================================================================
+   6. COMPOSE
+   ===================================================================== */
+function compose(){
+  ensureGridsSized();
+  if(!STATE.refLifeGrid) STATE.refLifeGrid = randomLifeGrid(STATE.refLifeW, STATE.refLifeH, 0.3);
+
+  const totalSteps = STATE.bars*STATE.stepsPerBar;
+  const segLen = STATE.harmonicRhythm==='bar' ? STATE.stepsPerBar : Math.floor(STATE.stepsPerBar/2);
+  const totalSegments = Math.ceil(totalSteps/segLen);
+
+  const startVocab = chordVocabularyFor(STATE.root, SCALES[effectiveScaleForSegment(0)], STATE.secondaryDominants);
+  const startChord = startVocab[0];
+
+  const chordWalk = [...chordAutomatonWalk(totalSegments, startChord, STATE.lambdaChord, STATE.ruleChordOverrides, {secondaryDominants:STATE.secondaryDominants})];
+  const chordSequence = chordWalk.map(r=>r.chord);
+
+  const voiceWalk = [...voiceAutomatonWalk(chordSequence, STATE.onsetGrid, STATE.lambdaVoice, STATE.ruleVoiceOverrides, {walkingBass:STATE.walkingBass, arpVoice1:STATE.arpVoice1})];
+  const pitches=[new Array(totalSteps).fill(null), new Array(totalSteps).fill(null), new Array(totalSteps).fill(null)];
+  const deco=[new Array(totalSteps).fill(false), new Array(totalSteps).fill(false), new Array(totalSteps).fill(false)];
+  const fellBack=[new Array(totalSteps).fill(false), new Array(totalSteps).fill(false), new Array(totalSteps).fill(false)];
+  for(const res of voiceWalk){
+    for(let v=0; v<3; v++){ pitches[v][res.step]=res.pitches[v]; deco[v][res.step]=res.deco[v]; fellBack[v][res.step]=res.fellBack[v]; }
+  }
+
+  let refScaleName=STATE.scaleName, refTargetTension=STATE.globalTension;
+  if(STATE.selectedBars.length===1){
+    const ov=STATE.barOverrides[STATE.selectedBars[0]];
+    if(ov){
+      if(ov.scale) refScaleName=ov.scale;
+      if(ov.phase==='consonant') refTargetTension=0.20; else if(ov.phase==='dissonant') refTargetTension=0.55;
+      else if(typeof ov.tension==='number') refTargetTension=ov.tension;
+    }
+  }
+  const refVocab = chordVocabularyFor(STATE.root, SCALES[refScaleName], STATE.secondaryDominants);
+  const refTable = chordRuleTable(STATE.lambdaChord, STATE.ruleChordOverrides);
+  const refLegal = refVocab.map(a=>refVocab.map(b=>{
+    const d=directedFifths(a.rootPc,b.rootPc), t=tensionBucketIdx(b.tensionVal-refTargetTension);
+    return refTable[d][t];
+  }));
+
+  const sweep = sweepLambdaChord(40, STATE.secondaryDominants);
+  const currentDynamics = analyzeChordDynamics(STATE.lambdaChord, STATE.ruleChordOverrides, startVocab[0], 220, STATE.secondaryDominants);
+  const sequenceFound = detectSequences(chordSequence);
+
+  STATE.composed = {
+    totalSteps, stepsPerBar:STATE.stepsPerBar, bars:STATE.bars, segLen,
+    chordSequence, pitches, deco, fellBack,
+    refVocab, refLegal, refScaleName,
+    sweep, currentDynamics, sequenceFound,
+  };
+}
+
+/* =====================================================================
+   7. REFERENCE GAME OF LIFE (pedagogical only -- does not drive the music)
+   ===================================================================== */
+function randomLifeGrid(w,h,density){
+  const g=new Uint8Array(w*h);
+  for(let i=0;i<g.length;i++) g[i]=Math.random()<density?1:0;
+  return g;
+}
+function stepLife(grid,w,h){
+  const next=new Uint8Array(w*h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    let n=0;
+    for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+      if(dx===0&&dy===0) continue;
+      const nx=(x+dx+w)%w, ny=(y+dy+h)%h;
+      n+=grid[ny*w+nx];
+    }
+    const alive=grid[y*w+x];
+    next[y*w+x] = alive ? ((n===2||n===3)?1:0) : (n===3?1:0);
+  }
+  return next;
+}
+function popcount(grid){ let s=0; for(let i=0;i<grid.length;i++) s+=grid[i]; return s; }
+
+/* =====================================================================
+   8. WEBGL RENDERING (piano roll + harmonic field)
+   ===================================================================== */
+const VERT_SRC = `
+attribute vec2 aPosition;
+attribute vec4 aColor;
+attribute vec2 aLocal;
+attribute float aCircle;
+uniform vec2 uResolution;
+varying vec4 vColor;
+varying vec2 vLocal;
+varying float vCircle;
+void main(){
+  vec2 clip = vec2((aPosition.x/uResolution.x)*2.0-1.0, 1.0-(aPosition.y/uResolution.y)*2.0);
+  gl_Position = vec4(clip,0.0,1.0);
+  vColor=aColor; vLocal=aLocal; vCircle=aCircle;
+}`;
+const FRAG_SRC = `
+precision mediump float;
+varying vec4 vColor;
+varying vec2 vLocal;
+varying float vCircle;
+void main(){
+  if(vCircle>0.5){
+    float d=length(vLocal);
+    if(d>1.0) discard;
+    float edge=1.0-smoothstep(0.82,1.0,d);
+    gl_FragColor=vec4(vColor.rgb, vColor.a*edge);
+  } else {
+    gl_FragColor=vColor;
+  }
+}`;
+function compileShader(gl,type,src){
+  const s=gl.createShader(type); gl.shaderSource(s,src); gl.compileShader(s);
+  if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){ console.error('shader error', gl.getShaderInfoLog(s)); }
+  return s;
+}
+function initGL(canvas){
+  let gl=null;
+  try{ gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl'); }catch(e){}
+  if(!gl) return null;
+  const vs=compileShader(gl,gl.VERTEX_SHADER,VERT_SRC), fs=compileShader(gl,gl.FRAGMENT_SHADER,FRAG_SRC);
+  const prog=gl.createProgram(); gl.attachShader(prog,vs); gl.attachShader(prog,fs); gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog,gl.LINK_STATUS)){ console.error(gl.getProgramInfoLog(prog)); return null; }
+  gl.useProgram(prog);
+  return {
+    gl, prog,
+    posLoc:gl.getAttribLocation(prog,'aPosition'), colorLoc:gl.getAttribLocation(prog,'aColor'),
+    localLoc:gl.getAttribLocation(prog,'aLocal'), circleLoc:gl.getAttribLocation(prog,'aCircle'),
+    resLoc:gl.getUniformLocation(prog,'uResolution'), buf:gl.createBuffer(), cssW:0, cssH:0,
+  };
+}
+function resizeGLCanvas(o, canvas){
+  const rect=canvas.getBoundingClientRect(); const dpr=window.devicePixelRatio||1;
+  const w=Math.max(2,Math.round(rect.width*dpr)), h=Math.max(2,Math.round(rect.height*dpr));
+  if(canvas.width!==w) canvas.width=w;
+  if(canvas.height!==h) canvas.height=h;
+  o.cssW=rect.width; o.cssH=rect.height;
+}
+function pushRect(arr,x,y,w,h,c){
+  const [r,g,b,a]=c, x0=x,y0=y,x1=x+w,y1=y+h;
+  const V=[[x0,y0],[x1,y0],[x0,y1],[x1,y0],[x1,y1],[x0,y1]];
+  for(const p of V) arr.push(p[0],p[1],r,g,b,a,0,0,0);
+}
+function pushCircle(arr,cx,cy,rad,c){
+  const [r,g,b,a]=c, x0=cx-rad,y0=cy-rad,x1=cx+rad,y1=cy+rad;
+  const V=[[x0,y0,-1,-1],[x1,y0,1,-1],[x0,y1,-1,1],[x1,y0,1,-1],[x1,y1,1,1],[x0,y1,-1,1]];
+  for(const p of V) arr.push(p[0],p[1],r,g,b,a,p[2],p[3],1);
+}
+function pushLine(arr,x0,y0,x1,y1,width,c){
+  const dx=x1-x0, dy=y1-y0, len=Math.hypot(dx,dy)||1;
+  const nx=-dy/len*width/2, ny=dx/len*width/2;
+  const [r,g,b,a]=c;
+  const p0=[x0+nx,y0+ny], p1=[x1+nx,y1+ny], p2=[x1-nx,y1-ny], p3=[x0-nx,y0-ny];
+  for(const p of [p0,p1,p2,p0,p2,p3]) arr.push(p[0],p[1],r,g,b,a,0,0,0);
+}
+function drawBuffer(o, floatArr){
+  const {gl,posLoc,colorLoc,localLoc,circleLoc,resLoc,buf}=o;
+  if(!gl) return;
+  resizeGLCanvas(o, gl.canvas);
+  gl.viewport(0,0,gl.canvas.width,gl.canvas.height);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(floatArr), gl.DYNAMIC_DRAW);
+  const stride=9*4;
+  gl.enableVertexAttribArray(posLoc); gl.vertexAttribPointer(posLoc,2,gl.FLOAT,false,stride,0);
+  gl.enableVertexAttribArray(colorLoc); gl.vertexAttribPointer(colorLoc,4,gl.FLOAT,false,stride,2*4);
+  gl.enableVertexAttribArray(localLoc); gl.vertexAttribPointer(localLoc,2,gl.FLOAT,false,stride,6*4);
+  gl.enableVertexAttribArray(circleLoc); gl.vertexAttribPointer(circleLoc,1,gl.FLOAT,false,stride,8*4);
+  gl.uniform2f(resLoc, o.cssW, o.cssH);
+  gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0.039,0.047,0.067,1); gl.clear(gl.COLOR_BUFFER_BIT);
+  gl.drawArrays(gl.TRIANGLES, 0, floatArr.length/9);
+}
+function tensionColor(t){
+  const tt=clamp01(t/0.55);
+  const cool=[0.42,0.58,0.84], warm=[0.84,0.41,0.29];
+  return [cool[0]+(warm[0]-cool[0])*tt, cool[1]+(warm[1]-cool[1])*tt, cool[2]+(warm[2]-cool[2])*tt, 1];
+}
+
+let GL_ROLL, GL_CHORD;
+
+function drawPianoRoll(playheadStep){
+  const c=STATE.composed; if(!c) return;
+  const rollCanvas=document.getElementById('pianoRollCanvas');
+  const rollRect=rollCanvas.getBoundingClientRect();
+  renderChordStrip(c, (rollRect.width||600)/c.totalSteps);
+
+  if(!GL_ROLL || !GL_ROLL.gl) return;
+  const W=GL_ROLL.cssW||GL_ROLL.gl.canvas.clientWidth||600, H=GL_ROLL.cssH||GL_ROLL.gl.canvas.clientHeight||300;
+  const stepW=W/c.totalSteps;
+  const lo=33, hi=88;
+  const pitchToY=(m)=> H*(1-(m-lo)/(hi-lo));
+  const arr=[];
+  for(let b=0;b<=c.bars;b++){ const x=b*STATE.stepsPerBar*stepW; pushRect(arr,x-0.5,0,1,H,[1,1,1,b%4===0?0.10:0.045]); }
+  const scalePCs = SCALES[STATE.scaleName].map(off=>(STATE.root+off)%12);
+  for(let m=REGISTERS[0].lo;m<=REGISTERS[0].hi;m++){
+    if(scalePCs.includes(pcOf(m))){ const y=pitchToY(m); pushRect(arr, 0, y-0.5, STATE.stepsPerBar*stepW, 1, [1,1,1,0.06]); }
+  }
+  for(let v=0; v<3; v++){
+    for(let s=0; s<c.totalSteps; s++){
+      const p=c.pitches[v][s]; if(p==null) continue;
+      let look=s+1; while(look<c.totalSteps && c.pitches[v][look]==null) look++;
+      const w=Math.max(2,(look-s)*stepW-2);
+      const y=pitchToY(p);
+      const col=VOICE_COLOR[v];
+      const alpha = c.fellBack[v][s] ? 0.4 : (c.deco[v][s] ? 0.62 : 0.95);
+      pushRect(arr, s*stepW+1, y-3.5, w, 7, [col[0],col[1],col[2],alpha]);
+    }
+  }
+  if(playheadStep!=null && playheadStep>=0){ const x=playheadStep*stepW; pushRect(arr, x-1, 0, 2, H, [0.79,0.63,0.35,0.85]); }
+  drawBuffer(GL_ROLL, arr);
+}
+function renderChordStrip(c, stepW){
+  const el=document.getElementById('chordStrip'); if(!el) return;
+  el.innerHTML='';
+  for(let segIdx=0; segIdx<c.chordSequence.length; segIdx++){
+    const chord=c.chordSequence[segIdx];
+    const x=segIdx*c.segLen*stepW, w=c.segLen*stepW;
+    if(x > c.totalSteps*stepW) break;
+    const col=tensionColor(chord.tensionVal);
+    const label=document.createElement('div');
+    label.className='seg-label';
+    label.style.left=(x+2)+'px'; label.style.width=Math.max(0,w-4)+'px';
+    label.style.background=`rgba(${Math.round(col[0]*255)},${Math.round(col[1]*255)},${Math.round(col[2]*255)},0.16)`;
+    label.style.color=`rgb(${Math.round(180+col[0]*60)},${Math.round(180+col[1]*60)},${Math.round(180+col[2]*60)})`;
+    if(chord.isSecondaryDominant) label.style.fontStyle='italic';
+    label.textContent=chord.roman;
+    el.appendChild(label);
+  }
+}
+
+const CIRCLE_OF_FIFTHS_PC_ORDER=[0,7,2,9,4,11,6,1,8,3,10,5];
+const RING_SCALE=[1.0, 1.32, 0.66]; // 0=diatonic (base), 1=secondary dominant (outer), 2=secondary leading-tone (inner)
+const RING_NODE_RADIUS=[12.5, 8, 8];
+function chordCircleGeometry(){
+  const canvas=document.getElementById('chordCircleCanvas');
+  const rect=canvas.getBoundingClientRect();
+  const W=rect.width||300, H=rect.height||300;
+  const cx=W/2, cy=H/2, R=Math.min(W,H)*0.32;
+  const posFor=(chord)=>{
+    const slot=CIRCLE_OF_FIFTHS_PC_ORDER.indexOf(chord.rootPc);
+    const ang=(slot/12)*Math.PI*2 - Math.PI/2;
+    const r=R*(RING_SCALE[chord.ring||0]!=null ? RING_SCALE[chord.ring||0] : 1.0);
+    return [cx+Math.cos(ang)*r, cy+Math.sin(ang)*r];
+  };
+  return {W,H,cx,cy,R,posFor};
+}
+function drawChordCircle(){
+  const c=STATE.composed; if(!c) return;
+  const {posFor}=chordCircleGeometry();
+  renderChordLabels(c.refVocab, posFor);
+  if(!GL_CHORD || !GL_CHORD.gl) return;
+  const W=GL_CHORD.cssW||GL_CHORD.gl.canvas.clientWidth||300, H=GL_CHORD.cssH||GL_CHORD.gl.canvas.clientHeight||300;
+  const cx=W/2, cy=H/2, R=Math.min(W,H)*0.32;
+  const arr=[];
+  for(let i=0;i<12;i++){
+    const ang=(i/12)*Math.PI*2 - Math.PI/2;
+    pushCircle(arr, cx+Math.cos(ang)*R, cy+Math.sin(ang)*R, 3, [1,1,1,0.08]);
+  }
+  const vocab=c.refVocab, legal=c.refLegal;
+  for(let i=0;i<vocab.length;i++){
+    const [x0,y0]=posFor(vocab[i]);
+    for(let j=0;j<vocab.length;j++){
+      if(i===j || !legal[i][j]) continue;
+      const [x1,y1]=posFor(vocab[j]);
+      pushLine(arr,x0,y0,x1,y1,1.3,[0.55,0.62,0.74,0.32]);
+    }
+  }
+  for(const chord of vocab){
+    const [x,y]=posFor(chord);
+    const col=tensionColor(chord.tensionVal);
+    pushCircle(arr,x,y,RING_NODE_RADIUS[chord.ring||0]||12.5,col);
+  }
+  drawBuffer(GL_CHORD, arr);
+}
+function renderChordLabels(vocab, posFor){
+  const el=document.getElementById('chordLabels'); if(!el) return;
+  el.innerHTML='';
+  for(const chord of vocab){
+    const [x,y]=posFor(chord);
+    const label=document.createElement('div');
+    label.className='chord-node-label';
+    label.style.left=x+'px'; label.style.top=y+'px';
+    if(chord.ring) label.style.fontSize='8px';
+    label.textContent=chord.roman;
+    el.appendChild(label);
+  }
+}
+
+function renderAll(){
+  drawPianoRoll(STATE.playing ? STATE.currentStepFloat : -1);
+  drawChordCircle();
+  renderSweepStrip();
+  renderDynamicsReadout();
+  renderStructureReadout();
+  renderRuleGrids();
+}
+
+/* =====================================================================
+   9. AUDIO ENGINE
+   ===================================================================== */
+function makePanner(ctx,val){
+  if(ctx.createStereoPanner){ const p=ctx.createStereoPanner(); p.pan.value=val; return p; }
+  const p=ctx.createPanner(); p.setPosition(val,0,1-Math.abs(val)); return p;
+}
+function buildImpulseResponse(ctx, seconds, decay){
+  const rate=ctx.sampleRate, len=Math.max(1,Math.floor(rate*seconds));
+  const impulse=ctx.createBuffer(2,len,rate);
+  for(let ch=0; ch<2; ch++){ const data=impulse.getChannelData(ch); for(let i=0;i<len;i++) data[i]=(Math.random()*2-1)*Math.pow(1-i/len, decay); }
+  return impulse;
+}
+function ensureAudio(){
+  if(STATE.audioCtx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  if(!AC){ console.warn('Web Audio not available'); return; }
+  const ctx=new AC();
+  const master=ctx.createGain(); master.gain.value=0.8;
+  const comp=ctx.createDynamicsCompressor();
+  master.connect(comp); comp.connect(ctx.destination);
+  const convolver=ctx.createConvolver();
+  try{ convolver.buffer=buildImpulseResponse(ctx,2.1,2.4); }catch(e){}
+  const reverbReturn=ctx.createGain(); reverbReturn.gain.value=0.32;
+  convolver.connect(reverbReturn); reverbReturn.connect(comp);
+  const pans=[], sendGains=[]; const panVals=[0.32,0,-0.32];
+  for(let v=0; v<3; v++){
+    const pan=makePanner(ctx,panVals[v]); pan.connect(master);
+    const send=ctx.createGain(); send.gain.value=0.22; pan.connect(send); send.connect(convolver);
+    pans.push(pan); sendGains.push(send);
+  }
+  STATE.audioCtx=ctx; STATE.masterGain=master; STATE.convolver=convolver; STATE.pans=pans; STATE.sendGains=sendGains;
+}
+function playNote(voiceIndex, midi, startTime, dur){
+  const ctx=STATE.audioCtx; if(!ctx) return;
+  const waveforms=['triangle','sawtooth','sine'];
+  const osc=ctx.createOscillator(), osc2=ctx.createOscillator();
+  osc.type=waveforms[voiceIndex]; osc2.type=waveforms[voiceIndex];
+  const freq=midiToFreq(midi);
+  osc.frequency.value=freq; osc2.frequency.value=freq; osc2.detune.value=7;
+  const oscGain=ctx.createGain(); oscGain.gain.value=0.55;
+  const osc2Gain=ctx.createGain(); osc2Gain.gain.value=0.16;
+  const filter=ctx.createBiquadFilter(); filter.type='lowpass';
+  const baseCut=900+(voiceIndex===0?1500:voiceIndex===1?750:320);
+  filter.frequency.setValueAtTime(baseCut,startTime);
+  filter.frequency.linearRampToValueAtTime(Math.max(200,baseCut*0.5), startTime+Math.max(0.05,dur*0.9));
+  filter.Q.value=1.1;
+  const env=ctx.createGain();
+  const peak=0.85, atk=0.012, rel=Math.min(0.28,dur*0.4);
+  env.gain.setValueAtTime(0.0001,startTime);
+  env.gain.linearRampToValueAtTime(peak, startTime+atk);
+  env.gain.setValueAtTime(peak, startTime+Math.max(atk,dur-rel));
+  env.gain.linearRampToValueAtTime(0.0001, startTime+dur);
+  osc.connect(oscGain); osc2.connect(osc2Gain);
+  oscGain.connect(filter); osc2Gain.connect(filter);
+  filter.connect(env);
+  env.connect(STATE.pans[voiceIndex]);
+  osc.start(startTime); osc2.start(startTime);
+  osc.stop(startTime+dur+0.08); osc2.stop(startTime+dur+0.08);
+}
+function secondsPerStep(){ return (60/STATE.tempo)*(4/STATE.stepsPerBar); }
+function scheduleStepAudio(step, time){
+  const c=STATE.composed; if(!c) return;
+  const spst=secondsPerStep();
+  for(let v=0; v<3; v++){
+    const pitch=c.pitches[v][step]; if(pitch==null) continue;
+    let look=step+1, ahead=1;
+    while(look<c.totalSteps && c.pitches[v][look]==null){ look++; ahead++; }
+    playNote(v,pitch,time,spst*ahead*0.88);
+  }
+}
+function schedulerTick(){
+  if(!STATE.playing) return;
+  const ctx=STATE.audioCtx;
+  while(STATE.nextStepTime < ctx.currentTime+0.12){
+    scheduleStepAudio(STATE.currentStep, STATE.nextStepTime);
+    STATE.nextStepTime += secondsPerStep();
+    STATE.currentStep++;
+    if(STATE.currentStep>=STATE.composed.totalSteps) STATE.currentStep=0;
+  }
+  STATE.schedulerTimer=setTimeout(schedulerTick,25);
+}
+function rafLoop(){
+  if(!STATE.playing) return;
+  const ctx=STATE.audioCtx, spst=secondsPerStep();
+  const elapsed=ctx.currentTime-STATE.playStartCtxTime;
+  let stepFloat=(elapsed/spst) % STATE.composed.totalSteps;
+  if(stepFloat<0) stepFloat+=STATE.composed.totalSteps;
+  STATE.currentStepFloat=stepFloat;
+  renderAll();
+  STATE.rafId=requestAnimationFrame(rafLoop);
+}
+function startPlayback(){
+  if(!STATE.composed) compose();
+  ensureAudio();
+  if(!STATE.audioCtx) return;
+  if(STATE.audioCtx.state==='suspended') STATE.audioCtx.resume();
+  STATE.playing=true; STATE.currentStep=0; STATE.currentStepFloat=0;
+  STATE.nextStepTime=STATE.audioCtx.currentTime+0.06;
+  STATE.playStartCtxTime=STATE.nextStepTime;
+  schedulerTick(); rafLoop();
+  document.getElementById('btnPlay').disabled=true;
+  document.getElementById('btnStop').disabled=false;
+}
+function stopPlayback(){
+  STATE.playing=false;
+  if(STATE.schedulerTimer) clearTimeout(STATE.schedulerTimer);
+  if(STATE.rafId) cancelAnimationFrame(STATE.rafId);
+  STATE.currentStep=0; STATE.currentStepFloat=0;
+  const b1=document.getElementById('btnPlay'), b2=document.getElementById('btnStop');
+  if(b1) b1.disabled=false; if(b2) b2.disabled=true;
+  renderAll();
+}
+
+/* =====================================================================
+   10. UI WIRING
+   ===================================================================== */
+function regenerateAndRender(){
+  stopPlayback();
+  compose();
+  renderBarsStrip();
+  renderRhythmGrid();
+  renderAll();
+}
+
+function renderBarsStrip(){
+  const el=document.getElementById('barsStrip'); el.innerHTML='';
+  for(let b=0;b<STATE.bars;b++){
+    const div=document.createElement('div');
+    div.className='bar-head'+(STATE.selectedBars.includes(b)?' selected':'');
+    div.textContent=(b+1);
+    const dots=document.createElement('div'); dots.className='dots';
+    const ov=STATE.barOverrides[b];
+    const d1=document.createElement('span'); d1.className='dot'; d1.style.background = ov&&ov.scale ? 'var(--accent)':'transparent';
+    const d2=document.createElement('span'); d2.className='dot';
+    if(ov && ov.phase==='consonant') d2.style.background='var(--cool)';
+    else if(ov && ov.phase==='dissonant') d2.style.background='var(--warm)';
+    else if(ov && typeof ov.tension==='number') d2.style.background='var(--muted)';
+    else d2.style.background='transparent';
+    dots.appendChild(d1); dots.appendChild(d2); div.appendChild(dots);
+    div.addEventListener('click', (e)=>{
+      if(e.shiftKey && STATE.selectedBars.length){
+        const last=STATE.selectedBars[STATE.selectedBars.length-1];
+        const lo=Math.min(last,b), hi=Math.max(last,b);
+        STATE.selectedBars=[]; for(let i=lo;i<=hi;i++) STATE.selectedBars.push(i);
+      } else {
+        const idx=STATE.selectedBars.indexOf(b);
+        if(idx>=0) STATE.selectedBars.splice(idx,1); else STATE.selectedBars.push(b);
+      }
+      renderBarsStrip(); renderBarEditor();
+      compose(); renderAll();
+    });
+    el.appendChild(div);
+  }
+}
+function renderBarEditor(){
+  const panel=document.getElementById('barEditor');
+  if(STATE.selectedBars.length===0){ panel.classList.add('hidden'); return; }
+  panel.classList.remove('hidden');
+  document.getElementById('barEditorLabel').textContent = STATE.selectedBars.length===1 ? ('Bar '+(STATE.selectedBars[0]+1)) : (STATE.selectedBars.length+' bars selected');
+  const ov = STATE.selectedBars.length===1 ? (STATE.barOverrides[STATE.selectedBars[0]]||{}) : {};
+  document.getElementById('barEditorScale').value = ov.scale || '';
+  const tSlider=document.getElementById('barEditorTension');
+  tSlider.value = Math.round((typeof ov.tension==='number'?ov.tension:STATE.globalTension)*100);
+  document.getElementById('barEditorTensionVal').textContent=tSlider.value;
+  document.querySelectorAll('.phase-btn').forEach(btn=> btn.classList.toggle('active', ov.phase===btn.dataset.phase));
+}
+function applyBarOverride(patch){
+  for(const b of STATE.selectedBars) STATE.barOverrides[b] = Object.assign({}, STATE.barOverrides[b], patch);
+  renderBarsStrip();
+}
+
+const PAINT_STATE = {painting:false, value:false};
+function renderRhythmGrid(){
+  const el=document.getElementById('rhythmGrid'); el.innerHTML='';
+  const totalSteps=STATE.bars*STATE.stepsPerBar;
+  for(let v=0; v<3; v++){
+    const row=document.createElement('div'); row.className='rhythm-row';
+    const tag=document.createElement('div'); tag.className='voice-tag';
+    tag.innerHTML='<span class="swatch" style="background:var(--'+VOICE_NAMES[v]+')"></span>'+VOICE_NAMES[v];
+    row.appendChild(tag);
+    const cellsWrap=document.createElement('div'); cellsWrap.className='cells';
+    for(let s=0;s<totalSteps;s++){
+      const cell=document.createElement('div');
+      cell.className='cell'+(s%STATE.stepsPerBar===0?' bar-start':'');
+      const isSeeded = v===0 && s<STATE.stepsPerBar && STATE.seedNotes[s]!=null;
+      if(STATE.onsetGrid[v][s]) cell.classList.add('on', VOICE_NAMES[v]);
+      if(isSeeded) cell.classList.add('seeded');
+      cell.addEventListener('mousedown', ()=>{
+        PAINT_STATE.painting=true; PAINT_STATE.value=!STATE.onsetGrid[v][s];
+        STATE.onsetGrid[v][s]=PAINT_STATE.value;
+        if(v===0 && s<STATE.stepsPerBar && !PAINT_STATE.value) delete STATE.seedNotes[s];
+        regenerateAndRender();
+      });
+      cell.addEventListener('mouseenter', ()=>{
+        if(!PAINT_STATE.painting) return;
+        STATE.onsetGrid[v][s]=PAINT_STATE.value;
+        if(v===0 && s<STATE.stepsPerBar && !PAINT_STATE.value) delete STATE.seedNotes[s];
+        regenerateAndRender();
+      });
+      cellsWrap.appendChild(cell);
+    }
+    row.appendChild(cellsWrap);
+    const presets=document.createElement('div'); presets.className='presets';
+    const mk=(label,fn)=>{ const b=document.createElement('button'); b.className='small'; b.textContent=label;
+      b.addEventListener('click',()=>{ STATE.onsetGrid[v]=fn(); if(v===0) STATE.seedNotes={}; regenerateAndRender(); }); return b; };
+    presets.appendChild(mk('all', ()=> new Array(totalSteps).fill(true)));
+    presets.appendChild(mk('none', ()=> new Array(totalSteps).fill(false)));
+    presets.appendChild(mk('E3', ()=> { const one=euclideanRhythm(STATE.stepsPerBar,3); const out=[]; for(let i=0;i<totalSteps;i++) out.push(one[i%STATE.stepsPerBar]); return out; }));
+    presets.appendChild(mk('E5', ()=> { const one=euclideanRhythm(STATE.stepsPerBar,5); const out=[]; for(let i=0;i<totalSteps;i++) out.push(one[i%STATE.stepsPerBar]); return out; }));
+    row.appendChild(presets);
+    el.appendChild(row);
+  }
+}
+
+function bindPianoRollSeeding(canvas){
+  canvas.addEventListener('click', (e)=>{
+    const c=STATE.composed; if(!c) return;
+    const rect=canvas.getBoundingClientRect();
+    const lx=e.clientX-rect.left, ly=e.clientY-rect.top;
+    const stepW=rect.width/c.totalSteps;
+    const stepIndex=Math.floor(lx/stepW);
+    if(stepIndex<0 || stepIndex>=STATE.stepsPerBar) return;
+    const lo=33, hi=88;
+    const approx = lo + (1-ly/rect.height)*(hi-lo);
+    const scalePCs=SCALES[STATE.scaleName].map(off=>(STATE.root+off)%12);
+    let best=null,bestD=1e9;
+    for(let m=REGISTERS[0].lo;m<=REGISTERS[0].hi;m++){
+      if(!scalePCs.includes(pcOf(m))) continue;
+      const d=Math.abs(m-approx); if(d<bestD){ bestD=d; best=m; }
+    }
+    if(best==null) return;
+    if(STATE.seedNotes[stepIndex]===best){ delete STATE.seedNotes[stepIndex]; STATE.onsetGrid[0][stepIndex]=false; }
+    else { STATE.seedNotes[stepIndex]=best; STATE.onsetGrid[0][stepIndex]=true; }
+    regenerateAndRender();
+  });
+}
+
+// ---- rule-space sweep strip ----
+function renderSweepStrip(){
+  const el=document.getElementById('sweepStrip'); if(!el || !STATE.composed) return;
+  el.innerHTML='';
+  const sweep=STATE.composed.sweep;
+  for(const pt of sweep){
+    const cell=document.createElement('div');
+    cell.className='sweep-cell'+(Math.abs(pt.lambda-STATE.lambdaChord)<(1/sweep.length) ? ' current':'');
+    const col=DYNAMICS_COLOR[pt.cls];
+    cell.style.background=`rgb(${Math.round(col[0]*255)},${Math.round(col[1]*255)},${Math.round(col[2]*255)})`;
+    const sensTxt = pt.sensitivity!=null ? (Math.round(pt.sensitivity*100)+'% divergence on a reference flip') : 'n/a';
+    cell.title = 'λ='+pt.lambda.toFixed(2)+' — '+pt.cls+' — period '+(pt.period||'—')+' of '+pt.vocabSize+' chords — '+sensTxt;
+    cell.addEventListener('click', ()=>{
+      STATE.lambdaChord=pt.lambda;
+      document.getElementById('lambdaChordSlider').value=Math.round(pt.lambda*100);
+      document.getElementById('lambdaChordVal').textContent=Math.round(pt.lambda*100);
+      regenerateAndRender();
+    });
+    el.appendChild(cell);
+  }
+}
+function nearestSweepPoint(){
+  const sweep = STATE.composed && STATE.composed.sweep;
+  if(!sweep || !sweep.length) return null;
+  let best=sweep[0], bestD=Math.abs(sweep[0].lambda-STATE.lambdaChord);
+  for(const pt of sweep){ const dd=Math.abs(pt.lambda-STATE.lambdaChord); if(dd<bestD){ bestD=dd; best=pt; } }
+  return best;
+}
+function renderDynamicsReadout(){
+  const el=document.getElementById('dynamicsReadout'); if(!el || !STATE.composed) return;
+  const d=STATE.composed.currentDynamics;
+  const near=nearestSweepPoint();
+  const cls = near ? near.cls : classifyDynamics(d, null);
+  let txt = `<span class="k">class:</span> ${cls}   `;
+  if(d.cycled) txt += `<span class="k">transient:</span> ${d.transient}   <span class="k">period:</span> ${d.period} of ${d.vocabSize} reachable chords   `;
+  if(near && near.sensitivity!=null) txt += `<span class="k">sensitivity:</span> flipping one rule cell changes ${Math.round(near.sensitivity*100)}% of the next 80 chords`;
+  el.innerHTML = txt;
+}
+function renderStructureReadout(){
+  const el=document.getElementById('structureReadout'); if(!el || !STATE.composed) return;
+  const d=STATE.composed.currentDynamics;
+  const seq=STATE.composed.sequenceFound;
+  const near=nearestSweepPoint();
+  let lines=[];
+  lines.push(`<span class="k">cycle:</span> transient ${d.transient}, period ${d.period} of ${d.vocabSize} reachable chords`);
+  lines.push(`<span class="k">class:</span> `+(near?near.cls:classifyDynamics(d,null))+(near&&near.sensitivity!=null?` (${Math.round(near.sensitivity*100)}% sensitivity)`:''));
+  lines.push(`<span class="k">glider / sequence:</span> `+(seq ? `found — a ${seq.k}-chord motion pattern repeats, transposed, starting at chord ${seq.startIdx+1}` : `none detected in this piece`));
+  el.innerHTML = lines.join('<br>');
+}
+
+function renderRuleGrids(){
+  const chordEl=document.getElementById('chordRuleGrid');
+  if(chordEl){
+    chordEl.innerHTML='';
+    const table = chordRuleTable(STATE.lambdaChord, STATE.ruleChordOverrides);
+    for(let tau=0; tau<5; tau++){
+      for(let d=0; d<12; d++){
+        const cell=document.createElement('div');
+        cell.className='rule-cell'+(table[d][tau]?' legal':'')+(STATE.ruleChordOverrides[d+','+tau]!=null?' override':'');
+        cell.title=`d=${d}, τ=${tau-2} → ${table[d][tau]?'legal':'illegal'}`;
+        cell.addEventListener('click', ()=>{
+          const cur = table[d][tau];
+          STATE.ruleChordOverrides[d+','+tau] = cur?0:1;
+          regenerateAndRender();
+        });
+        chordEl.appendChild(cell);
+      }
+    }
+  }
+  const voiceEl=document.getElementById('voiceRuleGrids');
+  if(voiceEl){
+    voiceEl.innerHTML='';
+    const table = voiceRuleTable(STATE.lambdaVoice, STATE.ruleVoiceOverrides);
+    for(let k=0;k<3;k++){
+      const grid=document.createElement('div'); grid.className='voice-rule-grid';
+      for(let mu=0; mu<5; mu++){
+        for(let phi=0; phi<3; phi++){
+          const cell=document.createElement('div');
+          cell.className='rule-cell'+(table[k][mu][phi]?' legal':'')+(STATE.ruleVoiceOverrides[k+','+mu+','+phi]!=null?' override':'');
+          cell.title=`κ=${k}, μ=${mu-2}, φ=${phi} → ${table[k][mu][phi]?'legal':'illegal'}`;
+          cell.addEventListener('click', ()=>{
+            const cur=table[k][mu][phi];
+            STATE.ruleVoiceOverrides[k+','+mu+','+phi] = cur?0:1;
+            regenerateAndRender();
+          });
+          grid.appendChild(cell);
+        }
+      }
+      voiceEl.appendChild(grid);
+    }
+  }
+}
+
+// ---- reference (non-driving) Game of Life mini panel ----
+function renderMiniLife(){
+  const el=document.getElementById('miniLifeGrid'); if(!el) return;
+  el.style.gridTemplateColumns=`repeat(${STATE.refLifeW},1fr)`;
+  el.innerHTML='';
+  for(let y=0;y<STATE.refLifeH;y++){
+    for(let x=0;x<STATE.refLifeW;x++){
+      const cell=document.createElement('div');
+      cell.className='mini-life-cell'+(STATE.refLifeGrid[y*STATE.refLifeW+x]?' alive':'');
+      cell.addEventListener('click', ()=>{
+        const idx=y*STATE.refLifeW+x;
+        STATE.refLifeGrid[idx]=STATE.refLifeGrid[idx]?0:1;
+        renderMiniLife();
+      });
+      el.appendChild(cell);
+    }
+  }
+  const pop=document.getElementById('miniLifePop');
+  if(pop) pop.textContent='population '+popcount(STATE.refLifeGrid)+' / '+(STATE.refLifeW*STATE.refLifeH);
+}
+
+function populateSelect(sel, entries){
+  sel.innerHTML='';
+  for(const [value,label] of entries){ const o=document.createElement('option'); o.value=value; o.textContent=label; sel.appendChild(o); }
+}
+
+function bindControls(){
+  window.addEventListener('mouseup', ()=>{ PAINT_STATE.painting=false; });
+
+  const rootSelect=document.getElementById('rootSelect');
+  populateSelect(rootSelect, NOTE_NAMES.map((n,i)=>[String(i),n]));
+  rootSelect.value='0';
+  rootSelect.addEventListener('change', ()=>{ STATE.root=parseInt(rootSelect.value,10); regenerateAndRender(); });
+
+  const scaleSelect=document.getElementById('scaleSelect');
+  populateSelect(scaleSelect, SCALE_ORDER.map(k=>[k,SCALE_LABELS[k]]));
+  scaleSelect.value=STATE.scaleName;
+  scaleSelect.addEventListener('change', ()=>{ STATE.scaleName=scaleSelect.value; regenerateAndRender(); });
+
+  const barEditorScale=document.getElementById('barEditorScale');
+  populateSelect(barEditorScale, [['','— inherit —']].concat(SCALE_ORDER.map(k=>[k,SCALE_LABELS[k]])));
+  barEditorScale.addEventListener('change', ()=>{ applyBarOverride({scale: barEditorScale.value || undefined}); regenerateAndRender(); });
+
+  document.getElementById('barsSelect').addEventListener('change', (e)=>{
+    STATE.bars=parseInt(e.target.value,10);
+    STATE.selectedBars=STATE.selectedBars.filter(b=>b<STATE.bars);
+    for(const k of Object.keys(STATE.barOverrides)) if(parseInt(k,10)>=STATE.bars) delete STATE.barOverrides[k];
+    regenerateAndRender(); renderBarEditor();
+  });
+  document.getElementById('stepsPerBarSelect').addEventListener('change', (e)=>{ STATE.stepsPerBar=parseInt(e.target.value,10); regenerateAndRender(); renderBarEditor(); });
+  document.getElementById('harmRhythmSelect').addEventListener('change', (e)=>{ STATE.harmonicRhythm=e.target.value; regenerateAndRender(); });
+
+  function bindSlider(id,valId,setFn){
+    const el=document.getElementById(id), val=document.getElementById(valId);
+    el.addEventListener('input', ()=>{ val.textContent=el.value; });
+    el.addEventListener('change', ()=>{ setFn(Number(el.value)); regenerateAndRender(); });
+  }
+  bindSlider('tensionSlider','tensionVal', v=>STATE.globalTension=v/100);
+  bindSlider('lambdaChordSlider','lambdaChordVal', v=>STATE.lambdaChord=v/100);
+  bindSlider('lambdaVoiceSlider','lambdaVoiceVal', v=>STATE.lambdaVoice=v/100);
+
+  document.getElementById('chkSecondaryDom').addEventListener('change', (e)=>{ STATE.secondaryDominants=e.target.checked; regenerateAndRender(); });
+  document.getElementById('chkWalkingBass').addEventListener('change', (e)=>{ STATE.walkingBass=e.target.checked; regenerateAndRender(); });
+  document.getElementById('arpSelect').addEventListener('change', (e)=>{ STATE.arpVoice1=e.target.value; regenerateAndRender(); });
+
+  const tempoSlider=document.getElementById('tempoSlider'), tempoVal=document.getElementById('tempoVal');
+  tempoSlider.addEventListener('input', ()=>{ tempoVal.textContent=tempoSlider.value; });
+  tempoSlider.addEventListener('change', ()=>{
+    const newTempo=parseInt(tempoSlider.value,10);
+    if(STATE.playing){
+      const ctx=STATE.audioCtx, oldSpst=secondsPerStep();
+      const elapsed=ctx.currentTime-STATE.playStartCtxTime, stepFloat=elapsed/oldSpst;
+      STATE.tempo=newTempo;
+      STATE.playStartCtxTime = ctx.currentTime - stepFloat*secondsPerStep();
+    } else { STATE.tempo=newTempo; }
+  });
+
+  document.getElementById('barEditorTension').addEventListener('input', (e)=>{ document.getElementById('barEditorTensionVal').textContent=e.target.value; });
+  document.getElementById('barEditorTension').addEventListener('change', (e)=>{ applyBarOverride({tension: parseInt(e.target.value,10)/100, phase:'custom'}); regenerateAndRender(); });
+  document.querySelectorAll('.phase-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const phase=btn.dataset.phase;
+      if(phase==='neutral') applyBarOverride({tension:undefined, phase:undefined});
+      else applyBarOverride({phase});
+      regenerateAndRender(); renderBarEditor();
+    });
+  });
+  document.getElementById('barEditorClear').addEventListener('click', ()=>{
+    for(const b of STATE.selectedBars) delete STATE.barOverrides[b];
+    regenerateAndRender(); renderBarEditor();
+  });
+
+  document.getElementById('btnRegenerate').addEventListener('click', regenerateAndRender);
+  document.getElementById('btnPlay').addEventListener('click', startPlayback);
+  document.getElementById('btnStop').addEventListener('click', stopPlayback);
+
+  document.getElementById('btnMiniLifeStep').addEventListener('click', ()=>{ STATE.refLifeGrid=stepLife(STATE.refLifeGrid, STATE.refLifeW, STATE.refLifeH); renderMiniLife(); });
+  document.getElementById('btnMiniLifeReseed').addEventListener('click', ()=>{ STATE.refLifeGrid=randomLifeGrid(STATE.refLifeW, STATE.refLifeH, 0.3); renderMiniLife(); });
+
+  bindPianoRollSeeding(document.getElementById('pianoRollCanvas'));
+  window.addEventListener('resize', ()=>{ renderAll(); });
+}
+
+function fillExplainer(){
+  document.getElementById('explainerBody').innerHTML = `
+    <h3>The corrected analogy</h3>
+    <p>Conway's Game of Life has no randomness in its evolution: a fixed local rule (a cell is born/survives based only on how many of its 8 neighbors are alive) is applied uniformly and deterministically, and complexity emerges purely from iterating that rule. The chaos, gliders and stability all come from the <em>rule</em>, not from dice-rolling at each generation.</p>
+    <p>This engine mirrors that structure on the correct domain. There is no 2D grid — the "space" is the small set of interacting channels (the chord, and the melody/mid/bass voices), and "time" is the step sequence. Each channel's next state depends on (a) its own immediate past and (b) the concurrent state of the channels it must harmonize with — a small, local neighborhood, exactly as in Life, just reshaped for this domain.</p>
+    <h3>The rule tables</h3>
+    <p>Chord transitions are governed by <code>RULE_CHORD[d][τ]</code>, a binary table over the directed fifths-step <code>d</code> (0–11, current chord to candidate) and a tension-deviation bucket <code>τ</code> — structurally the same kind of object as Life's B3/S23, just on a 12×5 domain instead of a 9-count one. Voice motion is governed by <code>RULE_VOICE[κ][μ][φ]</code>: <code>κ</code> is the count of already-decided voices this note is consonant with (the direct analogue of Life's live-neighbor count), <code>μ</code> is the motion class, <code>φ</code> is chord/scale/chromatic fit. Both tables default from a single λ (the fraction of cells marked legal, ranked by classical root-motion/voice-leading strength) but every cell is directly clickable and overridable.</p>
+    <p>The walk itself has <strong>no randomness</strong>: given root, scale, bar overrides, rhythm grid, seed notes and the two rule tables, the output is 100% reproducible. "Recompute" with nothing changed reproduces the identical piece — exactly like Life reproduces the identical next generation from the identical board.</p>
+    <h3>Reading the chaos, correctly</h3>
+    <p>Because the walk is deterministic over a <em>finite</em> chord space, it must eventually revisit a state — this is the pigeonhole principle, and it applies just as much to a finite Game of Life board (only so many possible configurations exist, so it too must eventually repeat exactly). "Never repeats" is therefore not a meaningful definition of chaos for either system. With the plain 7-chord diatonic set this meant every λ setting produced a short, quickly-detected cycle — not wrong, just not very interesting. Turning on <em>extended vocabulary</em> adds every applied dominant and applied leading-tone chord as a full standing member (not a fallback), roughly tripling the reachable states and giving transients, periods and detected "gliders" (transposed repeating chord-motion patterns) real room to be rich.</p>
+    <p>The <em>actual</em> mathematical signature of chaos in a bounded deterministic system is sensitive dependence on a perturbation (a positive Lyapunov exponent, in the continuous-systems version of this idea) — so alongside period and transient, every λ in the sweep also gets a sensitivity score: flip one specific rule cell and measure what fraction of the next 80 chords change. <span class="k">loop</span> = short period relative to the vocabulary; <span class="k">complex</span> = long period, low sensitivity (rich but robust); <span class="k">chaotic</span> = long period <em>and</em> high sensitivity (rich and fragile — the real thing). The sweep strip is the actual combinatorics engine: it enumerates rule tables across the permissiveness spectrum and classifies each one's resulting dynamics, the same kind of phase diagram Wolfram/Langton produce for cellular automaton rule space.</p>
+    <p>To test sensitive dependence directly: flip any cell in <code>RULE_CHORD</code> or <code>RULE_VOICE</code> and regenerate — the piece changes because the rule table, not an unrelated grid, is the actual seed of the chaos.</p>
+  `;
+}
+
+function init(){
+  STATE.refLifeGrid = randomLifeGrid(STATE.refLifeW, STATE.refLifeH, 0.3);
+  bindControls();
+  fillExplainer();
+  GL_ROLL = initGL(document.getElementById('pianoRollCanvas'));
+  GL_CHORD = initGL(document.getElementById('chordCircleCanvas'));
+  renderMiniLife();
+  regenerateAndRender();
+}
+
+if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', init); } else { init(); }
+
+})();
+</script>
+</body>
+</html>
