@@ -309,6 +309,12 @@
       </div>
       <p class="hint">Click any cell to flip it as a manual override (shown with a ring) — overrides apply to the exact (d,τ,ρ,η) or (κ,μ,φ,σ,γ) tuple shown, independent of which slice you're viewing. This is the correct place to test "sensitive dependence" — not an unrelated grid.</p>
 
+      <div style="display:flex; gap:8px; margin-top:10px; margin-bottom:12px; flex-wrap:wrap;">
+        <button class="small" id="btnClearOverrides">Clear manual overrides</button>
+        <button class="small" id="btnSeedFromLife">Seed overrides from Life</button>
+        <button class="small" id="btnMutateRules">Mutate active rules (10%)</button>
+      </div>
+
       <details class="mini-life">
         <summary>Compare: literal Conway's Game of Life (reference only — does not drive the music)</summary>
         <p class="hint" style="margin-top:2px">Shown only so the structural parallel is concrete: same idea (local rule, simple neighbor statistic, deterministic iteration → emergent order/chaos), different domain.</p>
@@ -325,6 +331,7 @@
           <option value="cylinder" selected>3D Cylinder</option>
           <option value="sphere">3D Sphere</option>
           <option value="spiral">3D Time Spiral</option>
+          <option value="hypercube">5D Rule Hypercube</option>
           <option value="flat">2D Flat Rings</option>
         </select>
         <label for="constrainSelect" style="font-size:11.5px; color:var(--muted)">Constrain:</label>
@@ -892,7 +899,17 @@ function pickByVoiceRule(candidates, ctx){
     if(pa!==pb) return pb-pa;
     return a-b;
   });
-  const chosen=legal[0];
+
+  // Apply Chaos Entropy (Noise) to the voice decision!
+  let chosen;
+  if (legal.length > 1 && Math.random() < (STATE.chaosAmount || 0)) {
+    const range = Math.min(legal.length, 1 + Math.floor((STATE.chaosAmount || 0) * 4));
+    const rIdx = Math.floor(Math.random() * range);
+    chosen = legal[rIdx];
+  } else {
+    chosen = legal[0];
+  }
+
   return {pitch:chosen, phi:classify(chosen).phi, fellBack};
 }
 function rangeAll(lo,hi){ const out=[]; for(let m=lo;m<=hi;m++) out.push(m); return out; }
@@ -1430,7 +1447,7 @@ function project3D(x, y, z, W, H) {
   return [px, py, cameraZ];
 }
 
-function getChord3D(chord) {
+function getChord3D(chord, segIdx) {
   const canvas = document.getElementById('chordCircleCanvas');
   const rect = canvas ? canvas.getBoundingClientRect() : {width:300, height:300};
   const W = rect.width || 300, H = rect.height || 300;
@@ -1461,6 +1478,43 @@ function getChord3D(chord) {
     x = xBase;
     y = yBase;
     z = 0; // Default Z for vocabulary nodes
+  } else if (STATE.projMode === 'hypercube') {
+    // 5D Rule-Space Hypercube Parallel Projection
+    let tau = tensionBucketIdx(chord.tensionVal - STATE.globalTension);
+    let rho = rhoOf(chord);
+    let eta = 1; // Neutral
+
+    if (typeof segIdx === 'number' && STATE.composed) {
+      const c = STATE.composed;
+      const target = segmentTargetTension(segIdx);
+      tau = tensionBucketIdx(chord.tensionVal - target);
+      rho = rhoOf(chord);
+
+      if (segIdx === 0) {
+        eta = 1;
+      } else if (segIdx > 0 && c.chordSequence && c.chordSequence[segIdx - 1]) {
+        if (segIdx > 1 && c.chordSequence[segIdx - 2]) {
+          const dPrev = directedFifths(c.chordSequence[segIdx - 2].rootPc, c.chordSequence[segIdx - 1].rootPc);
+          eta = momentumClassIdx(dPrev);
+        } else {
+          eta = 1;
+        }
+      }
+    }
+
+    // Scale axes to fit nicely on the canvas
+    const x3 = (tau - 2) * R * 0.45;
+    const x4 = (rho - 1) * R * 0.45;
+    const x5 = (eta - 1) * R * 0.45;
+
+    // Parallel projection basis vectors in 3D
+    const b3 = [0, 0, 1];               // Tension axis (purely vertical)
+    const b4 = [0.45, 0.45, 0.15];       // Category axis (skewed)
+    const b5 = [-0.4, 0.4, -0.25];       // Momentum axis (skewed)
+
+    x = xBase + x3 * b3[0] + x4 * b4[0] + x5 * b5[0];
+    y = yBase + x3 * b3[1] + x4 * b4[1] + x5 * b5[1];
+    z = x3 * b3[2] + x4 * b4[2] + x5 * b5[2];
   } else {
     // flat
     x = xBase;
@@ -1504,7 +1558,7 @@ function chordCircleGeometry(){
   const rect=canvas.getBoundingClientRect();
   const W=rect.width||300, H=rect.height||300;
   const posFor=(chord, segIdx)=>{
-    let [x, y, z] = getChord3D(chord);
+    let [x, y, z] = getChord3D(chord, segIdx);
 
     if (STATE.projMode === 'spiral' && typeof segIdx === 'number') {
       const c = STATE.composed;
@@ -1563,6 +1617,64 @@ function drawChordCircle(){
         }
       }
     }
+  } else if (STATE.projMode === 'spiral') {
+    // Draw a helical spiral background guide line
+    const totalSegments = c ? c.chordSequence.length : 8;
+    const steps = 12 * totalSegments;
+    let prevPt = null;
+    for (let i = 0; i <= steps; i++) {
+      const segVal = (i / steps) * totalSegments;
+      const ang = (i / 12) * Math.PI * 2 - Math.PI / 2;
+      const r = R; // outer ring
+      const xBase = Math.cos(ang) * r;
+      const yBase = Math.sin(ang) * r;
+      const zVal = (segVal - totalSegments / 2) * (H * 0.8 / totalSegments);
+
+      const [x0, y0, z0] = rotate3D(xBase, yBase, zVal, ROT_X, ROT_Y);
+      const [px, py, pz] = project3D(x0, y0, z0, W, H);
+      if (pz > 10) {
+        if (prevPt) {
+          pushLine(arr, prevPt[0], prevPt[1], px, py, 1.0, [1, 1, 1, 0.08]);
+        }
+        prevPt = [px, py];
+      } else {
+        prevPt = null;
+      }
+    }
+  } else if (STATE.projMode === 'hypercube') {
+    // Draw 5D Projection Axes
+    const drawAxis = (x0, y0, z0, x1, y1, z1, col) => {
+      const [rx0, ry0, rz0] = rotate3D(x0, y0, z0, ROT_X, ROT_Y);
+      const [rx1, ry1, rz1] = rotate3D(x1, y1, z1, ROT_X, ROT_Y);
+      const [px0, py0, pz0] = project3D(rx0, ry0, rz0, W, H);
+      const [px1, py1, pz1] = project3D(rx1, ry1, rz1, W, H);
+      if (pz0 > 10 && pz1 > 10) {
+        pushLine(arr, px0, py0, px1, py1, 1.5, col);
+      }
+    };
+
+    // Draw Tension Axis (τ) - Gold
+    drawAxis(0, 0, -R * 0.9, 0, 0, R * 0.9, [0.9, 0.7, 0.2, 0.35]);
+    // Draw Category Axis (ρ) - Cyan
+    drawAxis(-R * 0.6, -R * 0.6, -R * 0.2, R * 0.6, R * 0.6, R * 0.2, [0.1, 0.8, 0.8, 0.35]);
+    // Draw Momentum Axis (η) - Magenta
+    drawAxis(R * 0.52, -R * 0.52, R * 0.32, -R * 0.52, R * 0.52, -R * 0.32, [0.9, 0.2, 0.6, 0.35]);
+
+    // Draw standard concentric guide circles representing the default flat/fifths plane
+    for (let rScale of [0.66, 1.0, 1.32]) {
+      const r = R * rScale;
+      for (let i = 0; i < 24; i++) {
+        const ang0 = (i / 24) * Math.PI * 2;
+        const ang1 = ((i + 1) / 24) * Math.PI * 2;
+        const [x0, y0, z0] = rotate3D(Math.cos(ang0) * r, Math.sin(ang0) * r, 0, ROT_X, ROT_Y);
+        const [x1, y1, z1] = rotate3D(Math.cos(ang1) * r, Math.sin(ang1) * r, 0, ROT_X, ROT_Y);
+        const [p0x, p0y, p0z] = project3D(x0, y0, z0, W, H);
+        const [p1x, p1y, p1z] = project3D(x1, y1, z1, W, H);
+        if (p0z > 10 && p1z > 10) {
+          pushLine(arr, p0x, p0y, p1x, p1y, 1.0, [1, 1, 1, 0.05]);
+        }
+      }
+    }
   } else {
     for (let rScale of [0.66, 1.0, 1.32]) {
       const r = R * rScale;
@@ -1581,23 +1693,26 @@ function drawChordCircle(){
   }
 
   // Render transitions
-  const vocab=c.refVocab, legal=c.refLegal;
-  for(let i=0;i<vocab.length;i++){
-    const chordA = vocab[i];
-    if (!isChordVisible(chordA, c)) continue;
-    const [x0, y0, z0] = posFor(chordA);
-    if (z0 <= 10) continue;
+  // Transitions are kept abstract or restricted depending on projection mode
+  if (STATE.projMode !== 'spiral' && STATE.projMode !== 'hypercube') {
+    const vocab=c.refVocab, legal=c.refLegal;
+    for(let i=0;i<vocab.length;i++){
+      const chordA = vocab[i];
+      if (!isChordVisible(chordA, c)) continue;
+      const [x0, y0, z0] = posFor(chordA);
+      if (z0 <= 10) continue;
 
-    for(let j=0;j<vocab.length;j++){
-      if(i===j || !legal[i][j]) continue;
-      const chordB = vocab[j];
-      if (!isTransitionVisible(chordA, chordB, c)) continue;
-      const [x1, y1, z1] = posFor(chordB);
-      if (z1 <= 10) continue;
+      for(let j=0;j<vocab.length;j++){
+        if(i===j || !legal[i][j]) continue;
+        const chordB = vocab[j];
+        if (!isTransitionVisible(chordA, chordB, c)) continue;
+        const [x1, y1, z1] = posFor(chordB);
+        if (z1 <= 10) continue;
 
-      const avgZ = (z0 + z1) / 2;
-      const opacity = clamp01(1.0 - (avgZ - 100) / 600) * 0.35;
-      pushLine(arr, x0, y0, x1, y1, 1.3, [0.55, 0.62, 0.74, opacity]);
+        const avgZ = (z0 + z1) / 2;
+        const opacity = clamp01(1.0 - (avgZ - 100) / 600) * 0.35;
+        pushLine(arr, x0, y0, x1, y1, 1.3, [0.55, 0.62, 0.74, opacity]);
+      }
     }
   }
 
@@ -1616,29 +1731,52 @@ function drawChordCircle(){
   }
 
   // Render chord nodes
-  for(const chord of vocab){
-    if (!isChordVisible(chord, c)) continue;
-    const isCurrent = c.chordSequence.length && STATE.playing &&
-                      c.chordSequence[stepToSegment(STATE.currentStep)].rootPc === chord.rootPc &&
-                      c.chordSequence[stepToSegment(STATE.currentStep)].quality === chord.quality;
+  if (STATE.projMode === 'spiral' || STATE.projMode === 'hypercube') {
+    // Render the active walk sequence nodes along the spiral / hypercube
+    for (let i = 0; i < c.chordSequence.length; i++) {
+      const chord = c.chordSequence[i];
+      const isCurrent = STATE.playing && stepToSegment(STATE.currentStep) === i;
+      const [x, y, z] = posFor(chord, i);
+      if (z <= 10) continue;
 
-    const [x, y, z] = posFor(chord, isCurrent ? stepToSegment(STATE.currentStep) : undefined);
-    if (z <= 10) continue;
+      const depthScale = 400 / z;
+      const baseRad = RING_NODE_RADIUS[chord.ring||0]||12.5;
+      const rNode = baseRad * depthScale;
+      const col=tensionColor(chord.tensionVal);
 
-    const depthScale = 400 / z;
-    const baseRad = RING_NODE_RADIUS[chord.ring||0]||12.5;
-    const rNode = baseRad * depthScale;
-    const col=tensionColor(chord.tensionVal);
-    const isStart = STATE.startChordOverride && STATE.startChordOverride.rootPc === chord.rootPc && STATE.startChordOverride.quality === chord.quality;
+      if (isCurrent) {
+        pushCircle(arr, x, y, rNode + 6, [0.9, 0.65, 0.25, 0.4]);
+        pushCircle(arr, x, y, rNode, col);
+      } else {
+        pushCircle(arr, x, y, rNode, [col[0], col[1], col[2], clamp01(1.0 - (z - 100) / 600)]);
+      }
+    }
+  } else {
+    // Render static vocabulary nodes
+    for(const chord of vocab){
+      if (!isChordVisible(chord, c)) continue;
+      const isCurrent = c.chordSequence.length && STATE.playing &&
+                        c.chordSequence[stepToSegment(STATE.currentStep)].rootPc === chord.rootPc &&
+                        c.chordSequence[stepToSegment(STATE.currentStep)].quality === chord.quality;
 
-    if (isCurrent) {
-      pushCircle(arr, x, y, rNode + 6, [0.9, 0.65, 0.25, 0.4]);
-      pushCircle(arr, x, y, rNode, col);
-    } else if (isStart) {
-      pushCircle(arr, x, y, rNode + 4, [0.1, 0.8, 0.8, 0.4]);
-      pushCircle(arr, x, y, rNode, col);
-    } else {
-      pushCircle(arr, x, y, rNode, [col[0], col[1], col[2], clamp01(1.0 - (z - 100) / 600)]);
+      const [x, y, z] = posFor(chord, isCurrent ? stepToSegment(STATE.currentStep) : undefined);
+      if (z <= 10) continue;
+
+      const depthScale = 400 / z;
+      const baseRad = RING_NODE_RADIUS[chord.ring||0]||12.5;
+      const rNode = baseRad * depthScale;
+      const col=tensionColor(chord.tensionVal);
+      const isStart = STATE.startChordOverride && STATE.startChordOverride.rootPc === chord.rootPc && STATE.startChordOverride.quality === chord.quality;
+
+      if (isCurrent) {
+        pushCircle(arr, x, y, rNode + 6, [0.9, 0.65, 0.25, 0.4]);
+        pushCircle(arr, x, y, rNode, col);
+      } else if (isStart) {
+        pushCircle(arr, x, y, rNode + 4, [0.1, 0.8, 0.8, 0.4]);
+        pushCircle(arr, x, y, rNode, col);
+      } else {
+        pushCircle(arr, x, y, rNode, [col[0], col[1], col[2], clamp01(1.0 - (z - 100) / 600)]);
+      }
     }
   }
 
@@ -1649,31 +1787,89 @@ function renderChordLabels(vocab, posFor){
   const el=document.getElementById('chordLabels'); if(!el) return;
   el.innerHTML='';
   const c = STATE.composed;
-  for(const chord of vocab){
-    if (!isChordVisible(chord, c)) continue;
-    const isCurrent = c && c.chordSequence.length && STATE.playing &&
-                      c.chordSequence[stepToSegment(STATE.currentStep)].rootPc === chord.rootPc &&
-                      c.chordSequence[stepToSegment(STATE.currentStep)].quality === chord.quality;
+  const canvas = document.getElementById('chordCircleCanvas');
+  const rect = canvas ? canvas.getBoundingClientRect() : {width:300, height:300};
+  const W = rect.width || 300, H = rect.height || 300;
+  const R = Math.min(W, H) * 0.35;
 
-    const [x, y, z] = posFor(chord, isCurrent ? stepToSegment(STATE.currentStep) : undefined);
-    if (z <= 15) continue;
+  if (STATE.projMode === 'hypercube') {
+    // Add Axis Labels for Hypercube
+    const addAxisLabel = (x3d, y3d, z3d, text, color) => {
+      const [rx, ry, rz] = rotate3D(x3d, y3d, z3d, ROT_X, ROT_Y);
+      const [px, py, pz] = project3D(rx, ry, rz, W, H);
+      if (pz > 15) {
+        const lbl = document.createElement('div');
+        lbl.className = 'chord-node-label';
+        lbl.style.left = px + 'px';
+        lbl.style.top = py + 'px';
+        lbl.style.color = color;
+        lbl.style.fontWeight = 'bold';
+        lbl.style.fontSize = (9 * (400 / pz)) + 'px';
+        lbl.style.textShadow = '0 0 4px #000';
+        lbl.textContent = text;
+        el.appendChild(lbl);
+      }
+    };
 
-    const label=document.createElement('div');
-    label.className='chord-node-label';
-    label.style.left=x+'px'; label.style.top=y+'px';
+    addAxisLabel(0, 0, R * 1.05, "Tension (τ)", "#e6b33c");
+    addAxisLabel(R * 0.72, R * 0.72, R * 0.24, "Category (ρ)", "#1acc80");
+    addAxisLabel(-R * 0.62, R * 0.62, -R * 0.39, "Momentum (η)", "#e63399");
+  }
 
-    const depthScale = 400 / z;
-    const baseSize = chord.ring ? 8 : 9.5;
-    label.style.fontSize=(baseSize * depthScale)+'px';
+  if ((STATE.projMode === 'spiral' || STATE.projMode === 'hypercube') && c) {
+    // Render labels along the 3D spiral / hypercube path
+    for (let i = 0; i < c.chordSequence.length; i++) {
+      const chord = c.chordSequence[i];
+      const isCurrent = STATE.playing && stepToSegment(STATE.currentStep) === i;
+      const [x, y, z] = posFor(chord, i);
+      if (z <= 15) continue;
 
-    if(chord.ring) label.style.fontWeight='normal';
-    if(isCurrent) {
-      label.style.color='#ffffff';
-      label.style.fontWeight='bold';
+      const label=document.createElement('div');
+      label.className='chord-node-label';
+      label.style.left=x+'px'; label.style.top=y+'px';
+
+      const depthScale = 400 / z;
+      const baseSize = chord.ring ? 8 : 9.5;
+      label.style.fontSize=(baseSize * depthScale)+'px';
+
+      if(chord.ring) label.style.fontWeight='normal';
+      if(isCurrent) {
+        label.style.color='#ffffff';
+        label.style.fontWeight='bold';
+      } else {
+        label.style.color='var(--paper)';
+      }
+
+      label.textContent=chord.roman;
+      el.appendChild(label);
     }
+  } else {
+    for(const chord of vocab){
+      if (!isChordVisible(chord, c)) continue;
+      const isCurrent = c && c.chordSequence.length && STATE.playing &&
+                        c.chordSequence[stepToSegment(STATE.currentStep)].rootPc === chord.rootPc &&
+                        c.chordSequence[stepToSegment(STATE.currentStep)].quality === chord.quality;
 
-    label.textContent=chord.roman;
-    el.appendChild(label);
+      const [x, y, z] = posFor(chord, isCurrent ? stepToSegment(STATE.currentStep) : undefined);
+      if (z <= 15) continue;
+
+      const label=document.createElement('div');
+      label.className='chord-node-label';
+      label.style.left=x+'px'; label.style.top=y+'px';
+
+      const depthScale = 400 / z;
+      const baseSize = chord.ring ? 8 : 9.5;
+      label.style.fontSize=(baseSize * depthScale)+'px';
+
+      if(chord.ring) label.style.fontWeight='normal';
+      if(isCurrent) {
+        label.style.color='#ffffff';
+        label.style.fontWeight='bold';
+      }
+
+      label.textContent=chord.roman;
+      el.appendChild(label);
+    }
   }
 }
 
@@ -2080,6 +2276,80 @@ function renderMiniLife(){
   if(pop) pop.textContent='population '+popcount(STATE.refLifeGrid)+' / '+(STATE.refLifeW*STATE.refLifeH);
 }
 
+function hashLifeGrid(grid) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < grid.length; i++) {
+    h ^= grid[i];
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h;
+}
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function() {
+    a = (a + 0x9e3779b9) | 0;
+    let t = a ^ (a >>> 16);
+    t = Math.imul(t, 0x21f0aa7b);
+    t = t ^ (t >>> 15);
+    t = Math.imul(t, 0x735a2d97);
+    return ((t ^ (t >>> 15)) >>> 0) / 4294967296;
+  }
+}
+function clearAllOverrides() {
+  STATE.ruleChordOverrides = {};
+  STATE.ruleVoiceOverrides = {};
+  regenerateAndRender();
+}
+function seedOverridesFromLife() {
+  STATE.ruleChordOverrides = {};
+  STATE.ruleVoiceOverrides = {};
+  const grid = STATE.refLifeGrid;
+  if (!grid) return;
+  const hash = hashLifeGrid(grid);
+  const rng = mulberry32(hash);
+
+  const chordCells = CHORD_RULE_ORDER;
+  const numChord = Math.floor(chordCells.length * 0.15);
+  for (let i = 0; i < numChord; i++) {
+    const idx = Math.floor(rng() * chordCells.length);
+    const [d, tau, rho, eta] = chordCells[idx];
+    const key = d + ',' + tau + ',' + rho + ',' + eta;
+    STATE.ruleChordOverrides[key] = rng() < 0.5 ? 1 : 0;
+  }
+
+  const voiceCells = VOICE_RULE_ORDER;
+  const numVoice = Math.floor(rng() * voiceCells.length * 0.15);
+  for (let i = 0; i < numVoice; i++) {
+    const idx = Math.floor(rng() * voiceCells.length);
+    const [k, m, f, s, g] = voiceCells[idx];
+    const key = k + ',' + m + ',' + f + ',' + s + ',' + g;
+    STATE.ruleVoiceOverrides[key] = rng() < 0.5 ? 1 : 0;
+  }
+  regenerateAndRender();
+}
+function mutateRules() {
+  const chordCells = CHORD_RULE_ORDER;
+  const numChord = Math.floor(chordCells.length * 0.10);
+  for (let i = 0; i < numChord; i++) {
+    const idx = Math.floor(Math.random() * chordCells.length);
+    const [d, tau, rho, eta] = chordCells[idx];
+    const key = d + ',' + tau + ',' + rho + ',' + eta;
+    const val = chordRuleTable(STATE.lambdaChord, STATE.ruleChordOverrides)[d][tau][rho][eta];
+    STATE.ruleChordOverrides[key] = val ? 0 : 1;
+  }
+
+  const voiceCells = VOICE_RULE_ORDER;
+  const numVoice = Math.floor(Math.random() * voiceCells.length * 0.10);
+  for (let i = 0; i < numVoice; i++) {
+    const idx = Math.floor(Math.random() * voiceCells.length);
+    const [k, m, f, s, g] = voiceCells[idx];
+    const key = k + ',' + m + ',' + f + ',' + s + ',' + g;
+    const val = voiceRuleTable(STATE.lambdaVoice, STATE.ruleVoiceOverrides)[k][m][f][s][g];
+    STATE.ruleVoiceOverrides[key] = val ? 0 : 1;
+  }
+  regenerateAndRender();
+}
+
 function populateSelect(sel, entries){
   sel.innerHTML='';
   for(const [value,label] of entries){ const o=document.createElement('option'); o.value=value; o.textContent=label; sel.appendChild(o); }
@@ -2167,6 +2437,10 @@ function bindControls(){
 
   document.getElementById('btnMiniLifeStep').addEventListener('click', ()=>{ STATE.refLifeGrid=stepLife(STATE.refLifeGrid, STATE.refLifeW, STATE.refLifeH); renderMiniLife(); });
   document.getElementById('btnMiniLifeReseed').addEventListener('click', ()=>{ STATE.refLifeGrid=randomLifeGrid(STATE.refLifeW, STATE.refLifeH, 0.3); renderMiniLife(); });
+
+  document.getElementById('btnClearOverrides').addEventListener('click', clearAllOverrides);
+  document.getElementById('btnSeedFromLife').addEventListener('click', seedOverridesFromLife);
+  document.getElementById('btnMutateRules').addEventListener('click', mutateRules);
 
   // 3D Projections and Constrain options
   const projSelect = document.getElementById('projSelect');
