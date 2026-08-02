@@ -94,18 +94,136 @@
   .bar-head .dots{display:flex; gap:2px; justify-content:center; margin-top:3px; height:5px;}
   .bar-head .dot{width:4px; height:4px; border-radius:50%; background:transparent;}
 
-  #rhythmGrid{display:flex; flex-direction:column; gap:5px; margin-bottom:6px;}
-  .rhythm-row{display:flex; align-items:center; gap:8px;}
-  .rhythm-row .voice-tag{width:64px; flex-shrink:0; font-size:11px; color:var(--muted); display:flex; align-items:center; gap:5px;}
+  #rhythmGrid {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 6px;
+  }
+  .sequencer-controls {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 6px;
+    background: var(--panel-raised);
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--line-soft);
+  }
+  .sequencer-controls .section-title {
+    font-size: 11.5px;
+    color: var(--muted);
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .global-presets {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .global-presets .preset-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--panel);
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid var(--line-soft);
+  }
+  .global-presets .preset-label {
+    font-size: 11px;
+    color: var(--paper);
+    font-family: var(--mono);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
   .swatch{width:8px; height:8px; border-radius:2px; display:inline-block;}
-  .rhythm-row .cells{display:flex; gap:2px; flex:1; flex-wrap:nowrap; overflow-x:auto;}
-  .cell{flex:1; min-width:11px; height:22px; background:var(--panel-raised); border:1px solid var(--line-soft); border-radius:3px; cursor:pointer;}
-  .cell.bar-start{border-left:1px solid var(--line);}
-  .cell.on.melody{background:var(--melody); border-color:var(--melody);}
-  .cell.on.mid{background:var(--mid); border-color:var(--mid);}
-  .cell.on.bass{background:var(--bass); border-color:var(--bass);}
-  .cell.seeded{box-shadow:0 0 0 2px var(--accent) inset;}
-  .rhythm-row .presets{display:flex; gap:3px; flex-shrink:0;}
+  .bar-card {
+    background: var(--panel-raised);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .bar-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 4px rgba(230, 179, 60, 0.2);
+  }
+  .bar-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--line-soft);
+    cursor: pointer;
+    user-select: none;
+  }
+  .bar-card-header:hover .bar-card-title {
+    color: var(--accent);
+  }
+  .bar-card-title {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--paper);
+  }
+  .bar-card-header .dots {
+    display: flex;
+    gap: 3px;
+    align-items: center;
+    margin-left: 4px;
+  }
+  .bar-card-header .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+  .bar-voice-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .bar-voice-label {
+    width: 14px;
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    text-align: center;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .bar-voice-cells {
+    display: flex;
+    gap: 2px;
+    flex: 1;
+  }
+  .cell {
+    flex: 1;
+    min-width: 10px;
+    height: 20px;
+    background: var(--panel);
+    border: 1px solid var(--line-soft);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .cell.on.melody { background: var(--melody); border-color: var(--melody); }
+  .cell.on.mid { background: var(--mid); border-color: var(--mid); }
+  .cell.on.bass { background: var(--bass); border-color: var(--bass); }
+  .cell.seeded { box-shadow: 0 0 0 2px var(--accent) inset; }
 
   #barEditor{margin-top:10px; padding-top:12px; border-top:1px solid var(--line-soft); display:flex; flex-wrap:wrap; align-items:center; gap:16px;}
   #barEditor.hidden{display:none;}
@@ -2045,7 +2163,7 @@ function renderBarsStrip(){
         const idx=STATE.selectedBars.indexOf(b);
         if(idx>=0) STATE.selectedBars.splice(idx,1); else STATE.selectedBars.push(b);
       }
-      renderBarsStrip(); renderBarEditor();
+      renderBarsStrip(); renderBarEditor(); renderRhythmGrid();
       compose(); renderAll();
     });
     el.appendChild(div);
@@ -2067,49 +2185,228 @@ function renderBarEditor(){
 function applyBarOverride(patch){
   for(const b of STATE.selectedBars) STATE.barOverrides[b] = Object.assign({}, STATE.barOverrides[b], patch);
   renderBarsStrip();
+  renderRhythmGrid();
 }
 
 const PAINT_STATE = {painting:false, value:false};
 function renderRhythmGrid(){
   const el=document.getElementById('rhythmGrid'); el.innerHTML='';
-  const totalSteps=STATE.bars*STATE.stepsPerBar;
-  for(let v=0; v<3; v++){
-    const row=document.createElement('div'); row.className='rhythm-row';
-    const tag=document.createElement('div'); tag.className='voice-tag';
-    tag.innerHTML='<span class="swatch" style="background:var(--'+VOICE_NAMES[v]+')"></span>'+VOICE_NAMES[v];
-    row.appendChild(tag);
-    const cellsWrap=document.createElement('div'); cellsWrap.className='cells';
-    for(let s=0;s<totalSteps;s++){
-      const cell=document.createElement('div');
-      cell.className='cell'+(s%STATE.stepsPerBar===0?' bar-start':'');
-      const isSeeded = v===0 && s<STATE.stepsPerBar && STATE.seedNotes[s]!=null;
-      if(STATE.onsetGrid[v][s]) cell.classList.add('on', VOICE_NAMES[v]);
-      if(isSeeded) cell.classList.add('seeded');
-      cell.addEventListener('mousedown', ()=>{
-        PAINT_STATE.painting=true; PAINT_STATE.value=!STATE.onsetGrid[v][s];
-        STATE.onsetGrid[v][s]=PAINT_STATE.value;
-        if(v===0 && s<STATE.stepsPerBar && !PAINT_STATE.value) delete STATE.seedNotes[s];
+
+  const controls = document.createElement('div');
+  controls.className = 'sequencer-controls';
+
+  const title = document.createElement('span');
+  title.className = 'section-title';
+  title.textContent = 'Global Voice Presets:';
+  controls.appendChild(title);
+
+  const presetsWrap = document.createElement('div');
+  presetsWrap.className = 'global-presets';
+
+  for (let v = 0; v < 3; v++) {
+    const group = document.createElement('div');
+    group.className = 'preset-group';
+
+    const label = document.createElement('span');
+    label.className = 'preset-label';
+    label.innerHTML = `<span class="swatch" style="background:var(--${VOICE_NAMES[v]})"></span>${VOICE_NAMES[v]}:`;
+    group.appendChild(label);
+
+    const mk = (text, fn) => {
+      const b = document.createElement('button');
+      b.className = 'small';
+      b.style.padding = '2px 6px';
+      b.style.fontSize = '10px';
+      b.textContent = text;
+      b.addEventListener('click', () => {
+        STATE.onsetGrid[v] = fn();
+        if (v === 0) STATE.seedNotes = {};
         regenerateAndRender();
       });
-      cell.addEventListener('mouseenter', ()=>{
-        if(!PAINT_STATE.painting) return;
-        STATE.onsetGrid[v][s]=PAINT_STATE.value;
-        if(v===0 && s<STATE.stepsPerBar && !PAINT_STATE.value) delete STATE.seedNotes[s];
-        regenerateAndRender();
-      });
-      cellsWrap.appendChild(cell);
-    }
-    row.appendChild(cellsWrap);
-    const presets=document.createElement('div'); presets.className='presets';
-    const mk=(label,fn)=>{ const b=document.createElement('button'); b.className='small'; b.textContent=label;
-      b.addEventListener('click',()=>{ STATE.onsetGrid[v]=fn(); if(v===0) STATE.seedNotes={}; regenerateAndRender(); }); return b; };
-    presets.appendChild(mk('all', ()=> new Array(totalSteps).fill(true)));
-    presets.appendChild(mk('none', ()=> new Array(totalSteps).fill(false)));
-    presets.appendChild(mk('E3', ()=> { const one=euclideanRhythm(STATE.stepsPerBar,3); const out=[]; for(let i=0;i<totalSteps;i++) out.push(one[i%STATE.stepsPerBar]); return out; }));
-    presets.appendChild(mk('E5', ()=> { const one=euclideanRhythm(STATE.stepsPerBar,5); const out=[]; for(let i=0;i<totalSteps;i++) out.push(one[i%STATE.stepsPerBar]); return out; }));
-    row.appendChild(presets);
-    el.appendChild(row);
+      return b;
+    };
+
+    const totalSteps = STATE.bars * STATE.stepsPerBar;
+    group.appendChild(mk('all', () => new Array(totalSteps).fill(true)));
+    group.appendChild(mk('none', () => new Array(totalSteps).fill(false)));
+    group.appendChild(mk('E3', () => {
+      const one = euclideanRhythm(STATE.stepsPerBar, 3);
+      const out = [];
+      for (let i = 0; i < totalSteps; i++) out.push(one[i % STATE.stepsPerBar]);
+      return out;
+    }));
+    group.appendChild(mk('E5', () => {
+      const one = euclideanRhythm(STATE.stepsPerBar, 5);
+      const out = [];
+      for (let i = 0; i < totalSteps; i++) out.push(one[i % STATE.stepsPerBar]);
+      return out;
+    }));
+
+    presetsWrap.appendChild(group);
   }
+  controls.appendChild(presetsWrap);
+  el.appendChild(controls);
+
+  const grid = document.createElement('div');
+  grid.id = 'rhythmGridInner';
+  grid.style.display = 'grid';
+  grid.style.gridTemplateColumns = 'repeat(auto-fill, minmax(260px, 1fr))';
+  grid.style.gap = '12px';
+
+  for(let b=0; b<STATE.bars; b++){
+    const card = document.createElement('div');
+    card.className = 'bar-card' + (STATE.selectedBars.includes(b) ? ' selected' : '');
+
+    const header = document.createElement('div');
+    header.className = 'bar-card-header';
+
+    const bTitle = document.createElement('span');
+    bTitle.className = 'bar-card-title';
+    bTitle.textContent = `Bar ${b+1}`;
+
+    const dots = document.createElement('div');
+    dots.className = 'dots';
+    const ov = STATE.barOverrides[b];
+    if (ov) {
+      if (ov.scale) {
+        const d = document.createElement('span');
+        d.className = 'dot';
+        d.style.background = 'var(--accent)';
+        dots.appendChild(d);
+      }
+      if (ov.phase === 'consonant') {
+        const d = document.createElement('span');
+        d.className = 'dot';
+        d.style.background = 'var(--cool)';
+        dots.appendChild(d);
+      } else if (ov.phase === 'dissonant') {
+        const d = document.createElement('span');
+        d.className = 'dot';
+        d.style.background = 'var(--warm)';
+        dots.appendChild(d);
+      } else if (typeof ov.tension === 'number') {
+        const d = document.createElement('span');
+        d.className = 'dot';
+        d.style.background = 'var(--muted)';
+        dots.appendChild(d);
+      }
+    }
+    bTitle.appendChild(dots);
+    header.appendChild(bTitle);
+
+    const bActions = document.createElement('div');
+    bActions.style.display = 'flex';
+    bActions.style.gap = '4px';
+
+    const clrBtn = document.createElement('button');
+    clrBtn.className = 'small';
+    clrBtn.style.padding = '1px 4px';
+    clrBtn.style.fontSize = '9px';
+    clrBtn.textContent = 'clear';
+    clrBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      for (let v = 0; v < 3; v++) {
+        for (let s = 0; s < STATE.stepsPerBar; s++) {
+          const stepIndex = b * STATE.stepsPerBar + s;
+          STATE.onsetGrid[v][stepIndex] = false;
+          if (v === 0 && stepIndex < STATE.stepsPerBar) delete STATE.seedNotes[stepIndex];
+        }
+      }
+      regenerateAndRender();
+    });
+    bActions.appendChild(clrBtn);
+
+    const fillBtn = document.createElement('button');
+    fillBtn.className = 'small';
+    fillBtn.style.padding = '1px 4px';
+    fillBtn.style.fontSize = '9px';
+    fillBtn.textContent = 'fill';
+    fillBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      for (let v = 0; v < 3; v++) {
+        for (let s = 0; s < STATE.stepsPerBar; s++) {
+          const stepIndex = b * STATE.stepsPerBar + s;
+          STATE.onsetGrid[v][stepIndex] = true;
+        }
+      }
+      regenerateAndRender();
+    });
+    bActions.appendChild(fillBtn);
+
+    header.appendChild(bActions);
+
+    header.addEventListener('click', (e) => {
+      if (e.shiftKey && STATE.selectedBars.length) {
+        const last = STATE.selectedBars[STATE.selectedBars.length-1];
+        const lo = Math.min(last, b), hi = Math.max(last, b);
+        STATE.selectedBars = [];
+        for (let i = lo; i <= hi; i++) STATE.selectedBars.push(i);
+      } else {
+        const idx = STATE.selectedBars.indexOf(b);
+        if (idx >= 0) STATE.selectedBars.splice(idx, 1);
+        else STATE.selectedBars.push(b);
+      }
+      renderBarsStrip();
+      renderBarEditor();
+      renderRhythmGrid();
+      compose();
+      renderAll();
+    });
+
+    card.appendChild(header);
+
+    const body = document.createElement('div');
+    body.style.display = 'flex';
+    body.style.flexDirection = 'column';
+    body.style.gap = '6px';
+    body.style.marginTop = '6px';
+
+    for (let v = 0; v < 3; v++) {
+      const vRow = document.createElement('div');
+      vRow.className = 'bar-voice-row';
+
+      const vLabel = document.createElement('span');
+      vLabel.className = 'bar-voice-label';
+      vLabel.innerHTML = `<span class="swatch" style="background:var(--${VOICE_NAMES[v]})"></span>${VOICE_NAMES[v][0]}`;
+      vRow.appendChild(vLabel);
+
+      const cellsWrap = document.createElement('div');
+      cellsWrap.className = 'bar-voice-cells';
+
+      for (let s = 0; s < STATE.stepsPerBar; s++) {
+        const stepIndex = b * STATE.stepsPerBar + s;
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+
+        const isSeeded = v === 0 && stepIndex < STATE.stepsPerBar && STATE.seedNotes[stepIndex] != null;
+        if (STATE.onsetGrid[v][stepIndex]) cell.classList.add('on', VOICE_NAMES[v]);
+        if (isSeeded) cell.classList.add('seeded');
+
+        cell.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          PAINT_STATE.painting = true;
+          PAINT_STATE.value = !STATE.onsetGrid[v][stepIndex];
+          STATE.onsetGrid[v][stepIndex] = PAINT_STATE.value;
+          if (v === 0 && stepIndex < STATE.stepsPerBar && !PAINT_STATE.value) delete STATE.seedNotes[stepIndex];
+          regenerateAndRender();
+        });
+
+        cell.addEventListener('mouseenter', () => {
+          if (!PAINT_STATE.painting) return;
+          STATE.onsetGrid[v][stepIndex] = PAINT_STATE.value;
+          if (v === 0 && stepIndex < STATE.stepsPerBar && !PAINT_STATE.value) delete STATE.seedNotes[stepIndex];
+          regenerateAndRender();
+        });
+
+        cellsWrap.appendChild(cell);
+      }
+      vRow.appendChild(cellsWrap);
+      body.appendChild(vRow);
+    }
+    card.appendChild(body);
+    grid.appendChild(card);
+  }
+  el.appendChild(grid);
 }
 
 function bindPianoRollSeeding(canvas){
@@ -2356,7 +2653,9 @@ function populateSelect(sel, entries){
 }
 
 function bindControls(){
-  window.addEventListener('mouseup', ()=>{ PAINT_STATE.painting=false; });
+  window.addEventListener('mouseup', ()=>{
+    PAINT_STATE.painting=false;
+  });
 
   const rootSelect=document.getElementById('rootSelect');
   populateSelect(rootSelect, NOTE_NAMES.map((n,i)=>[String(i),n]));
@@ -2489,6 +2788,7 @@ function bindControls(){
     });
     window.addEventListener('mouseup', () => {
       isDraggingChord = false;
+      PAINT_STATE.painting = false;
     });
 
     chordCanvas.addEventListener('click', (e) => {
