@@ -228,7 +228,17 @@
         <div class="slidewrap"><input type="range" id="lambdaChordSlider" min="0" max="100" value="38"><span class="val" id="lambdaChordVal">38</span></div></div>
       <div class="field"><label class="field-label" for="lambdaVoiceSlider">λ — voice rule (counterpoint)</label>
         <div class="slidewrap"><input type="range" id="lambdaVoiceSlider" min="0" max="100" value="46"><span class="val" id="lambdaVoiceVal">46</span></div></div>
-      <p class="hint" style="margin-top:8px">λ = fraction of the rule table set to "legal" — low λ freezes the walk into short loops, high λ opens it toward chaos. See the sweep below.</p>
+      <div class="field"><label class="field-label" for="chaosAmountSlider">Chaos Entropy (Noise)</label>
+        <div class="slidewrap"><input type="range" id="chaosAmountSlider" min="0" max="100" value="0"><span class="val" id="chaosAmountVal">0</span></div></div>
+      <div class="field"><label class="field-label" for="fallbackStrategySelect">Fallback strategy</label>
+        <select id="fallbackStrategySelect" style="font-family:var(--mono); font-size:11.5px; max-width:140px;">
+          <option value="smooth" selected>Smooth</option>
+          <option value="chaotic">Chaotic</option>
+          <option value="frozen">Frozen</option>
+          <option value="tonic">Tonic</option>
+        </select>
+      </div>
+      <p class="hint" style="margin-top:8px">λ = fraction of the rule table set to "legal". Chaos Entropy injects stochastic transition noise to break deterministic loops. Fallback strategy controls dead-end choices.</p>
     </div>
 
     <div class="module">
@@ -308,7 +318,24 @@
     </div>
 
     <div class="viz-panel chord">
-      <h2>Harmonic Field <span class="sub">legal transitions under the current rule</span></h2>
+      <h2>Harmonic Field <span class="sub">3D composition hyperspace visualization</span></h2>
+      <div style="display:flex; gap:10px; margin-bottom:12px; flex-wrap:wrap; align-items:center;">
+        <label for="projSelect" style="font-size:11.5px; color:var(--muted)">Projection:</label>
+        <select id="projSelect" style="font-family:var(--mono); font-size:11.5px; max-width:140px;">
+          <option value="cylinder" selected>3D Cylinder</option>
+          <option value="sphere">3D Sphere</option>
+          <option value="spiral">3D Time Spiral</option>
+          <option value="flat">2D Flat Rings</option>
+        </select>
+        <label for="constrainSelect" style="font-size:11.5px; color:var(--muted)">Constrain:</label>
+        <select id="constrainSelect" style="font-family:var(--mono); font-size:11.5px; max-width:140px;">
+          <option value="all" selected>All transitions</option>
+          <option value="walk">Walk path only</option>
+          <option value="diatonic">Diatonic only</option>
+          <option value="active">Active scale only</option>
+        </select>
+        <button class="small" id="btnResetRotation" style="padding:2px 6px; font-size:10px;">Reset View</button>
+      </div>
       <div class="canvas-wrap"><canvas id="chordCircleCanvas"></canvas><div class="gl-labels" id="chordLabels"></div></div>
       <div class="legend">
         <span class="item"><span class="swatch" style="background:var(--cool)"></span>consonant</span>
@@ -513,8 +540,8 @@ const STATE = {
   tempo:96,
   globalTension:0.30,
   lambdaChord:0.38, lambdaVoice:0.46,
-  ruleChordOverrides:{},   // "d,tau" -> 0|1
-  ruleVoiceOverrides:{},   // "k,mu,phi" -> 0|1
+  ruleChordOverrides:{},   // "d,tau,rho,eta" -> 0|1
+  ruleVoiceOverrides:{},   // "k,mu,phi,sigma,gamma" -> 0|1
   secondaryDominants:false, walkingBass:false, arpVoice1:'none',
   barOverrides:{}, selectedBars:[],
   onsetGrid:null, seedNotes:{},
@@ -522,6 +549,13 @@ const STATE = {
   composed:null,
   audioCtx:null, masterGain:null, convolver:null, pans:null, sendGains:null,
   playing:false, currentStep:0, currentStepFloat:0, nextStepTime:0, playStartCtxTime:0, schedulerTimer:null, rafId:null,
+
+  // Hyperspace/3D and Chaos settings
+  projMode:'cylinder',
+  constrainMode:'all',
+  fallbackStrategy:'smooth',
+  chaosAmount:0.0,
+  startChordOverride:null,
 };
 
 const REGISTERS = [
@@ -798,17 +832,26 @@ function* chordAutomatonWalk(totalSegments, startChord, lambdaChord, overrides, 
     });
     let fellBack=false;
     if(!legal || legal.length===0){
-      // true dead end -- Life's rule is total (every neighbor-count has a
-      // defined outcome, even if it's "dies"); ours is total too: fall
-      // back to the smoothest available move regardless of the rule. With
-      // the extended vocabulary this is rarer, since secondary dominants
-      // and applied leading-tones are already ordinary candidates that the
-      // rule table can legally admit on their own merits.
       fellBack=true;
-      legal=v.slice();
+      if (STATE.fallbackStrategy === 'chaotic') {
+        const rIdx = Math.floor(Math.random() * v.length);
+        legal = [v[rIdx]];
+      } else if (STATE.fallbackStrategy === 'frozen') {
+        legal = [current];
+      } else if (STATE.fallbackStrategy === 'tonic') {
+        legal = [v[0]];
+      } else {
+        legal=v.slice();
+      }
     }
     legal.sort(chordTieBreakCompare(current, prev2));
-    const next=legal[0];
+    let next;
+    if (legal.length > 1 && Math.random() < (STATE.chaosAmount || 0)) {
+      const rIdx = Math.floor(Math.random() * legal.length);
+      next = legal[rIdx];
+    } else {
+      next = legal[0];
+    }
     eta = momentumClassIdx(directedFifths(current.rootPc, next.rootPc)); // this transition's own strength becomes the incoming momentum for the *next* decision
     prev2 = current;
     current=next;
@@ -1105,11 +1148,16 @@ function ensureGridsSized(){
     STATE.onsetGrid=[0,1,2].map(v=>defaultOnsetGrid(v,totalSteps,STATE.stepsPerBar,STATE.harmonicRhythm));
     STATE.seedNotes={};
   } else {
-    STATE.onsetGrid=STATE.onsetGrid.map(old=>{
-      const out=new Array(totalSteps);
-      for(let s=0;s<totalSteps;s++) out[s]= old.length ? (old[s%old.length]||false) : false;
-      return out;
-    });
+    if (STATE.onsetGrid[0].length !== totalSteps) {
+      STATE.onsetGrid=STATE.onsetGrid.map(old=>{
+        const out=new Array(totalSteps);
+        for(let s=0;s<totalSteps;s++) out[s]= s < old.length ? (old[s]||false) : false;
+        return out;
+      });
+      for(const k of Object.keys(STATE.seedNotes)){
+        if(parseInt(k,10) >= totalSteps) delete STATE.seedNotes[k];
+      }
+    }
   }
   STATE.lastStepsPerBar=STATE.stepsPerBar;
 }
@@ -1126,7 +1174,15 @@ function compose(){
   const totalSegments = Math.ceil(totalSteps/segLen);
 
   const startVocab = chordVocabularyFor(STATE.root, SCALES[effectiveScaleForSegment(0)], STATE.secondaryDominants);
-  const startChord = startVocab[0];
+  let startChord = startVocab[0];
+  if (STATE.startChordOverride) {
+    const exists = startVocab.some(c => c.rootPc === STATE.startChordOverride.rootPc && c.quality === STATE.startChordOverride.quality);
+    if (exists) {
+      startChord = startVocab.find(c => c.rootPc === STATE.startChordOverride.rootPc && c.quality === STATE.startChordOverride.quality);
+    } else {
+      STATE.startChordOverride = null;
+    }
+  }
 
   const chordWalk = [...chordAutomatonWalk(totalSegments, startChord, STATE.lambdaChord, STATE.ruleChordOverrides, {secondaryDominants:STATE.secondaryDominants})];
   const chordSequence = chordWalk.map(r=>r.chord);
@@ -1347,56 +1403,275 @@ function renderChordStrip(c, stepW){
 const CIRCLE_OF_FIFTHS_PC_ORDER=[0,7,2,9,4,11,6,1,8,3,10,5];
 const RING_SCALE=[1.0, 1.32, 0.66]; // 0=diatonic (base), 1=secondary dominant (outer), 2=secondary leading-tone (inner)
 const RING_NODE_RADIUS=[12.5, 8, 8];
+
+let ROT_X = 0.4;
+let ROT_Y = -0.5;
+
+function rotate3D(x, y, z, rotX, rotY) {
+  const cosY = Math.cos(rotY), sinY = Math.sin(rotY);
+  const x1 = x * cosY - z * sinY;
+  const z1 = x * sinY + z * cosY;
+
+  const cosX = Math.cos(rotX), sinX = Math.sin(rotX);
+  const y2 = y * cosX - z1 * sinX;
+  const z2 = y * sinX + z1 * cosX;
+
+  return [x1, y2, z2];
+}
+
+function project3D(x, y, z, W, H) {
+  const cx = W / 2, cy = H / 2;
+  const d = 400; // Camera distance
+  const fov = 350; // Field of view scaling
+  const cameraZ = z + d;
+  if (cameraZ <= 10) return [cx, cy, 0];
+  const px = cx + (x * fov) / cameraZ;
+  const py = cy + (y * fov) / cameraZ;
+  return [px, py, cameraZ];
+}
+
+function getChord3D(chord) {
+  const canvas = document.getElementById('chordCircleCanvas');
+  const rect = canvas ? canvas.getBoundingClientRect() : {width:300, height:300};
+  const W = rect.width || 300, H = rect.height || 300;
+  const R = Math.min(W, H) * 0.35;
+
+  const slot = CIRCLE_OF_FIFTHS_PC_ORDER.indexOf(chord.rootPc);
+  const ang = (slot / 12) * Math.PI * 2 - Math.PI / 2;
+  const ringScale = RING_SCALE[chord.ring || 0] != null ? RING_SCALE[chord.ring || 0] : 1.0;
+  const r = R * ringScale;
+
+  const xBase = Math.cos(ang) * r;
+  const yBase = Math.sin(ang) * r;
+
+  let x = xBase, y = yBase, z = 0;
+
+  if (STATE.projMode === 'cylinder') {
+    x = xBase;
+    y = yBase;
+    z = (chord.tensionVal - 0.3) * (H * 0.7);
+  } else if (STATE.projMode === 'sphere') {
+    const lon = ang;
+    const lat = (chord.tensionVal - 0.3) * Math.PI * 0.7;
+    const sphR = R * (0.8 + 0.3 * (chord.ring || 0));
+    x = sphR * Math.cos(lat) * Math.cos(lon);
+    y = sphR * Math.cos(lat) * Math.sin(lon);
+    z = sphR * Math.sin(lat);
+  } else if (STATE.projMode === 'spiral') {
+    x = xBase;
+    y = yBase;
+    z = 0; // Default Z for vocabulary nodes
+  } else {
+    // flat
+    x = xBase;
+    y = yBase;
+    z = 0;
+  }
+
+  return [x, y, z];
+}
+
+function isChordVisible(chord, c) {
+  if (STATE.constrainMode === 'walk') {
+    return c.chordSequence.some(ch => ch.rootPc === chord.rootPc && ch.quality === chord.quality);
+  }
+  if (STATE.constrainMode === 'diatonic') {
+    return chord.ring === 0;
+  }
+  if (STATE.constrainMode === 'active') {
+    const scalePCs = SCALES[STATE.scaleName].map(off => (STATE.root + off) % 12);
+    return chord.tones.every(t => scalePCs.includes(t));
+  }
+  return true;
+}
+
+function isTransitionVisible(chordA, chordB, c) {
+  if (STATE.constrainMode === 'walk') {
+    for (let i = 0; i < c.chordSequence.length - 1; i++) {
+      const ca = c.chordSequence[i], cb = c.chordSequence[i+1];
+      if (ca.rootPc === chordA.rootPc && ca.quality === chordA.quality &&
+          cb.rootPc === chordB.rootPc && cb.quality === chordB.quality) {
+        return true;
+      }
+    }
+    return false;
+  }
+  return isChordVisible(chordA, c) && isChordVisible(chordB, c);
+}
+
 function chordCircleGeometry(){
   const canvas=document.getElementById('chordCircleCanvas');
   const rect=canvas.getBoundingClientRect();
   const W=rect.width||300, H=rect.height||300;
-  const cx=W/2, cy=H/2, R=Math.min(W,H)*0.32;
-  const posFor=(chord)=>{
-    const slot=CIRCLE_OF_FIFTHS_PC_ORDER.indexOf(chord.rootPc);
-    const ang=(slot/12)*Math.PI*2 - Math.PI/2;
-    const r=R*(RING_SCALE[chord.ring||0]!=null ? RING_SCALE[chord.ring||0] : 1.0);
-    return [cx+Math.cos(ang)*r, cy+Math.sin(ang)*r];
+  const posFor=(chord, segIdx)=>{
+    let [x, y, z] = getChord3D(chord);
+
+    if (STATE.projMode === 'spiral' && typeof segIdx === 'number') {
+      const c = STATE.composed;
+      const totalSegments = c ? c.chordSequence.length : 8;
+      z = (segIdx - totalSegments / 2) * (H * 0.8 / totalSegments);
+    }
+
+    const [xr, yr, zr] = rotate3D(x, y, z, ROT_X, ROT_Y);
+    const [px, py, pz] = project3D(xr, yr, zr, W, H);
+    return [px, py, pz];
   };
-  return {W,H,cx,cy,R,posFor};
+  return {W,H,posFor};
 }
+
 function drawChordCircle(){
   const c=STATE.composed; if(!c) return;
-  const {posFor}=chordCircleGeometry();
+  const {W,H,posFor}=chordCircleGeometry();
   renderChordLabels(c.refVocab, posFor);
   if(!GL_CHORD || !GL_CHORD.gl) return;
-  const W=GL_CHORD.cssW||GL_CHORD.gl.canvas.clientWidth||300, H=GL_CHORD.cssH||GL_CHORD.gl.canvas.clientHeight||300;
-  const cx=W/2, cy=H/2, R=Math.min(W,H)*0.32;
+
   const arr=[];
-  for(let i=0;i<12;i++){
-    const ang=(i/12)*Math.PI*2 - Math.PI/2;
-    pushCircle(arr, cx+Math.cos(ang)*R, cy+Math.sin(ang)*R, 3, [1,1,1,0.08]);
-  }
-  const vocab=c.refVocab, legal=c.refLegal;
-  for(let i=0;i<vocab.length;i++){
-    const [x0,y0]=posFor(vocab[i]);
-    for(let j=0;j<vocab.length;j++){
-      if(i===j || !legal[i][j]) continue;
-      const [x1,y1]=posFor(vocab[j]);
-      pushLine(arr,x0,y0,x1,y1,1.3,[0.55,0.62,0.74,0.32]);
+  const R = Math.min(W, H) * 0.35;
+
+  // Render grid helper lines
+  if (STATE.projMode === 'sphere') {
+    for (let latIdx = -2; latIdx <= 2; latIdx++) {
+      const lat = (latIdx / 3) * Math.PI * 0.7;
+      const r_lat = R * Math.cos(lat);
+      const z_lat = R * Math.sin(lat);
+      for (let i = 0; i < 24; i++) {
+        const ang0 = (i / 24) * Math.PI * 2;
+        const ang1 = ((i + 1) / 24) * Math.PI * 2;
+        const [x0, y0, z0] = rotate3D(Math.cos(ang0) * r_lat, Math.sin(ang0) * r_lat, z_lat, ROT_X, ROT_Y);
+        const [x1, y1, z1] = rotate3D(Math.cos(ang1) * r_lat, Math.sin(ang1) * r_lat, z_lat, ROT_X, ROT_Y);
+        const [p0x, p0y, p0z] = project3D(x0, y0, z0, W, H);
+        const [p1x, p1y, p1z] = project3D(x1, y1, z1, W, H);
+        if (p0z > 10 && p1z > 10) {
+          pushLine(arr, p0x, p0y, p1x, p1y, 1.0, [1, 1, 1, 0.04]);
+        }
+      }
+    }
+  } else if (STATE.projMode === 'cylinder') {
+    for (let rScale of [0.66, 1.0, 1.32]) {
+      const r = R * rScale;
+      for (let zVal of [-H*0.2, 0, H*0.2]) {
+        for (let i = 0; i < 24; i++) {
+          const ang0 = (i / 24) * Math.PI * 2;
+          const ang1 = ((i + 1) / 24) * Math.PI * 2;
+          const [x0, y0, z0] = rotate3D(Math.cos(ang0) * r, Math.sin(ang0) * r, zVal, ROT_X, ROT_Y);
+          const [x1, y1, z1] = rotate3D(Math.cos(ang1) * r, Math.sin(ang1) * r, zVal, ROT_X, ROT_Y);
+          const [p0x, p0y, p0z] = project3D(x0, y0, z0, W, H);
+          const [p1x, p1y, p1z] = project3D(x1, y1, z1, W, H);
+          if (p0z > 10 && p1z > 10) {
+            pushLine(arr, p0x, p0y, p1x, p1y, 1.0, [1, 1, 1, 0.04]);
+          }
+        }
+      }
+    }
+  } else {
+    for (let rScale of [0.66, 1.0, 1.32]) {
+      const r = R * rScale;
+      for (let i = 0; i < 24; i++) {
+        const ang0 = (i / 24) * Math.PI * 2;
+        const ang1 = ((i + 1) / 24) * Math.PI * 2;
+        const [x0, y0, z0] = rotate3D(Math.cos(ang0) * r, Math.sin(ang0) * r, 0, ROT_X, ROT_Y);
+        const [x1, y1, z1] = rotate3D(Math.cos(ang1) * r, Math.sin(ang1) * r, 0, ROT_X, ROT_Y);
+        const [p0x, p0y, p0z] = project3D(x0, y0, z0, W, H);
+        const [p1x, p1y, p1z] = project3D(x1, y1, z1, W, H);
+        if (p0z > 10 && p1z > 10) {
+          pushLine(arr, p0x, p0y, p1x, p1y, 1.0, [1, 1, 1, 0.05]);
+        }
+      }
     }
   }
-  for(const chord of vocab){
-    const [x,y]=posFor(chord);
-    const col=tensionColor(chord.tensionVal);
-    pushCircle(arr,x,y,RING_NODE_RADIUS[chord.ring||0]||12.5,col);
+
+  // Render transitions
+  const vocab=c.refVocab, legal=c.refLegal;
+  for(let i=0;i<vocab.length;i++){
+    const chordA = vocab[i];
+    if (!isChordVisible(chordA, c)) continue;
+    const [x0, y0, z0] = posFor(chordA);
+    if (z0 <= 10) continue;
+
+    for(let j=0;j<vocab.length;j++){
+      if(i===j || !legal[i][j]) continue;
+      const chordB = vocab[j];
+      if (!isTransitionVisible(chordA, chordB, c)) continue;
+      const [x1, y1, z1] = posFor(chordB);
+      if (z1 <= 10) continue;
+
+      const avgZ = (z0 + z1) / 2;
+      const opacity = clamp01(1.0 - (avgZ - 100) / 600) * 0.35;
+      pushLine(arr, x0, y0, x1, y1, 1.3, [0.55, 0.62, 0.74, opacity]);
+    }
   }
+
+  // Render composed walk path
+  if (c.chordSequence.length > 1) {
+    for (let i = 0; i < c.chordSequence.length - 1; i++) {
+      const ca = c.chordSequence[i], cb = c.chordSequence[i+1];
+      const [x0, y0, z0] = posFor(ca, i);
+      const [x1, y1, z1] = posFor(cb, i+1);
+      if (z0 > 10 && z1 > 10) {
+        const avgZ = (z0 + z1) / 2;
+        const opacity = clamp01(1.0 - (avgZ - 100) / 600) * 0.85;
+        pushLine(arr, x0, y0, x1, y1, 3.5, [0.9, 0.65, 0.25, opacity]);
+      }
+    }
+  }
+
+  // Render chord nodes
+  for(const chord of vocab){
+    if (!isChordVisible(chord, c)) continue;
+    const isCurrent = c.chordSequence.length && STATE.playing &&
+                      c.chordSequence[stepToSegment(STATE.currentStep)].rootPc === chord.rootPc &&
+                      c.chordSequence[stepToSegment(STATE.currentStep)].quality === chord.quality;
+
+    const [x, y, z] = posFor(chord, isCurrent ? stepToSegment(STATE.currentStep) : undefined);
+    if (z <= 10) continue;
+
+    const depthScale = 400 / z;
+    const baseRad = RING_NODE_RADIUS[chord.ring||0]||12.5;
+    const rNode = baseRad * depthScale;
+    const col=tensionColor(chord.tensionVal);
+    const isStart = STATE.startChordOverride && STATE.startChordOverride.rootPc === chord.rootPc && STATE.startChordOverride.quality === chord.quality;
+
+    if (isCurrent) {
+      pushCircle(arr, x, y, rNode + 6, [0.9, 0.65, 0.25, 0.4]);
+      pushCircle(arr, x, y, rNode, col);
+    } else if (isStart) {
+      pushCircle(arr, x, y, rNode + 4, [0.1, 0.8, 0.8, 0.4]);
+      pushCircle(arr, x, y, rNode, col);
+    } else {
+      pushCircle(arr, x, y, rNode, [col[0], col[1], col[2], clamp01(1.0 - (z - 100) / 600)]);
+    }
+  }
+
   drawBuffer(GL_CHORD, arr);
 }
+
 function renderChordLabels(vocab, posFor){
   const el=document.getElementById('chordLabels'); if(!el) return;
   el.innerHTML='';
+  const c = STATE.composed;
   for(const chord of vocab){
-    const [x,y]=posFor(chord);
+    if (!isChordVisible(chord, c)) continue;
+    const isCurrent = c && c.chordSequence.length && STATE.playing &&
+                      c.chordSequence[stepToSegment(STATE.currentStep)].rootPc === chord.rootPc &&
+                      c.chordSequence[stepToSegment(STATE.currentStep)].quality === chord.quality;
+
+    const [x, y, z] = posFor(chord, isCurrent ? stepToSegment(STATE.currentStep) : undefined);
+    if (z <= 15) continue;
+
     const label=document.createElement('div');
     label.className='chord-node-label';
     label.style.left=x+'px'; label.style.top=y+'px';
-    if(chord.ring) label.style.fontSize='8px';
+
+    const depthScale = 400 / z;
+    const baseSize = chord.ring ? 8 : 9.5;
+    label.style.fontSize=(baseSize * depthScale)+'px';
+
+    if(chord.ring) label.style.fontWeight='normal';
+    if(isCurrent) {
+      label.style.color='#ffffff';
+      label.style.fontWeight='bold';
+    }
+
     label.textContent=chord.roman;
     el.appendChild(label);
   }
@@ -1470,6 +1745,20 @@ function playNote(voiceIndex, midi, startTime, dur){
   env.connect(STATE.pans[voiceIndex]);
   osc.start(startTime); osc2.start(startTime);
   osc.stop(startTime+dur+0.08); osc2.stop(startTime+dur+0.08);
+}
+function playChordPreview(chord) {
+  ensureAudio();
+  const ctx = STATE.audioCtx;
+  if (!ctx) return;
+  const tones = chord.tones;
+  const time = ctx.currentTime;
+  const dur = 0.8;
+  tones.forEach((pc, i) => {
+    const voiceIdx = i % 3;
+    const registerBase = voiceIdx === 0 ? 72 : (voiceIdx === 1 ? 60 : 48);
+    const midi = registerBase + ((pc - registerBase % 12 + 12) % 12);
+    playNote(voiceIdx, midi, time, dur);
+  });
 }
 function secondsPerStep(){ return (60/STATE.tempo)*(4/STATE.stepsPerBar); }
 function scheduleStepAudio(step, time){
@@ -1574,7 +1863,8 @@ function renderBarEditor(){
   const ov = STATE.selectedBars.length===1 ? (STATE.barOverrides[STATE.selectedBars[0]]||{}) : {};
   document.getElementById('barEditorScale').value = ov.scale || '';
   const tSlider=document.getElementById('barEditorTension');
-  tSlider.value = Math.round((typeof ov.tension==='number'?ov.tension:STATE.globalTension)*100);
+  const resolvedTension = ov.phase === 'consonant' ? 0.20 : (ov.phase === 'dissonant' ? 0.55 : (typeof ov.tension === 'number' ? ov.tension : STATE.globalTension));
+  tSlider.value = Math.round(resolvedTension*100);
   document.getElementById('barEditorTensionVal').textContent=tSlider.value;
   document.querySelectorAll('.phase-btn').forEach(btn=> btn.classList.toggle('active', ov.phase===btn.dataset.phase));
 }
@@ -1829,6 +2119,16 @@ function bindControls(){
   bindSlider('tensionSlider','tensionVal', v=>STATE.globalTension=v/100);
   bindSlider('lambdaChordSlider','lambdaChordVal', v=>STATE.lambdaChord=v/100);
   bindSlider('lambdaVoiceSlider','lambdaVoiceVal', v=>STATE.lambdaVoice=v/100);
+  bindSlider('chaosAmountSlider','chaosAmountVal', v=>STATE.chaosAmount=v/100);
+
+  const fallbackStrategySelect = document.getElementById('fallbackStrategySelect');
+  if (fallbackStrategySelect) {
+    fallbackStrategySelect.value = STATE.fallbackStrategy;
+    fallbackStrategySelect.addEventListener('change', (e) => {
+      STATE.fallbackStrategy = e.target.value;
+      regenerateAndRender();
+    });
+  }
 
   document.getElementById('chkSecondaryDom').addEventListener('change', (e)=>{ STATE.secondaryDominants=e.target.checked; regenerateAndRender(); });
   document.getElementById('chkWalkingBass').addEventListener('change', (e)=>{ STATE.walkingBass=e.target.checked; regenerateAndRender(); });
@@ -1852,7 +2152,7 @@ function bindControls(){
     btn.addEventListener('click', ()=>{
       const phase=btn.dataset.phase;
       if(phase==='neutral') applyBarOverride({tension:undefined, phase:undefined});
-      else applyBarOverride({phase});
+      else applyBarOverride({phase, tension:undefined});
       regenerateAndRender(); renderBarEditor();
     });
   });
@@ -1867,6 +2167,79 @@ function bindControls(){
 
   document.getElementById('btnMiniLifeStep').addEventListener('click', ()=>{ STATE.refLifeGrid=stepLife(STATE.refLifeGrid, STATE.refLifeW, STATE.refLifeH); renderMiniLife(); });
   document.getElementById('btnMiniLifeReseed').addEventListener('click', ()=>{ STATE.refLifeGrid=randomLifeGrid(STATE.refLifeW, STATE.refLifeH, 0.3); renderMiniLife(); });
+
+  // 3D Projections and Constrain options
+  const projSelect = document.getElementById('projSelect');
+  if (projSelect) {
+    projSelect.addEventListener('change', (e) => {
+      STATE.projMode = e.target.value;
+      renderAll();
+    });
+  }
+  const constrainSelect = document.getElementById('constrainSelect');
+  if (constrainSelect) {
+    constrainSelect.addEventListener('change', (e) => {
+      STATE.constrainMode = e.target.value;
+      renderAll();
+    });
+  }
+  const btnResetRotation = document.getElementById('btnResetRotation');
+  if (btnResetRotation) {
+    btnResetRotation.addEventListener('click', () => {
+      ROT_X = 0.4;
+      ROT_Y = -0.5;
+      renderAll();
+    });
+  }
+
+  // Interactive 3D drag-to-rotate & click-to-preview/select
+  let isDraggingChord = false;
+  let lastMouseX = 0, lastMouseY = 0;
+  const chordCanvas = document.getElementById('chordCircleCanvas');
+  if (chordCanvas) {
+    chordCanvas.addEventListener('mousedown', (e) => {
+      isDraggingChord = true;
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!isDraggingChord) return;
+      const dx = e.clientX - lastMouseX;
+      const dy = e.clientY - lastMouseY;
+      ROT_Y += dx * 0.007;
+      ROT_X += dy * 0.007;
+      ROT_X = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, ROT_X));
+      lastMouseX = e.clientX;
+      lastMouseY = e.clientY;
+      renderAll();
+    });
+    window.addEventListener('mouseup', () => {
+      isDraggingChord = false;
+    });
+
+    chordCanvas.addEventListener('click', (e) => {
+      if (Math.hypot(e.clientX - lastMouseX, e.clientY - lastMouseY) > 5) return;
+      const c = STATE.composed; if (!c) return;
+      const rect = chordCanvas.getBoundingClientRect();
+      const lx = e.clientX - rect.left, ly = e.clientY - rect.top;
+      const {posFor} = chordCircleGeometry();
+      let bestChord = null, bestDist = 20;
+      for (const chord of c.refVocab) {
+        const [px, py] = posFor(chord);
+        if (py == null) continue;
+        const d = Math.hypot(lx - px, ly - py);
+        if (d < bestDist) {
+          bestDist = d;
+          bestChord = chord;
+        }
+      }
+      if (bestChord) {
+        playChordPreview(bestChord);
+        STATE.startChordOverride = bestChord;
+        regenerateAndRender();
+      }
+    });
+  }
 
   bindPianoRollSeeding(document.getElementById('pianoRollCanvas'));
   window.addEventListener('resize', ()=>{ renderAll(); });
