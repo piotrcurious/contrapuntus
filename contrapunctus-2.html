@@ -1697,6 +1697,7 @@ function drawChordCircle(){
   renderChordLabels(c.refVocab, posFor);
   if(!GL_CHORD || !GL_CHORD.gl) return;
 
+  const vocab = c.refVocab, legal = c.refLegal;
   const arr=[];
   const R = Math.min(W, H) * 0.35;
 
