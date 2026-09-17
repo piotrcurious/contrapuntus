@@ -1105,9 +1105,10 @@ function ensureGridsSized(){
     STATE.onsetGrid=[0,1,2].map(v=>defaultOnsetGrid(v,totalSteps,STATE.stepsPerBar,STATE.harmonicRhythm));
     STATE.seedNotes={};
   } else {
-    STATE.onsetGrid=STATE.onsetGrid.map(old=>{
+    STATE.onsetGrid=STATE.onsetGrid.map((old, v)=>{
       const out=new Array(totalSteps);
-      for(let s=0;s<totalSteps;s++) out[s]= old.length ? (old[s%old.length]||false) : false;
+      const def=defaultOnsetGrid(v, totalSteps, STATE.stepsPerBar, STATE.harmonicRhythm);
+      for(let s=0;s<totalSteps;s++) out[s] = s < old.length ? old[s] : def[s];
       return out;
     });
   }
@@ -1587,6 +1588,15 @@ const PAINT_STATE = {painting:false, value:false};
 function renderRhythmGrid(){
   const el=document.getElementById('rhythmGrid'); el.innerHTML='';
   const totalSteps=STATE.bars*STATE.stepsPerBar;
+
+  function updateCellVisual(v, s, cellEl){
+    const isOn = !!STATE.onsetGrid[v][s];
+    cellEl.classList.toggle('on', isOn);
+    cellEl.classList.toggle(VOICE_NAMES[v], isOn);
+    const isSeeded = v===0 && s<STATE.stepsPerBar && STATE.seedNotes[s]!=null;
+    cellEl.classList.toggle('seeded', isSeeded);
+  }
+
   for(let v=0; v<3; v++){
     const row=document.createElement('div'); row.className='rhythm-row';
     const tag=document.createElement('div'); tag.className='voice-tag';
@@ -1596,27 +1606,43 @@ function renderRhythmGrid(){
     for(let s=0;s<totalSteps;s++){
       const cell=document.createElement('div');
       cell.className='cell'+(s%STATE.stepsPerBar===0?' bar-start':'');
-      const isSeeded = v===0 && s<STATE.stepsPerBar && STATE.seedNotes[s]!=null;
-      if(STATE.onsetGrid[v][s]) cell.classList.add('on', VOICE_NAMES[v]);
-      if(isSeeded) cell.classList.add('seeded');
-      cell.addEventListener('mousedown', ()=>{
-        PAINT_STATE.painting=true; PAINT_STATE.value=!STATE.onsetGrid[v][s];
+      updateCellVisual(v, s, cell);
+
+      cell.addEventListener('mousedown', (e)=>{
+        e.preventDefault();
+        PAINT_STATE.painting=true;
+        PAINT_STATE.value=!STATE.onsetGrid[v][s];
         STATE.onsetGrid[v][s]=PAINT_STATE.value;
         if(v===0 && s<STATE.stepsPerBar && !PAINT_STATE.value) delete STATE.seedNotes[s];
-        regenerateAndRender();
+        updateCellVisual(v, s, cell);
+        compose();
+        renderAll();
       });
+
       cell.addEventListener('mouseenter', ()=>{
         if(!PAINT_STATE.painting) return;
+        if(STATE.onsetGrid[v][s] === PAINT_STATE.value) return;
         STATE.onsetGrid[v][s]=PAINT_STATE.value;
         if(v===0 && s<STATE.stepsPerBar && !PAINT_STATE.value) delete STATE.seedNotes[s];
-        regenerateAndRender();
+        updateCellVisual(v, s, cell);
+        compose();
+        renderAll();
       });
+
       cellsWrap.appendChild(cell);
     }
     row.appendChild(cellsWrap);
     const presets=document.createElement('div'); presets.className='presets';
     const mk=(label,fn)=>{ const b=document.createElement('button'); b.className='small'; b.textContent=label;
-      b.addEventListener('click',()=>{ STATE.onsetGrid[v]=fn(); if(v===0) STATE.seedNotes={}; regenerateAndRender(); }); return b; };
+      b.addEventListener('click',()=>{
+        STATE.onsetGrid[v]=fn();
+        if(v===0){
+          for(let s in STATE.seedNotes){
+            if(!STATE.onsetGrid[0][s]) delete STATE.seedNotes[s];
+          }
+        }
+        regenerateAndRender();
+      }); return b; };
     presets.appendChild(mk('all', ()=> new Array(totalSteps).fill(true)));
     presets.appendChild(mk('none', ()=> new Array(totalSteps).fill(false)));
     presets.appendChild(mk('E3', ()=> { const one=euclideanRhythm(STATE.stepsPerBar,3); const out=[]; for(let i=0;i<totalSteps;i++) out.push(one[i%STATE.stepsPerBar]); return out; }));
