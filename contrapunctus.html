@@ -334,6 +334,14 @@
         <label class="field-label" for="chaosSlider">Chaos amount</label>
         <div class="slidewrap"><input type="range" id="chaosSlider" min="0" max="100" value="40"><span class="val" id="chaosVal">40</span></div>
       </div>
+      <div class="field">
+        <label class="field-label" for="envAttackSlider">Attack (ms)</label>
+        <div class="slidewrap"><input type="range" id="envAttackSlider" min="2" max="100" value="20"><span class="val" id="envAttackVal">20</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envReleaseSlider">Release (ms)</label>
+        <div class="slidewrap"><input type="range" id="envReleaseSlider" min="10" max="800" value="250"><span class="val" id="envReleaseVal">250</span></div>
+      </div>
     </div>
   </section>
 
@@ -570,6 +578,7 @@ const STATE = {
   weights:{functional:1.0, voiceLeading:1.0, tensionMatch:0.8},
   secondaryDominants:false, walkingBass:false, arpVoice1:'none',
   chaosAmount:0.40,
+  envAttack:0.02, envDecay:0.15, envSustain:0.7, envRelease:0.25,
   barOverrides:{},          // barIndex -> {scale?, tension?, phase?}
   selectedBars:[],
   onsetGrid:null,           // [voice][step] boolean, voice0=melody,1=mid,2=bass
@@ -1364,18 +1373,28 @@ function playNote(voiceIndex, midi, startTime, dur){
   filter.frequency.setValueAtTime(baseCut,startTime);
   filter.frequency.linearRampToValueAtTime(Math.max(200,baseCut*0.5), startTime+Math.max(0.05,dur*0.9));
   filter.Q.value=1.1;
+
   const env=ctx.createGain();
-  const peak=0.85, atk=0.012, rel=Math.min(0.28,dur*0.4);
-  env.gain.setValueAtTime(0.0001,startTime);
-  env.gain.linearRampToValueAtTime(peak, startTime+atk);
-  env.gain.setValueAtTime(peak, startTime+Math.max(atk,dur-rel));
-  env.gain.linearRampToValueAtTime(0.0001, startTime+dur);
+  const peak=0.85;
+  const atk=Math.min(STATE.envAttack || 0.02, dur*0.3);
+  const dec=Math.min(STATE.envDecay || 0.15, dur*0.3);
+  const susLevel=peak * (STATE.envSustain != null ? STATE.envSustain : 0.7);
+  const rel=Math.min(STATE.envRelease || 0.25, 0.8);
+  const noteOffTime=startTime + Math.max(atk + dec, dur * 0.95);
+
+  env.gain.setValueAtTime(0.0001, startTime);
+  env.gain.linearRampToValueAtTime(peak, startTime + atk);
+  env.gain.linearRampToValueAtTime(susLevel, startTime + atk + dec);
+  env.gain.setValueAtTime(susLevel, noteOffTime);
+  env.gain.linearRampToValueAtTime(0.0001, noteOffTime + rel);
+
   osc.connect(oscGain); osc2.connect(osc2Gain);
   oscGain.connect(filter); osc2Gain.connect(filter);
   filter.connect(env);
   env.connect(STATE.pans[voiceIndex]);
+
   osc.start(startTime); osc2.start(startTime);
-  osc.stop(startTime+dur+0.08); osc2.stop(startTime+dur+0.08);
+  osc.stop(noteOffTime + rel + 0.02); osc2.stop(noteOffTime + rel + 0.02);
 }
 function secondsPerStep(){ return (60/STATE.tempo)*(4/STATE.stepsPerBar); }
 function scheduleStepAudio(step, time){
@@ -1671,6 +1690,8 @@ function bindControls(){
   bindSlider('wVoiceLeading','wVoiceLeadingVal', v=>STATE.weights.voiceLeading=v/100, Number);
   bindSlider('wTensionMatch','wTensionMatchVal', v=>STATE.weights.tensionMatch=v/100, Number);
   bindSlider('chaosSlider','chaosVal', v=>STATE.chaosAmount=v/100, Number);
+  bindSlider('envAttackSlider','envAttackVal', v=>STATE.envAttack=v/1000, Number);
+  bindSlider('envReleaseSlider','envReleaseVal', v=>STATE.envRelease=v/1000, Number);
 
   document.getElementById('chkSecondaryDom').addEventListener('change', (e)=>{ STATE.secondaryDominants=e.target.checked; regenerateAndRender(); });
   document.getElementById('chkWalkingBass').addEventListener('change', (e)=>{ STATE.walkingBass=e.target.checked; regenerateAndRender(); });

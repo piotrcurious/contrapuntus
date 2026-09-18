@@ -228,6 +228,10 @@
         <div class="slidewrap"><input type="range" id="lambdaChordSlider" min="0" max="100" value="38"><span class="val" id="lambdaChordVal">38</span></div></div>
       <div class="field"><label class="field-label" for="lambdaVoiceSlider">λ — voice rule (counterpoint)</label>
         <div class="slidewrap"><input type="range" id="lambdaVoiceSlider" min="0" max="100" value="46"><span class="val" id="lambdaVoiceVal">46</span></div></div>
+      <div class="field"><label class="field-label" for="envAttackSlider">Attack (ms)</label>
+        <div class="slidewrap"><input type="range" id="envAttackSlider" min="2" max="100" value="20"><span class="val" id="envAttackVal">20</span></div></div>
+      <div class="field"><label class="field-label" for="envReleaseSlider">Release (ms)</label>
+        <div class="slidewrap"><input type="range" id="envReleaseSlider" min="10" max="800" value="250"><span class="val" id="envReleaseVal">250</span></div></div>
       <p class="hint" style="margin-top:8px">λ = fraction of the rule table set to "legal" — low λ freezes the walk into short loops, high λ opens it toward chaos. See the sweep below.</p>
     </div>
 
@@ -516,6 +520,7 @@ const STATE = {
   ruleChordOverrides:{},   // "d,tau" -> 0|1
   ruleVoiceOverrides:{},   // "k,mu,phi" -> 0|1
   secondaryDominants:false, walkingBass:false, arpVoice1:'none',
+  envAttack:0.02, envDecay:0.15, envSustain:0.7, envRelease:0.25,
   barOverrides:{}, selectedBars:[],
   onsetGrid:null, seedNotes:{},
   refLifeW:16, refLifeH:10, refLifeGrid:null,
@@ -1459,18 +1464,28 @@ function playNote(voiceIndex, midi, startTime, dur){
   filter.frequency.setValueAtTime(baseCut,startTime);
   filter.frequency.linearRampToValueAtTime(Math.max(200,baseCut*0.5), startTime+Math.max(0.05,dur*0.9));
   filter.Q.value=1.1;
+
   const env=ctx.createGain();
-  const peak=0.85, atk=0.012, rel=Math.min(0.28,dur*0.4);
-  env.gain.setValueAtTime(0.0001,startTime);
-  env.gain.linearRampToValueAtTime(peak, startTime+atk);
-  env.gain.setValueAtTime(peak, startTime+Math.max(atk,dur-rel));
-  env.gain.linearRampToValueAtTime(0.0001, startTime+dur);
+  const peak=0.85;
+  const atk=Math.min(STATE.envAttack || 0.02, dur*0.3);
+  const dec=Math.min(STATE.envDecay || 0.15, dur*0.3);
+  const susLevel=peak * (STATE.envSustain != null ? STATE.envSustain : 0.7);
+  const rel=Math.min(STATE.envRelease || 0.25, 0.8);
+  const noteOffTime=startTime + Math.max(atk + dec, dur * 0.95);
+
+  env.gain.setValueAtTime(0.0001, startTime);
+  env.gain.linearRampToValueAtTime(peak, startTime + atk);
+  env.gain.linearRampToValueAtTime(susLevel, startTime + atk + dec);
+  env.gain.setValueAtTime(susLevel, noteOffTime);
+  env.gain.linearRampToValueAtTime(0.0001, noteOffTime + rel);
+
   osc.connect(oscGain); osc2.connect(osc2Gain);
   oscGain.connect(filter); osc2Gain.connect(filter);
   filter.connect(env);
   env.connect(STATE.pans[voiceIndex]);
+
   osc.start(startTime); osc2.start(startTime);
-  osc.stop(startTime+dur+0.08); osc2.stop(startTime+dur+0.08);
+  osc.stop(noteOffTime + rel + 0.02); osc2.stop(noteOffTime + rel + 0.02);
 }
 function secondsPerStep(){ return (60/STATE.tempo)*(4/STATE.stepsPerBar); }
 function scheduleStepAudio(step, time){
@@ -1855,6 +1870,8 @@ function bindControls(){
   bindSlider('tensionSlider','tensionVal', v=>STATE.globalTension=v/100);
   bindSlider('lambdaChordSlider','lambdaChordVal', v=>STATE.lambdaChord=v/100);
   bindSlider('lambdaVoiceSlider','lambdaVoiceVal', v=>STATE.lambdaVoice=v/100);
+  bindSlider('envAttackSlider','envAttackVal', v=>STATE.envAttack=v/1000);
+  bindSlider('envReleaseSlider','envReleaseVal', v=>STATE.envRelease=v/1000);
 
   document.getElementById('chkSecondaryDom').addEventListener('change', (e)=>{ STATE.secondaryDominants=e.target.checked; regenerateAndRender(); });
   document.getElementById('chkWalkingBass').addEventListener('change', (e)=>{ STATE.walkingBass=e.target.checked; regenerateAndRender(); });
