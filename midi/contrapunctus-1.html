@@ -1823,6 +1823,7 @@ function init(){
 if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', init); } else { init(); }
 
 
+
 /* --- WEB MIDI INTEGRATION MODULE --- */
 const GM_INSTRUMENT_NAMES = [
   "0: Acoustic Grand Piano", "1: Bright Acoustic Piano", "2: Electric Grand Piano", "3: Honky-tonk Piano",
@@ -1847,12 +1848,16 @@ const GM_INSTRUMENT_NAMES = [
 const MIDI_VOICE_NAMES = ["Melody", "Mid", "Bass"];
 
 function initMIDI() {
-  if (!navigator.requestMIDIAccess) {
-    const el = document.getElementById('midiStatus');
+  const el = document.getElementById('midiStatus');
+  if (!navigator || !navigator.requestMIDIAccess) {
     if (el) el.textContent = "Web MIDI API not supported in this browser.";
     return;
   }
-  navigator.requestMIDIAccess({ sysex: false }).then(onMIDISuccess, onMIDIFailure);
+  try {
+    navigator.requestMIDIAccess({ sysex: false }).then(onMIDISuccess, onMIDIFailure).catch(onMIDIFailure);
+  } catch(e) {
+    onMIDIFailure(e);
+  }
 }
 
 function onMIDISuccess(midiAccess) {
@@ -1865,13 +1870,22 @@ function onMIDISuccess(midiAccess) {
   bindMIDIControls();
 }
 
-function onMIDIFailure(msg) {
+function onMIDIFailure(err) {
   const el = document.getElementById('midiStatus');
-  if (el) el.textContent = "MIDI Access Failed: " + msg;
+  let msg = err && err.message ? err.message : String(err);
+  if (err && (err.name === 'InvalidStateError' || msg.includes('Initialization failed'))) {
+    msg = "MIDI subsystem unavailable on this platform/OS. (Web Audio active)";
+  } else if (err && (err.name === 'NotAllowedError' || msg.includes('Permission to use Web MIDI API was not granted'))) {
+    msg = "MIDI permission not granted or disallowed in headless mode. (Web Audio active)";
+  }
+  if (el) {
+    el.textContent = "Web MIDI: " + msg;
+    el.style.color = "#a0d8ff";
+  }
 }
 
 function updateMIDIDevices() {
-  if (!STATE.midi.access) return;
+  if (!STATE.midi || !STATE.midi.access) return;
   const inSel = document.getElementById('midiInputSelect');
   const outSel = document.getElementById('midiOutputSelect');
   if (!inSel || !outSel) return;
@@ -1906,7 +1920,7 @@ function updateMIDIDevices() {
 
 function attachMIDIInputListener() {
   const inSel = document.getElementById('midiInputSelect');
-  if (!inSel) return;
+  if (!inSel || !STATE.midi) return;
   if (STATE.midi.input) {
     STATE.midi.input.onmidimessage = null;
     STATE.midi.input = null;
@@ -1921,7 +1935,7 @@ function attachMIDIInputListener() {
 
 function attachMIDIOutputPort() {
   const outSel = document.getElementById('midiOutputSelect');
-  if (!outSel) return;
+  if (!outSel || !STATE.midi) return;
   if (outSel.value && STATE.midi.access) {
     STATE.midi.output = STATE.midi.access.outputs.get(outSel.value);
     for (let v = 0; v < STATE.midi.voices.length; v++) {
@@ -1933,6 +1947,7 @@ function attachMIDIOutputPort() {
 }
 
 function handleMIDIMessage(event) {
+  if (!STATE.midi) return;
   const data = event.data;
   const status = data[0];
 
@@ -1988,7 +2003,7 @@ function handleMIDIMessage(event) {
 }
 
 function sendMIDIProgramChange(voiceIndex) {
-  if (!STATE.midi.output) return;
+  if (!STATE.midi || !STATE.midi.output) return;
   const vConfig = STATE.midi.voices[voiceIndex];
   if (!vConfig) return;
   const ch = (vConfig.channel - 1) & 0x0F;
@@ -1999,7 +2014,7 @@ function sendMIDIProgramChange(voiceIndex) {
 }
 
 function sendMIDINote(voiceIndex, midiPitch, startTime, durSec) {
-  if (!STATE.midi.output) return;
+  if (!STATE.midi || !STATE.midi.output) return;
   const vConfig = STATE.midi.voices[voiceIndex];
   if (!vConfig || !vConfig.enabled) return;
 
@@ -2032,7 +2047,7 @@ function sendMIDINote(voiceIndex, midiPitch, startTime, durSec) {
 
 function renderMIDIVoiceTable() {
   const tbody = document.getElementById('midiVoicesTbody');
-  if (!tbody) return;
+  if (!tbody || !STATE.midi) return;
   tbody.innerHTML = '';
 
   STATE.midi.voices.forEach((vConfig, i) => {
@@ -2100,12 +2115,10 @@ function bindMIDIControls() {
   const chkSync = document.getElementById('chkMidiSync');
   if (chkSync) {
     chkSync.addEventListener('change', (e) => {
-      STATE.midi.syncClock = e.target.checked;
+      if (STATE.midi) STATE.midi.syncClock = e.target.checked;
     });
   }
 }
-
-
 })();
 </script>
 </body>
