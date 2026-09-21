@@ -351,7 +351,28 @@
       <h2>Detected Structure <span class="sub">period / transient / sensitivity / sequence ("glider")</span></h2>
       <div class="readout" id="structureReadout" style="margin-top:8px;"></div>
       <p class="hint">A "sequence" here (a melodic/harmonic cell repeating at a shifted pitch level) is the exact compositional analogue of a Life glider: a local pattern preserved by the rule but translated.</p>
-    </div>
+
+      <div class="field">
+        <label class="field-label" for="envPeakSlider">Peak Magnitude (Vol %)</label>
+        <div class="slidewrap"><input type="range" id="envPeakSlider" min="0" max="100" value="85"><span class="val" id="envPeakVal">85</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envAttackSlider">Attack (ms)</label>
+        <div class="slidewrap"><input type="range" id="envAttackSlider" min="2" max="200" value="20"><span class="val" id="envAttackVal">20</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envDecaySlider">Decay (ms)</label>
+        <div class="slidewrap"><input type="range" id="envDecaySlider" min="10" max="500" value="150"><span class="val" id="envDecayVal">150</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envSustainSlider">Sustain Level (%)</label>
+        <div class="slidewrap"><input type="range" id="envSustainSlider" min="0" max="100" value="70"><span class="val" id="envSustainVal">70</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envReleaseSlider">Release (ms)</label>
+        <div class="slidewrap"><input type="range" id="envReleaseSlider" min="10" max="800" value="250"><span class="val" id="envReleaseVal">250</span></div>
+      </div>
+</div>
   </section>
 
   <details class="explainer">
@@ -1791,6 +1812,12 @@ function bindControls(){
   document.getElementById('btnMiniLifeReseed').addEventListener('click', ()=>{ STATE.refLifeGrid=randomLifeGrid(STATE.refLifeW, STATE.refLifeH, 0.3); renderMiniLife(); });
 
   bindPianoRollSeeding(document.getElementById('pianoRollCanvas'));
+    bindSlider('envPeakSlider','envPeakVal', v=>STATE.envPeak=v/100, Number);
+  bindSlider('envAttackSlider','envAttackVal', v=>STATE.envAttack=v/1000, Number);
+  bindSlider('envDecaySlider','envDecayVal', v=>STATE.envDecay=v/1000, Number);
+  bindSlider('envSustainSlider','envSustainVal', v=>STATE.envSustain=v/100, Number);
+  bindSlider('envReleaseSlider','envReleaseVal', v=>STATE.envRelease=v/1000, Number);
+
   window.addEventListener('resize', ()=>{ renderAll(); });
 }
 

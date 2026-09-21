@@ -342,9 +342,21 @@
         <label class="field-label" for="chaosSlider">Chaos amount</label>
         <div class="slidewrap"><input type="range" id="chaosSlider" min="0" max="100" value="40"><span class="val" id="chaosVal">40</span></div>
       </div>
+            <div class="field">
+        <label class="field-label" for="envPeakSlider">Peak Magnitude (Vol %)</label>
+        <div class="slidewrap"><input type="range" id="envPeakSlider" min="0" max="100" value="85"><span class="val" id="envPeakVal">85</span></div>
+      </div>
       <div class="field">
         <label class="field-label" for="envAttackSlider">Attack (ms)</label>
-        <div class="slidewrap"><input type="range" id="envAttackSlider" min="2" max="100" value="20"><span class="val" id="envAttackVal">20</span></div>
+        <div class="slidewrap"><input type="range" id="envAttackSlider" min="2" max="200" value="20"><span class="val" id="envAttackVal">20</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envDecaySlider">Decay (ms)</label>
+        <div class="slidewrap"><input type="range" id="envDecaySlider" min="10" max="500" value="150"><span class="val" id="envDecayVal">150</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envSustainSlider">Sustain Level (%)</label>
+        <div class="slidewrap"><input type="range" id="envSustainSlider" min="0" max="100" value="70"><span class="val" id="envSustainVal">70</span></div>
       </div>
       <div class="field">
         <label class="field-label" for="envReleaseSlider">Release (ms)</label>
@@ -630,7 +642,7 @@ const STATE = window.STATE = {
   weights:{functional:1.0, voiceLeading:1.0, tensionMatch:0.8},
   secondaryDominants:false, walkingBass:false, arpVoice1:'none',
   chaosAmount:0.40,
-  envAttack:0.02, envDecay:0.15, envSustain:0.7, envRelease:0.25,
+  envPeak:0.85, envAttack:0.02, envDecay:0.15, envSustain:0.7, envRelease:0.25,
   barOverrides:{},          // barIndex -> {scale?, tension?, phase?}
   selectedBars:[],
   onsetGrid:null,           // [voice][step] boolean, voice0=melody,1=mid,2=bass
@@ -1429,7 +1441,7 @@ function playNote(voiceIndex, midi, startTime, dur){
   filter.Q.value=1.1;
 
   const env=ctx.createGain();
-  const peak=0.85;
+  const peak = STATE.envPeak != null ? STATE.envPeak : 0.85;
   const atk=Math.min(STATE.envAttack || 0.02, dur*0.3);
   const dec=Math.min(STATE.envDecay || 0.15, dur*0.3);
   const susLevel=peak * (STATE.envSustain != null ? STATE.envSustain : 0.7);
@@ -1758,7 +1770,10 @@ function bindControls(){
   bindSlider('wVoiceLeading','wVoiceLeadingVal', v=>STATE.weights.voiceLeading=v/100, Number);
   bindSlider('wTensionMatch','wTensionMatchVal', v=>STATE.weights.tensionMatch=v/100, Number);
   bindSlider('chaosSlider','chaosVal', v=>STATE.chaosAmount=v/100, Number);
+    bindSlider('envPeakSlider','envPeakVal', v=>STATE.envPeak=v/100, Number);
   bindSlider('envAttackSlider','envAttackVal', v=>STATE.envAttack=v/1000, Number);
+  bindSlider('envDecaySlider','envDecayVal', v=>STATE.envDecay=v/1000, Number);
+  bindSlider('envSustainSlider','envSustainVal', v=>STATE.envSustain=v/100, Number);
   bindSlider('envReleaseSlider','envReleaseVal', v=>STATE.envRelease=v/1000, Number);
 
   document.getElementById('chkSecondaryDom').addEventListener('change', (e)=>{ STATE.secondaryDominants=e.target.checked; regenerateAndRender(); });
