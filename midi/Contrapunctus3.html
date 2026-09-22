@@ -735,9 +735,9 @@ function defaultProfiles(){
 }
 function defaultVoiceEnv(v){
   return [
-    {a:0.010, d:0.085, s:0.55, r:0.30, gateRatio:0.92},
-    {a:0.022, d:0.120, s:0.66, r:0.42, gateRatio:0.98},
-    {a:0.016, d:0.160, s:0.72, r:0.55, gateRatio:0.90},
+    {p:1.0, a:0.010, d:0.085, s:0.55, r:0.30, gateRatio:0.92},
+    {p:1.0, a:0.022, d:0.120, s:0.66, r:0.42, gateRatio:0.98},
+    {p:1.0, a:0.016, d:0.160, s:0.72, r:0.55, gateRatio:0.90},
   ][v];
 }
 
@@ -1237,9 +1237,10 @@ function spanToNext(v, step){
 }
 function envFor(v, step){
   const base = STATE.voiceEnv[v], o = STATE.noteEnv[v+':'+step];
-  const e = {a:base.a, d:base.d, s:base.s, r:base.r, gate:spanToNext(v,step)*base.gateRatio, custom:false};
-  if(o){ for(const k of ['a','d','s','r','gate']) if(o[k]!=null){ e[k]=o[k]; e.custom=true; } }
+  const e = {p:base.p!=null?base.p:1.0, a:base.a, d:base.d, s:base.s, r:base.r, gate:spanToNext(v,step)*base.gateRatio, custom:false};
+  if(o){ for(const k of ['p','a','d','s','r','gate']) if(o[k]!=null){ e[k]=o[k]; e.custom=true; } }
   e.gate = Math.max(0.03, e.gate);
+  e.p = e.p!=null?e.p:1.0;
   return e;
 }
 function secondsPerStep(){ return (60/STATE.tempo)*(4/STATE.stepsPerBar); }
@@ -2105,8 +2106,8 @@ function drawEnv(){
   g.fillRect(X(off), ENV.pad.t, X(off+e.r)-X(off), h-ENV.pad.t-ENV.pad.b);
 
   // curve
-  const pk=1;
-  const pts=[[0,0],[e.a,pk],[e.a+e.d,e.s],[Math.max(e.a+e.d,off),e.s],[Math.max(e.a+e.d,off)+e.r,0]];
+  const pk=e.p!=null?e.p:1.0;
+  const pts=[[0,0],[e.a,pk],[e.a+e.d,e.s*pk],[Math.max(e.a+e.d,off),e.s*pk],[Math.max(e.a+e.d,off)+e.r,0]];
   g.beginPath();
   g.moveTo(X(pts[0][0]),Y(pts[0][1]));
   for(let i=1;i<pts.length;i++) g.lineTo(X(pts[i][0]),Y(pts[i][1]));
@@ -2128,9 +2129,10 @@ function drawEnv(){
   g.strokeStyle=css(THEME.faint,0.5); g.lineWidth=1;
   g.beginPath(); g.moveTo(ENV.pad.l, Y(0)+0.5); g.lineTo(w-ENV.pad.r, Y(0)+0.5); g.stroke();
   const handles=[
+    {id:'p', x:X(e.a), y:Y(pk)},
     {id:'a', x:X(e.a), y:Y(pk)},
-    {id:'d', x:X(e.a+e.d), y:Y(e.s)},
-    {id:'s', x:X((e.a+e.d+Math.max(e.a+e.d,off))/2), y:Y(e.s)},
+    {id:'d', x:X(e.a+e.d), y:Y(e.s*pk)},
+    {id:'s', x:X((e.a+e.d+Math.max(e.a+e.d,off))/2), y:Y(e.s*pk)},
     {id:'gate', x:X(off), y:ENV.pad.t+10},
     {id:'r', x:X(Math.max(e.a+e.d,off)+e.r), y:Y(0)},
   ];
@@ -2149,7 +2151,7 @@ function drawEnv(){
   const over = e.gate - nt.span;
   el.innerHTML =
     'lane <b>'+VOICE_NAMES[nt.v]+'</b>  step <b>'+(nt.step+1)+'</b>  '+midiName(nt.pitch)+
-    '   \u00b7   A <b>'+Math.round(e.a*1000)+'</b>ms  D <b>'+Math.round(e.d*1000)+'</b>ms  S <b>'+e.s.toFixed(2)+
+    '   \u00b7   Peak <b>'+Math.round(pk*100)+'%</b>  A <b>'+Math.round(e.a*1000)+'</b>ms  D <b>'+Math.round(e.d*1000)+'</b>ms  S <b>'+e.s.toFixed(2)+
     '</b>  R <b>'+Math.round(e.r*1000)+'</b>ms'+
     '<br>note off at <b>'+e.gate.toFixed(2)+'</b> steps ('+Math.round(e.gate*sps*1000)+' ms)'+
     '   \u00b7   next note in this lane at <b>'+nt.span+'</b> steps'+
@@ -2174,9 +2176,10 @@ function envDrag(id, mx, my){
   const e=nt.e;
   const key=nt.v+':'+nt.step;
   const cur=Object.assign({}, STATE.noteEnv[key]||{});
-  if(id==='a') cur.a=Math.min(1.2, Math.max(0.002, t));
+  if(id==='p') cur.p=amp;
+  else if(id==='a') { cur.a=Math.min(1.2, Math.max(0.002, t)); cur.p=amp; }
   else if(id==='d') cur.d=Math.min(2, Math.max(0.005, t-(cur.a!=null?cur.a:e.a)));
-  else if(id==='s') cur.s=amp;
+  else if(id==='s') cur.s=amp / (e.p != null && e.p > 0 ? e.p : 1.0);
   else if(id==='gate') cur.gate=Math.min(32, Math.max(0.03, t/sps));
   else if(id==='r'){
     const off=(cur.gate!=null?cur.gate:e.gate)*sps;
@@ -2402,7 +2405,7 @@ function playNote(v, midi, t0, e){
   let a=e.a, d=e.d;
   const gate=Math.max(0.02, e.gate*sps);
   if(a+d > gate){ const k=gate/(a+d); a*=k; d*=k; }
-  const off=t0+gate, rel=Math.max(0.01,e.r), peak=0.8;
+  const off=t0+gate, rel=Math.max(0.01,e.r), peak=0.8 * (e.p != null ? e.p : 1.0);
 
   const waves=['triangle','sawtooth','sine'];
   const o1=ctx.createOscillator(), o2=ctx.createOscillator();
@@ -3029,6 +3032,7 @@ else boot();
   initMIDI();
 
 
+
 /* --- WEB MIDI INTEGRATION MODULE --- */
 const GM_INSTRUMENT_NAMES = [
   "0: Acoustic Grand Piano", "1: Bright Acoustic Piano", "2: Electric Grand Piano", "3: Honky-tonk Piano",
@@ -3053,12 +3057,16 @@ const GM_INSTRUMENT_NAMES = [
 const MIDI_VOICE_NAMES = ["Melody", "Mid", "Bass"];
 
 function initMIDI() {
-  if (!navigator.requestMIDIAccess) {
-    const el = document.getElementById('midiStatus');
+  const el = document.getElementById('midiStatus');
+  if (!navigator || !navigator.requestMIDIAccess) {
     if (el) el.textContent = "Web MIDI API not supported in this browser.";
     return;
   }
-  navigator.requestMIDIAccess({ sysex: false }).then(onMIDISuccess, onMIDIFailure);
+  try {
+    navigator.requestMIDIAccess({ sysex: false }).then(onMIDISuccess, onMIDIFailure).catch(onMIDIFailure);
+  } catch(e) {
+    onMIDIFailure(e);
+  }
 }
 
 function onMIDISuccess(midiAccess) {
@@ -3071,13 +3079,22 @@ function onMIDISuccess(midiAccess) {
   bindMIDIControls();
 }
 
-function onMIDIFailure(msg) {
+function onMIDIFailure(err) {
   const el = document.getElementById('midiStatus');
-  if (el) el.textContent = "MIDI Access Failed: " + msg;
+  let msg = err && err.message ? err.message : String(err);
+  if (err && (err.name === 'InvalidStateError' || msg.includes('Initialization failed'))) {
+    msg = "MIDI subsystem unavailable on this platform/OS. (Web Audio active)";
+  } else if (err && (err.name === 'NotAllowedError' || msg.includes('Permission to use Web MIDI API was not granted'))) {
+    msg = "MIDI permission not granted or disallowed in headless mode. (Web Audio active)";
+  }
+  if (el) {
+    el.textContent = "Web MIDI: " + msg;
+    el.style.color = "#a0d8ff";
+  }
 }
 
 function updateMIDIDevices() {
-  if (!STATE.midi.access) return;
+  if (!STATE.midi || !STATE.midi.access) return;
   const inSel = document.getElementById('midiInputSelect');
   const outSel = document.getElementById('midiOutputSelect');
   if (!inSel || !outSel) return;
@@ -3112,7 +3129,7 @@ function updateMIDIDevices() {
 
 function attachMIDIInputListener() {
   const inSel = document.getElementById('midiInputSelect');
-  if (!inSel) return;
+  if (!inSel || !STATE.midi) return;
   if (STATE.midi.input) {
     STATE.midi.input.onmidimessage = null;
     STATE.midi.input = null;
@@ -3127,7 +3144,7 @@ function attachMIDIInputListener() {
 
 function attachMIDIOutputPort() {
   const outSel = document.getElementById('midiOutputSelect');
-  if (!outSel) return;
+  if (!outSel || !STATE.midi) return;
   if (outSel.value && STATE.midi.access) {
     STATE.midi.output = STATE.midi.access.outputs.get(outSel.value);
     for (let v = 0; v < STATE.midi.voices.length; v++) {
@@ -3139,6 +3156,7 @@ function attachMIDIOutputPort() {
 }
 
 function handleMIDIMessage(event) {
+  if (!STATE.midi) return;
   const data = event.data;
   const status = data[0];
 
@@ -3150,8 +3168,8 @@ function handleMIDIMessage(event) {
       const bpm = Math.round(60000 / (delta * 24));
       if (bpm >= 30 && bpm <= 300) {
         STATE.tempo = bpm;
-        const tempoVal = document.getElementById('tempoNum');
-        const tempoSlider = document.getElementById('tempo');
+        const tempoVal = document.getElementById('tempoVal') || document.getElementById('tempoNum');
+        const tempoSlider = document.getElementById('tempoSlider') || document.getElementById('tempo');
         if (tempoVal) tempoVal.textContent = bpm;
         if (tempoSlider) tempoSlider.value = bpm;
       }
@@ -3163,27 +3181,38 @@ function handleMIDIMessage(event) {
     if (STATE.midi.clockCount >= clocksPerStep) {
       STATE.midi.clockCount = 0;
       if (STATE.playing && STATE.composed) {
-        const audioCtx = STATE.audio ? STATE.audio.ctx : null;
+        const audioCtx = STATE.audioCtx || (STATE.audio ? STATE.audio.ctx : null);
         const curTime = audioCtx ? audioCtx.currentTime : 0;
-        scheduleStep(STATE.step, curTime);
-        STATE.step = (STATE.step + 1) % (STATE.composed.total || STATE.composed.totalSteps);
+        if (typeof scheduleStepAudio === 'function') {
+          scheduleStepAudio(STATE.currentStep, curTime);
+          STATE.currentStep = (STATE.currentStep + 1) % STATE.composed.totalSteps;
+        } else if (typeof scheduleStep === 'function') {
+          scheduleStep(STATE.step, curTime);
+          STATE.step = (STATE.step + 1) % (STATE.composed.total || STATE.composed.totalSteps);
+        }
       }
     }
   } else if (status === 0xFA || status === 0xFB) { // Start or Continue
     if (STATE.midi.syncClock) {
       STATE.midi.clockCount = 0;
       STATE.midi.lastClockTime = 0;
-      if (!STATE.playing) play();
+      if (!STATE.playing) {
+        if (typeof startPlayback === 'function') startPlayback();
+        else if (typeof play === 'function') play();
+      }
     }
   } else if (status === 0xFC) { // Stop
     if (STATE.midi.syncClock) {
-      if (STATE.playing) stop();
+      if (STATE.playing) {
+        if (typeof stopPlayback === 'function') stopPlayback();
+        else if (typeof stop === 'function') stop();
+      }
     }
   }
 }
 
 function sendMIDIProgramChange(voiceIndex) {
-  if (!STATE.midi.output) return;
+  if (!STATE.midi || !STATE.midi.output) return;
   const vConfig = STATE.midi.voices[voiceIndex];
   if (!vConfig) return;
   const ch = (vConfig.channel - 1) & 0x0F;
@@ -3194,7 +3223,7 @@ function sendMIDIProgramChange(voiceIndex) {
 }
 
 function sendMIDINote(voiceIndex, midiPitch, startTime, durSec) {
-  if (!STATE.midi.output) return;
+  if (!STATE.midi || !STATE.midi.output) return;
   const vConfig = STATE.midi.voices[voiceIndex];
   if (!vConfig || !vConfig.enabled) return;
 
@@ -3202,7 +3231,7 @@ function sendMIDINote(voiceIndex, midiPitch, startTime, durSec) {
   const pitch = Math.max(0, Math.min(127, Math.round(midiPitch)));
   const vel = 100;
 
-  const ctx = STATE.audio ? STATE.audio.ctx : null;
+  const ctx = STATE.audioCtx || (STATE.audio ? STATE.audio.ctx : null);
   let noteOnDelayMs = 0;
   if (ctx && startTime > ctx.currentTime) {
     noteOnDelayMs = (startTime - ctx.currentTime) * 1000;
@@ -3227,7 +3256,7 @@ function sendMIDINote(voiceIndex, midiPitch, startTime, durSec) {
 
 function renderMIDIVoiceTable() {
   const tbody = document.getElementById('midiVoicesTbody');
-  if (!tbody) return;
+  if (!tbody || !STATE.midi) return;
   tbody.innerHTML = '';
 
   STATE.midi.voices.forEach((vConfig, i) => {
@@ -3295,12 +3324,10 @@ function bindMIDIControls() {
   const chkSync = document.getElementById('chkMidiSync');
   if (chkSync) {
     chkSync.addEventListener('change', (e) => {
-      STATE.midi.syncClock = e.target.checked;
+      if (STATE.midi) STATE.midi.syncClock = e.target.checked;
     });
   }
 }
-
-
 })();
 </script>
 </body>

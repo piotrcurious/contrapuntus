@@ -236,10 +236,26 @@
         <div class="slidewrap"><input type="range" id="lambdaChordSlider" min="0" max="100" value="38"><span class="val" id="lambdaChordVal">38</span></div></div>
       <div class="field"><label class="field-label" for="lambdaVoiceSlider">λ — voice rule (counterpoint)</label>
         <div class="slidewrap"><input type="range" id="lambdaVoiceSlider" min="0" max="100" value="46"><span class="val" id="lambdaVoiceVal">46</span></div></div>
-      <div class="field"><label class="field-label" for="envAttackSlider">Attack (ms)</label>
-        <div class="slidewrap"><input type="range" id="envAttackSlider" min="2" max="100" value="20"><span class="val" id="envAttackVal">20</span></div></div>
-      <div class="field"><label class="field-label" for="envReleaseSlider">Release (ms)</label>
-        <div class="slidewrap"><input type="range" id="envReleaseSlider" min="10" max="800" value="250"><span class="val" id="envReleaseVal">250</span></div></div>
+            <div class="field">
+        <label class="field-label" for="envPeakSlider">Peak Magnitude (Vol %)</label>
+        <div class="slidewrap"><input type="range" id="envPeakSlider" min="0" max="100" value="85"><span class="val" id="envPeakVal">85</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envAttackSlider">Attack (ms)</label>
+        <div class="slidewrap"><input type="range" id="envAttackSlider" min="2" max="200" value="20"><span class="val" id="envAttackVal">20</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envDecaySlider">Decay (ms)</label>
+        <div class="slidewrap"><input type="range" id="envDecaySlider" min="10" max="500" value="150"><span class="val" id="envDecayVal">150</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envSustainSlider">Sustain Level (%)</label>
+        <div class="slidewrap"><input type="range" id="envSustainSlider" min="0" max="100" value="70"><span class="val" id="envSustainVal">70</span></div>
+      </div>
+      <div class="field">
+        <label class="field-label" for="envReleaseSlider">Release (ms)</label>
+        <div class="slidewrap"><input type="range" id="envReleaseSlider" min="10" max="800" value="250"><span class="val" id="envReleaseVal">250</span></div>
+      </div></div>
       <p class="hint" style="margin-top:8px">λ = fraction of the rule table set to "legal" — low λ freezes the walk into short loops, high λ opens it toward chaos. See the sweep below.</p>
     </div>
 
@@ -572,7 +588,7 @@ const STATE = window.STATE = {
   ruleChordOverrides:{},   // "d,tau" -> 0|1
   ruleVoiceOverrides:{},   // "k,mu,phi" -> 0|1
   secondaryDominants:false, walkingBass:false, arpVoice1:'none',
-  envAttack:0.02, envDecay:0.15, envSustain:0.7, envRelease:0.25,
+  envPeak:0.85, envAttack:0.02, envDecay:0.15, envSustain:0.7, envRelease:0.25,
   barOverrides:{}, selectedBars:[],
   onsetGrid:null, seedNotes:{},
   refLifeW:16, refLifeH:10, refLifeGrid:null,
@@ -1520,7 +1536,7 @@ function playNote(voiceIndex, midi, startTime, dur){
   filter.Q.value=1.1;
 
   const env=ctx.createGain();
-  const peak=0.85;
+  const peak = STATE.envPeak != null ? STATE.envPeak : 0.85;
   const atk=Math.min(STATE.envAttack || 0.02, dur*0.3);
   const dec=Math.min(STATE.envDecay || 0.15, dur*0.3);
   const susLevel=peak * (STATE.envSustain != null ? STATE.envSustain : 0.7);
@@ -1938,8 +1954,11 @@ function bindControls(){
   bindSlider('tensionSlider','tensionVal', v=>STATE.globalTension=v/100);
   bindSlider('lambdaChordSlider','lambdaChordVal', v=>STATE.lambdaChord=v/100);
   bindSlider('lambdaVoiceSlider','lambdaVoiceVal', v=>STATE.lambdaVoice=v/100);
-  bindSlider('envAttackSlider','envAttackVal', v=>STATE.envAttack=v/1000);
-  bindSlider('envReleaseSlider','envReleaseVal', v=>STATE.envRelease=v/1000);
+    bindSlider('envPeakSlider','envPeakVal', v=>STATE.envPeak=v/100, Number);
+  bindSlider('envAttackSlider','envAttackVal', v=>STATE.envAttack=v/1000, Number);
+  bindSlider('envDecaySlider','envDecayVal', v=>STATE.envDecay=v/1000, Number);
+  bindSlider('envSustainSlider','envSustainVal', v=>STATE.envSustain=v/100, Number);
+  bindSlider('envReleaseSlider','envReleaseVal', v=>STATE.envRelease=v/1000, Number);
 
   document.getElementById('chkSecondaryDom').addEventListener('change', (e)=>{ STATE.secondaryDominants=e.target.checked; regenerateAndRender(); });
   document.getElementById('chkWalkingBass').addEventListener('change', (e)=>{ STATE.walkingBass=e.target.checked; regenerateAndRender(); });
@@ -2012,6 +2031,7 @@ function init(){
 if(document.readyState==='loading'){ document.addEventListener('DOMContentLoaded', init); } else { init(); }
 
 
+
 /* --- WEB MIDI INTEGRATION MODULE --- */
 const GM_INSTRUMENT_NAMES = [
   "0: Acoustic Grand Piano", "1: Bright Acoustic Piano", "2: Electric Grand Piano", "3: Honky-tonk Piano",
@@ -2036,12 +2056,16 @@ const GM_INSTRUMENT_NAMES = [
 const MIDI_VOICE_NAMES = ["Melody", "Mid", "Bass"];
 
 function initMIDI() {
-  if (!navigator.requestMIDIAccess) {
-    const el = document.getElementById('midiStatus');
+  const el = document.getElementById('midiStatus');
+  if (!navigator || !navigator.requestMIDIAccess) {
     if (el) el.textContent = "Web MIDI API not supported in this browser.";
     return;
   }
-  navigator.requestMIDIAccess({ sysex: false }).then(onMIDISuccess, onMIDIFailure);
+  try {
+    navigator.requestMIDIAccess({ sysex: false }).then(onMIDISuccess, onMIDIFailure).catch(onMIDIFailure);
+  } catch(e) {
+    onMIDIFailure(e);
+  }
 }
 
 function onMIDISuccess(midiAccess) {
@@ -2054,13 +2078,22 @@ function onMIDISuccess(midiAccess) {
   bindMIDIControls();
 }
 
-function onMIDIFailure(msg) {
+function onMIDIFailure(err) {
   const el = document.getElementById('midiStatus');
-  if (el) el.textContent = "MIDI Access Failed: " + msg;
+  let msg = err && err.message ? err.message : String(err);
+  if (err && (err.name === 'InvalidStateError' || msg.includes('Initialization failed'))) {
+    msg = "MIDI subsystem unavailable on this platform/OS. (Web Audio active)";
+  } else if (err && (err.name === 'NotAllowedError' || msg.includes('Permission to use Web MIDI API was not granted'))) {
+    msg = "MIDI permission not granted or disallowed in headless mode. (Web Audio active)";
+  }
+  if (el) {
+    el.textContent = "Web MIDI: " + msg;
+    el.style.color = "#a0d8ff";
+  }
 }
 
 function updateMIDIDevices() {
-  if (!STATE.midi.access) return;
+  if (!STATE.midi || !STATE.midi.access) return;
   const inSel = document.getElementById('midiInputSelect');
   const outSel = document.getElementById('midiOutputSelect');
   if (!inSel || !outSel) return;
@@ -2095,7 +2128,7 @@ function updateMIDIDevices() {
 
 function attachMIDIInputListener() {
   const inSel = document.getElementById('midiInputSelect');
-  if (!inSel) return;
+  if (!inSel || !STATE.midi) return;
   if (STATE.midi.input) {
     STATE.midi.input.onmidimessage = null;
     STATE.midi.input = null;
@@ -2110,7 +2143,7 @@ function attachMIDIInputListener() {
 
 function attachMIDIOutputPort() {
   const outSel = document.getElementById('midiOutputSelect');
-  if (!outSel) return;
+  if (!outSel || !STATE.midi) return;
   if (outSel.value && STATE.midi.access) {
     STATE.midi.output = STATE.midi.access.outputs.get(outSel.value);
     for (let v = 0; v < STATE.midi.voices.length; v++) {
@@ -2122,6 +2155,7 @@ function attachMIDIOutputPort() {
 }
 
 function handleMIDIMessage(event) {
+  if (!STATE.midi) return;
   const data = event.data;
   const status = data[0];
 
@@ -2177,7 +2211,7 @@ function handleMIDIMessage(event) {
 }
 
 function sendMIDIProgramChange(voiceIndex) {
-  if (!STATE.midi.output) return;
+  if (!STATE.midi || !STATE.midi.output) return;
   const vConfig = STATE.midi.voices[voiceIndex];
   if (!vConfig) return;
   const ch = (vConfig.channel - 1) & 0x0F;
@@ -2188,7 +2222,7 @@ function sendMIDIProgramChange(voiceIndex) {
 }
 
 function sendMIDINote(voiceIndex, midiPitch, startTime, durSec) {
-  if (!STATE.midi.output) return;
+  if (!STATE.midi || !STATE.midi.output) return;
   const vConfig = STATE.midi.voices[voiceIndex];
   if (!vConfig || !vConfig.enabled) return;
 
@@ -2221,7 +2255,7 @@ function sendMIDINote(voiceIndex, midiPitch, startTime, durSec) {
 
 function renderMIDIVoiceTable() {
   const tbody = document.getElementById('midiVoicesTbody');
-  if (!tbody) return;
+  if (!tbody || !STATE.midi) return;
   tbody.innerHTML = '';
 
   STATE.midi.voices.forEach((vConfig, i) => {
@@ -2289,12 +2323,10 @@ function bindMIDIControls() {
   const chkSync = document.getElementById('chkMidiSync');
   if (chkSync) {
     chkSync.addEventListener('change', (e) => {
-      STATE.midi.syncClock = e.target.checked;
+      if (STATE.midi) STATE.midi.syncClock = e.target.checked;
     });
   }
 }
-
-
 })();
 </script>
 </body>
