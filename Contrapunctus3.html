@@ -548,25 +548,35 @@ const CHORD_TEMPLATES = {
 };
 const ROMAN = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'];
 
-function midiToFreq(m){ return 440*Math.pow(2,(m-69)/12); }
-function midiName(m){ const pc=((Math.round(m)%12)+12)%12; return NOTE_NAMES[pc]+(Math.floor(m/12)-1); }
-function pcOf(x){ return ((Math.round(x)%12)+12)%12; }
+const EDO = 12; // Parameterized Equal Division of the Octave (12 for 12-TET, 24 for 24-TET, etc.)
+
+function midiToFreq(m){ return 440*Math.pow(2,(m-69)/EDO); }
+function midiName(m){ const pc=((Math.round(m)%EDO)+EDO)%EDO; return NOTE_NAMES[pc] ? (NOTE_NAMES[pc]+(Math.floor(m/12)-1)) : (pc.toFixed(1)+(Math.floor(m/12)-1)); }
+function pcOf(x){ return ((x % EDO) + EDO) % EDO; }
 function clamp01(x){ return x<0?0:x>1?1:x; }
-function ic(x){ const s=((Math.round(x)%12)+12)%12; return Math.min(s,12-s); }
+function ic(x){ const s=((x % EDO) + EDO) % EDO; return Math.min(s, EDO - s); }
 
 const CONSONANCE_BY_IC = [1.0,0.05,0.25,0.65,0.75,0.9,0.15];
-const CONSONANT_ICS = new Set([0,3,4,5]);
+const CONSONANT_ICS = new Set([0, Math.round(3*EDO/12), Math.round(4*EDO/12), Math.round(5*EDO/12)]);
+
+function consonanceOfIC(d) {
+  const st = Math.min(6, Math.max(0, d * (12 / EDO)));
+  const i = Math.floor(st);
+  if (i >= 6) return CONSONANCE_BY_IC[6];
+  const frac = st - i;
+  return (1 - frac) * CONSONANCE_BY_IC[i] + frac * CONSONANCE_BY_IC[i + 1];
+}
 
 function chordTension(tones){
   const pcs=[...new Set(tones.map(pcOf))];
   if(pcs.length<2) return 0;
   let sum=0,n=0;
-  for(let i=0;i<pcs.length;i++) for(let j=i+1;j<pcs.length;j++){ sum += 1-CONSONANCE_BY_IC[ic(pcs[j]-pcs[i])]; n++; }
+  for(let i=0;i<pcs.length;i++) for(let j=i+1;j<pcs.length;j++){ sum += 1-consonanceOfIC(ic(pcs[j]-pcs[i])); n++; }
   return sum/n;
 }
 function chordQuality(tones){
   const root=tones[0];
-  const iv=[...new Set(tones.map(t=>((t-root+120)%12)))].sort((a,b)=>a-b);
+  const iv=[...new Set(tones.map(t=>((t-root+120*EDO)%EDO)))].sort((a,b)=>a-b);
   return CHORD_TEMPLATES[iv.join(',')] || 'other';
 }
 function romanNumeral(degree, quality){
@@ -593,6 +603,7 @@ function annotate(c){
   c.quality = chordQuality(c.tones);
   if(c.applied==='dom') c.roman = 'V7/'+c.of;
   else if(c.applied==='lt') c.roman = 'vii\u00b07/'+c.of;
+  else if(c.applied==='borrowed') c.roman = 'b' + romanNumeral(c.degree, c.quality);
   else c.roman = romanNumeral(c.degree, c.quality);
   c.tensionVal = chordTension(c.tones);
   c.key = c.rootPc+':'+c.quality+':'+(c.applied||'-');
@@ -621,6 +632,18 @@ function buildExtended(rootPc, steps){
     const l=(t.rootPc+11)%12;
     add(annotate({degree:-1, rootPc:l, tones:[l,(l+3)%12,(l+6)%12,(l+9)%12], applied:'lt', of:t.roman, ring:2}));
   }
+
+  // Add Modal Mixture (Borrowing from parallel minor)
+  const parallelMinorSteps = SCALES.Aeolian;
+  const borrowed = buildDiatonic(rootPc, parallelMinorSteps);
+  for(const b of borrowed) {
+    if (b.degree === 2 || b.degree === 3 || b.degree === 5 || b.degree === 6) {
+      b.applied = 'borrowed';
+      b.ring = 1;
+      add(annotate(b));
+    }
+  }
+
   out.forEach((c,i)=>{ c.idx=i; if(c.ring==null) c.ring=0; });
   return out;
 }
@@ -1041,12 +1064,17 @@ function relativeMotion(delta, others){
 }
 function filterParallels(cands, prevPitch, others){
   if(!others.length || prevPitch==null) return cands;
+  const octave = 0;
+  const fifth = Math.round(7 * EDO / 12) % EDO;
   const f = cands.filter(c=>{
     for(const o of others){
       if(o.pitch==null||o.prevPitch==null) continue;
-      const before=ic(prevPitch-o.prevPitch), after=ic(c-o.pitch);
-      const mine=c-prevPitch, theirs=o.pitch-o.prevPitch;
-      if(mine!==0 && theirs!==0 && Math.sign(mine)===Math.sign(theirs) && before===after && (after===0||after===5)) return false;
+      const before = ((Math.abs(prevPitch - o.prevPitch)) % EDO + EDO) % EDO;
+      const after = ((Math.abs(c - o.pitch)) % EDO + EDO) % EDO;
+      const mine = c - prevPitch, theirs = o.pitch - o.prevPitch;
+      if(mine!==0 && theirs!==0 && Math.sign(mine)===Math.sign(theirs)){
+        if(before === after && (after === octave || after === fifth)) return false;
+      }
     }
     return true;
   });
