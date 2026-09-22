@@ -441,11 +441,22 @@ const ROMAN_BASE = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII
 
 function midiToFreq(m){ return 440*Math.pow(2,(m-69)/12); }
 function midiToName(m){ const pc=((Math.round(m)%12)+12)%12; return NOTE_NAMES[pc]+(Math.floor(m/12)-1); }
-function pcOf(x){ return ((Math.round(x)%12)+12)%12; }
-function clamp01(x){ return Math.max(0,Math.min(1,x)); }
-function intervalClass(x){ const s=((Math.round(x)%12)+12)%12; return Math.min(s,12-s); }
+const EDO = 12;
 
-const CONSONANCE_BY_IC = [1.0,0.05,0.25,0.65,0.75,0.9,0.15];
+function pcOf(x){ return ((x % EDO) + EDO) % EDO; }
+function clamp01(x){ return Math.max(0,Math.min(1,x)); }
+function intervalClass(x){ const s=((x % EDO) + EDO) % EDO; return Math.min(s, EDO - s); }
+
+const CONSONANCE_BY_IC = [1.0, 0.05, 0.25, 0.65, 0.75, 0.9, 0.15];
+
+function consonanceOfIC(d) {
+  if (d <= 0) return CONSONANCE_BY_IC[0];
+  if (d >= 6) return CONSONANCE_BY_IC[6];
+  const idx = Math.floor(d);
+  const frac = d - idx;
+  if (idx >= 6) return CONSONANCE_BY_IC[6];
+  return CONSONANCE_BY_IC[idx] * (1 - frac) + CONSONANCE_BY_IC[idx + 1] * frac;
+}
 
 function chordTension(tones){
   const pcs=[...new Set(tones.map(pcOf))];
@@ -453,7 +464,7 @@ function chordTension(tones){
   let sum=0,count=0;
   for(let i=0;i<pcs.length;i++) for(let j=i+1;j<pcs.length;j++){
     const ic=intervalClass(pcs[j]-pcs[i]);
-    sum += 1-CONSONANCE_BY_IC[ic]; count++;
+    sum += 1 - consonanceOfIC(ic); count++;
   }
   return sum/count;
 }
@@ -512,16 +523,29 @@ function buildExtendedVocabulary(rootPc, scaleSteps){
   }
   for(const target of diatonic){
     if(target.degree!==0){
-      const domRootPc=(target.rootPc+7)%12;
-      const domTones=[domRootPc,(domRootPc+4)%12,(domRootPc+7)%12,(domRootPc+10)%12];
+      const domRootPc=(target.rootPc+7)%EDO;
+      const domTones=[domRootPc,(domRootPc+4)%EDO,(domRootPc+7)%EDO,(domRootPc+10)%EDO];
       const dom={degree:-1, rootPc:domRootPc, tones:domTones, isSecondaryDominant:true, resolvesToRoman:target.roman, ring:1};
       annotateChord(dom); tryAdd(dom);
     }
-    const ltRootPc=(target.rootPc+11)%12;
-    const ltTones=[ltRootPc,(ltRootPc+3)%12,(ltRootPc+6)%12,(ltRootPc+9)%12];
+    const ltRootPc=(target.rootPc+11)%EDO;
+    const ltTones=[ltRootPc,(ltRootPc+3)%EDO,(ltRootPc+6)%EDO,(ltRootPc+9)%EDO];
     const lt={degree:-1, rootPc:ltRootPc, tones:ltTones, isSecondaryLeadingTone:true, resolvesToRoman:target.roman, ring:2};
     annotateChord(lt); tryAdd(lt);
   }
+
+  // Borrowed chords from parallel minor (Aeolian)
+  const parallelMinorSteps = SCALES.Aeolian || [0,2,3,5,7,8,10];
+  const borrowed = buildDiatonicChords(rootPc, parallelMinorSteps);
+  for(const b of borrowed) {
+    if (b.degree === 1 || b.degree === 2 || b.degree === 4 || b.degree === 5) {
+      b.applied = 'borrowed';
+      b.roman = 'b' + romanNumeral(b.degree, b.quality);
+      b.ring = 1;
+      tryAdd(b);
+    }
+  }
+
   for(const c of out) if(c.ring==null) c.ring=0;
   return out;
 }
@@ -767,10 +791,15 @@ function filterParallels(candidates, ctx){
   const filtered = candidates.filter(cand=>{
     for(const ov of ctx.otherVoicesAtThisStep){
       if(ov.pitch==null || ov.prevPitch==null) continue;
-      const prevIc=intervalClass(ctx.prevPitch-ov.prevPitch), newIc=intervalClass(cand-ov.pitch);
-      const candMotion=cand-ctx.prevPitch, ovMotion=ov.pitch-ov.prevPitch;
-      const sameDir = candMotion!==0 && ovMotion!==0 && Math.sign(candMotion)===Math.sign(ovMotion);
-      if(sameDir && prevIc===newIc && (newIc===0||newIc===5)) return false;
+      const mine = cand - ctx.prevPitch;
+      const theirs = ov.pitch - ov.prevPitch;
+      if (mine !== 0 && theirs !== 0 && Math.sign(mine) === Math.sign(theirs)) {
+        const before = ((ctx.prevPitch - ov.prevPitch) % EDO + EDO) % EDO;
+        const after = ((cand - ov.pitch) % EDO + EDO) % EDO;
+        if (before === after && (after === 0 || after === 7)) {
+          return false;
+        }
+      }
     }
     return true;
   });
