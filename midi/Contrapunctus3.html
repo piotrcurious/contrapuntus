@@ -2881,20 +2881,20 @@ function bindControls(){
   $('btnEnvVoice').addEventListener('click', ()=>{
     const nt=envTarget(); if(!nt) return;
     const base=STATE.voiceEnv[nt.v];
-    base.a=nt.e.a; base.d=nt.e.d; base.s=nt.e.s; base.r=nt.e.r;
+    base.p=(nt.e.p!=null?nt.e.p:1.0); base.a=nt.e.a; base.d=nt.e.d; base.s=nt.e.s; base.r=nt.e.r;
     base.gateRatio=Math.max(0.02, nt.e.gate/Math.max(1,nt.span));
     for(const k of Object.keys(STATE.noteEnv)) if(k.startsWith(nt.v+':')) delete STATE.noteEnv[k];
-    regenerate();
+    refreshNotes(); regenerate(); drawEnv();
   });
   $('btnEnvAll').addEventListener('click', ()=>{
     const nt=envTarget(); if(!nt) return;
     for(let v=0;v<3;v++){
       const base=STATE.voiceEnv[v];
-      base.a=nt.e.a; base.d=nt.e.d; base.s=nt.e.s; base.r=nt.e.r;
+      base.p=(nt.e.p!=null?nt.e.p:1.0); base.a=nt.e.a; base.d=nt.e.d; base.s=nt.e.s; base.r=nt.e.r;
       base.gateRatio=Math.max(0.02, nt.e.gate/Math.max(1,nt.span));
     }
     STATE.noteEnv={};
-    regenerate();
+    refreshNotes(); regenerate(); drawEnv();
   });
   $('btnEnvReset').addEventListener('click', ()=>{
     const n=STATE.selectedNote; if(!n) return;
