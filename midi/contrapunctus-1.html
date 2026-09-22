@@ -732,8 +732,8 @@ function filterParallels(candidates, ctx){
       const mine = cand - ctx.prevPitch;
       const theirs = ov.pitch - ov.prevPitch;
       if (mine !== 0 && theirs !== 0 && Math.sign(mine) === Math.sign(theirs)) {
-        const before = ((ctx.prevPitch - ov.prevPitch) % EDO + EDO) % EDO;
-        const after = ((cand - ov.pitch) % EDO + EDO) % EDO;
+        const before = ((Math.abs(ctx.prevPitch - ov.prevPitch)) % EDO + EDO) % EDO;
+        const after = ((Math.abs(cand - ov.pitch)) % EDO + EDO) % EDO;
         if (before === after && (after === 0 || after === 7)) {
           return false;
         }
