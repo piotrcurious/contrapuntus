@@ -2129,12 +2129,12 @@ function drawEnv(){
   g.strokeStyle=css(THEME.faint,0.5); g.lineWidth=1;
   g.beginPath(); g.moveTo(ENV.pad.l, Y(0)+0.5); g.lineTo(w-ENV.pad.r, Y(0)+0.5); g.stroke();
   const handles=[
-    {id:'p', x:X(e.a), y:Y(pk)},
-    {id:'a', x:X(e.a), y:Y(pk)},
-    {id:'d', x:X(e.a+e.d), y:Y(e.s*pk)},
-    {id:'s', x:X((e.a+e.d+Math.max(e.a+e.d,off))/2), y:Y(e.s*pk)},
-    {id:'gate', x:X(off), y:ENV.pad.t+10},
-    {id:'r', x:X(Math.max(e.a+e.d,off)+e.r), y:Y(0)},
+    {id:'a', x:X(e.a), y:Y(0)}, // attack time handle at baseline
+    {id:'p', x:X(e.a), y:Y(pk)}, // peak volume magnitude handle at top of attack
+    {id:'d', x:X(e.a+e.d), y:Y(e.s*pk)}, // decay time handle at sustain start
+    {id:'s', x:X((e.a+e.d+Math.max(e.a+e.d,off))/2), y:Y(e.s*pk)}, // sustain level handle along sustain stage
+    {id:'gate', x:X(off), y:ENV.pad.t+10}, // gate / note-off handle
+    {id:'r', x:X(Math.max(e.a+e.d,off)+e.r), y:Y(0)}, // release time handle at end
   ];
   for(const hd of handles){
     g.beginPath(); g.arc(hd.x,hd.y,4.6,0,7);
@@ -2176,14 +2176,24 @@ function envDrag(id, mx, my){
   const e=nt.e;
   const key=nt.v+':'+nt.step;
   const cur=Object.assign({}, STATE.noteEnv[key]||{});
-  if(id==='p') cur.p=amp;
-  else if(id==='a') { cur.a=Math.min(1.2, Math.max(0.002, t)); cur.p=amp; }
-  else if(id==='d') cur.d=Math.min(2, Math.max(0.005, t-(cur.a!=null?cur.a:e.a)));
-  else if(id==='s') cur.s=amp / (e.p != null && e.p > 0 ? e.p : 1.0);
-  else if(id==='gate') cur.gate=Math.min(32, Math.max(0.03, t/sps));
-  else if(id==='r'){
-    const off=(cur.gate!=null?cur.gate:e.gate)*sps;
-    cur.r=Math.min(4, Math.max(0.01, t-Math.max((cur.a!=null?cur.a:e.a)+(cur.d!=null?cur.d:e.d), off)));
+  if(id==='p') {
+    cur.p = amp;
+  } else if(id==='a') {
+    cur.a = Math.min(1.2, Math.max(0.002, t));
+  } else if(id==='d') {
+    const curA = cur.a != null ? cur.a : e.a;
+    cur.d = Math.min(2, Math.max(0.005, t - curA));
+  } else if(id==='s') {
+    const curP = cur.p != null ? cur.p : (e.p != null ? e.p : 1.0);
+    cur.s = clamp01(amp / (curP > 0 ? curP : 1.0));
+  } else if(id==='gate') {
+    cur.gate = Math.min(32, Math.max(0.03, t / sps));
+  } else if(id==='r') {
+    const curA = cur.a != null ? cur.a : e.a;
+    const curD = cur.d != null ? cur.d : e.d;
+    const curGate = cur.gate != null ? cur.gate : e.gate;
+    const off = curGate * sps;
+    cur.r = Math.min(4, Math.max(0.01, t - Math.max(curA + curD, off)));
   }
   STATE.noteEnv[key]=cur;
   refreshNotes();
