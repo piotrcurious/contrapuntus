@@ -1666,8 +1666,9 @@ function buildNotes(c){
       const p=c.pitches[v][s]; if(p==null) continue;
       const span=Math.max(1, nextOn[s]-s);
       const o=STATE.noteEnv[v+':'+s];
-      const e={a:base.a, d:base.d, s:base.s, r:base.r, gate:span*base.gateRatio, custom:false};
-      if(o){ for(const k of ['a','d','s','r','gate']) if(o[k]!=null){ e[k]=o[k]; e.custom=true; } }
+      const e={p:base.p!=null?base.p:1.0, a:base.a, d:base.d, s:base.s, r:base.r, gate:span*base.gateRatio, custom:false};
+      if(o){ for(const k of ['p','a','d','s','r','gate']) if(o[k]!=null){ e[k]=o[k]; e.custom=true; } }
+      e.p = e.p != null ? e.p : 1.0;
       e.gate=Math.max(0.03,e.gate);
       notes[v].push({v, step:s, pitch:p, e, span, tailSteps:e.r/sps,
         deco:c.deco[v][s], fell:c.fell[v][s], anchored: v===0 && STATE.anchors[s]!=null});

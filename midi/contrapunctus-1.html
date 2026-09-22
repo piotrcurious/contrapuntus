@@ -1415,11 +1415,18 @@ function playNote(voiceIndex, midi, startTime, dur){
   filter.frequency.linearRampToValueAtTime(Math.max(200,baseCut*0.5), startTime+Math.max(0.05,dur*0.9));
   filter.Q.value=1.1;
   const env=ctx.createGain();
-  const peak=0.85, atk=0.012, rel=Math.min(0.28,dur*0.4);
-  env.gain.setValueAtTime(0.0001,startTime);
-  env.gain.linearRampToValueAtTime(peak, startTime+atk);
-  env.gain.setValueAtTime(peak, startTime+Math.max(atk,dur-rel));
-  env.gain.linearRampToValueAtTime(0.0001, startTime+dur);
+  const peak = STATE.envPeak != null ? STATE.envPeak : 0.85;
+  const atk = Math.min(STATE.envAttack || 0.02, dur*0.3);
+  const dec = Math.min(STATE.envDecay || 0.15, dur*0.3);
+  const susLevel = peak * (STATE.envSustain != null ? STATE.envSustain : 0.7);
+  const rel = Math.min(STATE.envRelease || 0.25, 0.8);
+  const noteOffTime = startTime + Math.max(atk + dec, dur * 0.95);
+
+  env.gain.setValueAtTime(0.0001, startTime);
+  env.gain.linearRampToValueAtTime(peak, startTime + atk);
+  env.gain.linearRampToValueAtTime(susLevel, startTime + atk + dec);
+  env.gain.setValueAtTime(susLevel, noteOffTime);
+  env.gain.linearRampToValueAtTime(0.0001, noteOffTime + rel);
   osc.connect(oscGain); osc2.connect(osc2Gain);
   oscGain.connect(filter); osc2Gain.connect(filter);
   filter.connect(env);
