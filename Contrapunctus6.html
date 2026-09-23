@@ -702,10 +702,11 @@ class KuramotoOscillatorNetwork {
 
 const GLOBAL_KURAMOTO_NETWORK = new KuramotoOscillatorNetwork();
 
-function calculatePhaseEntrainmentIndex(stepIndex) {
-  GLOBAL_KURAMOTO_NETWORK.step(0.05);
+function calculatePhaseEntrainmentIndex(stepIndex, advance) {
+  if (advance === true) {
+    GLOBAL_KURAMOTO_NETWORK.step(0.05);
+  }
   const R = GLOBAL_KURAMOTO_NETWORK.getPhaseCouplingIndex();
-  // Groove metric: optimal syncopation threshold is R ~ 0.65 - 0.85
   const idealGrooveThreshold = 0.75;
   const entrainmentError = Math.abs(R - idealGrooveThreshold);
   return { R, entrainmentError };
@@ -810,14 +811,22 @@ function calculateEmbodiedDynamicsFriction(voicePitches, prevPitches, cw) {
 // S4: Bayesian Prediction Error (Syntactic surprise)
 // S5: Kuramoto Phase Alignment (Rhythmic entrainment)
 
+const TENSOR_MEMO_CACHE = new Map();
 function evaluateMusicalStateTensor(voicePitches, prevPitches) {
+  const key = (voicePitches?voicePitches.join(','):'') + '|' + (prevPitches?prevPitches.join(','):'');
+  let hit = TENSOR_MEMO_CACHE.get(key);
+  if (hit) return hit;
+
   const S1 = calculatePlompLeveltRoughness(voicePitches);
   const S2 = calculateTemplateMatchingError(voicePitches);
   const S3 = calculateStreamFusion(voicePitches, prevPitches);
   const S4 = calculatePredictiveSurprise(voicePitches);
-  const S5 = calculatePhaseEntrainmentIndex().entrainmentError;
+  const S5 = calculatePhaseEntrainmentIndex(null, false).entrainmentError;
 
-  return [S1, S2, S3, S4, S5]; // 5D Coordinate Vector in Phase Space
+  const res = [S1, S2, S3, S4, S5];
+  if (TENSOR_MEMO_CACHE.size > 1024) TENSOR_MEMO_CACHE.clear();
+  TENSOR_MEMO_CACHE.set(key, res);
+  return res;
 }
 
 function calculatePlompLeveltRoughness(pitches) {
@@ -838,28 +847,41 @@ function calculatePlompLeveltRoughness(pitches) {
 // 2. PARETO FRONTIER NAVIGATION (Pruning Dominated Options)
 // A candidate A dominates B if A is <= B on all axes and strictly < B on at least one axis.
 function isParetoDominated(vectorA, vectorB) {
-  let strictlyBetterInOne = false;
+  // Returns true if vectorA is dominated by vectorB (B is <= A on all axes and strictly < A on at least one)
+  let B_is_strictly_better = false;
   for (let i = 0; i < vectorA.length; i++) {
-    if (vectorA[i] > vectorB[i]) return false; // A is worse than B on axis i
-    if (vectorA[i] < vectorB[i]) strictlyBetterInOne = true;
+    if (vectorB[i] > vectorA[i]) return false; // B is worse than A on axis i, so B cannot dominate A
+    if (vectorB[i] < vectorA[i]) B_is_strictly_better = true;
   }
-  return strictlyBetterInOne;
+  return B_is_strictly_better;
 }
 
 function computeParetoFrontier(candidates) {
   if (candidates.length <= 1) return candidates;
 
+  // Ensure all candidates have a valid 5D State Tensor
+  const prepared = candidates.map(c => {
+    if (!c.tensor) {
+      const pitches = c.c ? c.c.tones : (c.pitch ? [c.pitch] : [0]);
+      c.tensor = evaluateMusicalStateTensor(pitches, null);
+    }
+    return c;
+  });
+
   const frontier = [];
-  for (let i = 0; i < candidates.length; i++) {
+  for (let i = 0; i < prepared.length; i++) {
     let dominated = false;
-    for (let j = 0; j < candidates.length; j++) {
-      if (i !== j && isParetoDominated(candidates[j].tensor, candidates[i].length ? candidates[i] : candidates[i].tensor)) {
+    const tensorI = prepared[i].tensor;
+    for (let j = 0; j < prepared.length; j++) {
+      if (i === j) continue;
+      const tensorJ = prepared[j].tensor;
+      if (isParetoDominated(tensorI, tensorJ)) {
         dominated = true;
         break;
       }
     }
     if (!dominated) {
-      frontier.push(candidates[i]);
+      frontier.push(prepared[i]);
     }
   }
   return frontier.length > 0 ? frontier : candidates;
@@ -1366,19 +1388,13 @@ function tieBreak(current, prev2, costOf){
     if(ta!==tb) return ta-tb;
 
     // Evaluate Cognitive Friction (ASA Fusion + Predictive Surprise + Template Matching Error)
-    // Version 6: Compute 5D Musical State Tensor S and evaluate Pareto Optimization
-    const tensorA = evaluateMusicalStateTensor(a.c.tones, current.tones);
-    const tensorB = evaluateMusicalStateTensor(b.c.tones, current.tones);
-    a.tensor = tensorA;
-    b.tensor = tensorB;
-
-    if (isParetoDominated(tensorA, tensorB)) return -1;
-    if (isParetoDominated(tensorB, tensorA)) return 1;
-
-    const fA = calculateEmbodiedDynamicsFriction(a.c.tones, current.tones, cw);
-    const fB = calculateEmbodiedDynamicsFriction(b.c.tones, current.tones, cw);
-    if (Math.abs(fA.totalFriction - fB.totalFriction) > 0.01) {
-      return fA.totalFriction - fB.totalFriction;
+    // Version 6: Compute 5D Musical State Tensor S and evaluate total cost
+    a.friction = a.friction || calculateEmbodiedDynamicsFriction(a.c.tones, current.tones, cw);
+    b.friction = b.friction || calculateEmbodiedDynamicsFriction(b.c.tones, current.tones, cw);
+    a.tensor = a.tensor || evaluateMusicalStateTensor(a.c.tones, current.tones);
+    b.tensor = b.tensor || evaluateMusicalStateTensor(b.c.tones, current.tones);
+    if (Math.abs(a.friction.totalFriction - b.friction.totalFriction) > 0.01) {
+      return a.friction.totalFriction - b.friction.totalFriction;
     }
 
     const va=voiceLeadingDistance(current.tones,a.c.tones), vb=voiceLeadingDistance(current.tones,b.c.tones);
@@ -1414,8 +1430,23 @@ function chordStep(current, prev2, eta, tbl, vocab, target){
       cands.push({c, cost:tbl.costs[f], f});
     }
   }
+  if (!STATE.isBasinTraversal) {
+    const cw = STATE.cognitiveWeights || {};
+    for (let i = 0; i < cands.length; i++) {
+      const cand = cands[i];
+      if (typeof calculateEmbodiedDynamicsFriction !== 'undefined') {
+        cand.friction = calculateEmbodiedDynamicsFriction(cand.c.tones, current.tones, cw);
+      } else if (typeof calculateCognitiveFriction !== 'undefined') {
+        cand.f = calculateCognitiveFriction(cand.c.tones, current.tones, cw.W1, cw.W2, cw.W3);
+      }
+    }
+  }
   cands.sort(tieBreak(current, prev2));
-  return {legal:cands.map(x=>x.c), cands, fellBack};
+  const cw = STATE.cognitiveWeights || {};
+  const isV6Active = (cw.W1 > 0 || cw.W2 > 0 || cw.W3 > 0 || cw.W4 > 0 || cw.W5 > 0 || cw.W6 > 0);
+  const isSim = !!(STATE.isBasinTraversal || STATE.isSweep);
+  const paretoCands = (isV6Active && cands.length > 1 && !isSim) ? computeParetoFrontier(cands) : cands;
+  return {legal:paretoCands.map(x=>x.c), cands:paretoCands, fellBack};
 }
 
 function cellOfMove(from, to, target, eta){
@@ -1442,6 +1473,9 @@ function runChordWalk(totalSegments){
     let chosen = legal[0], pinned=false;
     const pin = STATE.pins[g];
     if(pin){ const f = legal.find(c=>c.key===pin); if(f){ chosen=f; pinned=true; } }
+    updateBayesianPrior(chosen.tones);
+    const fval = calculateEmbodiedDynamicsFriction(chosen.tones, current.tones, STATE.cognitiveWeights);
+    recordFrictionEvent(fval.totalFriction);
     const cell = cellOfMove(current, chosen, target, eta);
     const from = current;
     eta = etaOf(cell.d);
@@ -1819,6 +1853,7 @@ const CLASS_COLOR_DARK = {
 
 let SWEEP_KEY=null, SWEEP_VAL=null;
 function sweep(steps){
+  STATE.isSweep = true;
   const key=[STATE.root,STATE.scaleName,STATE.tension,STATE.extended?1:0,STATE.take,steps,
     JSON.stringify(STATE.seed), profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
   if(key===SWEEP_KEY) return SWEEP_VAL;
@@ -1831,12 +1866,14 @@ function sweep(steps){
       vocabSize:d.vocabSize, sens:s.fraction, cls:classify(d,s.fraction)});
   }
   SWEEP_KEY=key; SWEEP_VAL=out;
+  STATE.isSweep = false;
   return out;
 }
 
 /* ---- the whole state graph, decomposed ---- */
 let BASIN_KEY=null, BASIN_VAL=null;
 function basins(){
+  STATE.isBasinTraversal = true;
   const key=[STATE.root,STATE.scaleName,STATE.tension,STATE.extended?1:0,STATE.take,STATE.lamC,
     profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
   if(key===BASIN_KEY) return BASIN_VAL;
@@ -1875,6 +1912,7 @@ function basins(){
   const rank=new Map(); list.forEach((a,i)=>rank.set(a.id,i));
   BASIN_KEY=key;
   BASIN_VAL={vocab, V, P, N, enc, succ, attr, trans, list, rank, maxT};
+  STATE.isBasinTraversal = false;
   return BASIN_VAL;
 }
 
@@ -3279,6 +3317,7 @@ function bindControls(){
 
   const slider=(id,numId,set,fmt)=>{
     const el=$(id), n=$(numId);
+    if (!el || !n) return;
     el.addEventListener('input', ()=>{ set((+el.value)); n.textContent=fmt((+el.value)); regenerate(false); });
     el.addEventListener('change', ()=> regenerate(true));
   };
