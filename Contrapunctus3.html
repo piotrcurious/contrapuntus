@@ -2845,6 +2845,7 @@ function bindControls(){
 
   const slider=(id,numId,set,fmt)=>{
     const el=$(id), n=$(numId);
+    if (!el || !n) return;
     el.addEventListener('input', ()=>{ set((+el.value)); n.textContent=fmt((+el.value)); regenerate(false); });
     el.addEventListener('change', ()=> regenerate(true));
   };

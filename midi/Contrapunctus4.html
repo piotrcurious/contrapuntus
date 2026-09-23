@@ -1196,6 +1196,17 @@ function chordStep(current, prev2, eta, tbl, vocab, target){
       cands.push({c, cost:tbl.costs[f], f});
     }
   }
+  if (!STATE.isBasinTraversal) {
+    const cw = STATE.cognitiveWeights || {};
+    for (let i = 0; i < cands.length; i++) {
+      const cand = cands[i];
+      if (typeof calculateEmbodiedDynamicsFriction !== 'undefined') {
+        cand.f = calculateEmbodiedDynamicsFriction(cand.c.tones, current.tones, cw);
+      } else if (typeof calculateCognitiveFriction !== 'undefined') {
+        cand.f = calculateCognitiveFriction(cand.c.tones, current.tones, cw.W1, cw.W2, cw.W3);
+      }
+    }
+  }
   cands.sort(tieBreak(current, prev2));
   return {legal:cands.map(x=>x.c), cands, fellBack};
 }
@@ -1224,6 +1235,7 @@ function runChordWalk(totalSegments){
     let chosen = legal[0], pinned=false;
     const pin = STATE.pins[g];
     if(pin){ const f = legal.find(c=>c.key===pin); if(f){ chosen=f; pinned=true; } }
+    updateBayesianPrior(chosen.tones);
     const cell = cellOfMove(current, chosen, target, eta);
     const from = current;
     eta = etaOf(cell.d);
@@ -1610,6 +1622,7 @@ function sweep(steps){
 /* ---- the whole state graph, decomposed ---- */
 let BASIN_KEY=null, BASIN_VAL=null;
 function basins(){
+  STATE.isBasinTraversal = true;
   const key=[STATE.root,STATE.scaleName,STATE.tension,STATE.extended?1:0,STATE.take,STATE.lamC,
     profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
   if(key===BASIN_KEY) return BASIN_VAL;
@@ -1648,6 +1661,7 @@ function basins(){
   const rank=new Map(); list.forEach((a,i)=>rank.set(a.id,i));
   BASIN_KEY=key;
   BASIN_VAL={vocab, V, P, N, enc, succ, attr, trans, list, rank, maxT};
+  STATE.isBasinTraversal = false;
   return BASIN_VAL;
 }
 
@@ -3071,6 +3085,7 @@ function bindControls(){
 
   const slider=(id,numId,set,fmt)=>{
     const el=$(id), n=$(numId);
+    if(!el || !n) return;
     el.addEventListener('input', ()=>{ set((+el.value)); n.textContent=fmt((+el.value)); regenerate(false); });
     el.addEventListener('change', ()=> regenerate(true));
   };
