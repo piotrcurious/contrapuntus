@@ -1621,9 +1621,13 @@ const CLASS_COLOR_DARK = {
 
 let SWEEP_KEY=null, SWEEP_VAL=null;
 function sweep(steps){
-  const key=[STATE.root,STATE.scaleName,STATE.tension,STATE.extended?1:0,STATE.take,steps,
-    JSON.stringify(STATE.seed), profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
-  if(key===SWEEP_KEY) return SWEEP_VAL;
+  STATE.isSweep = true;
+  const cw = STATE.cognitiveWeights || {};
+  const key = [STATE.root, STATE.scaleName, STATE.tension, STATE.extended?1:0, STATE.take, STATE.paretoMode||'pareto', STATE.paretoEpsilon||0.15, STATE.paretoDiversity||0.25, STATE.contextThreshold||0.6, JSON.stringify(cw), steps, JSON.stringify(STATE.seed), profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
+  if (key === SWEEP_KEY && SWEEP_VAL) {
+    STATE.isSweep = false;
+    return SWEEP_VAL;
+  }
   const out=[];
   for(let i=0;i<=steps;i++){
     const lam=i/steps;
@@ -1640,9 +1644,12 @@ function sweep(steps){
 let BASIN_KEY=null, BASIN_VAL=null;
 function basins(){
   STATE.isBasinTraversal = true;
-  const key=[STATE.root,STATE.scaleName,STATE.tension,STATE.extended?1:0,STATE.take,STATE.lamC,
-    profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
-  if(key===BASIN_KEY) return BASIN_VAL;
+  const cw = STATE.cognitiveWeights || {};
+  const key = [STATE.root, STATE.scaleName, STATE.tension, STATE.extended?1:0, STATE.take, STATE.lamC, STATE.paretoMode||'pareto', STATE.paretoEpsilon||0.15, STATE.paretoDiversity||0.25, STATE.contextThreshold||0.6, JSON.stringify(cw), profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
+  if (key === BASIN_KEY && BASIN_VAL) {
+    STATE.isBasinTraversal = false;
+    return BASIN_VAL;
+  }
   const vocab = vocabularyFor(STATE.root, SCALES[STATE.scaleName], STATE.extended);
   const V=vocab.length, P=V+1, N=V*3*P, tbl=chordTable(), target=STATE.tension;
   const enc=(i,e,p)=>(i*3+e)*P+(p+1);
@@ -1699,6 +1706,13 @@ function detectSequence(chords){
    ===================================================================== */
 function compose(heavy){
   ensureGrids();
+  // Reset singletons for deterministic recomputation
+  if (typeof BAYESIAN_PRIOR !== 'undefined') BAYESIAN_PRIOR.fill(1 / 12);
+  if (typeof GLOBAL_KURAMOTO_NETWORK !== 'undefined') {
+    GLOBAL_KURAMOTO_NETWORK.phases = [0.1, 0.5, 1.2, 2.1];
+  }
+  if (typeof FRICTION_HISTORY_TIMELINE !== 'undefined') FRICTION_HISTORY_TIMELINE.length = 0;
+  if (typeof TENSOR_MEMO_CACHE !== 'undefined') TENSOR_MEMO_CACHE.clear();
   if(!STATE.life.grid) STATE.life.grid = randomLife(STATE.life.w, STATE.life.h, 0.3);
 
   const total = STATE.bars*STATE.stepsPerBar;

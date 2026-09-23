@@ -850,9 +850,16 @@ function calculatePlompLeveltRoughness(pitches) {
   let roughnessSum = 0;
   for (let i = 0; i < activePitches.length; i++) {
     for (let j = i + 1; j < activePitches.length; j++) {
-      const semitoneDiff = Math.abs(12 * Math.log2(midiToFreq(activePitches[j]) / midiToFreq(activePitches[i]))) % 12;
-      const ic = Math.min(semitoneDiff, 12 - semitoneDiff);
-      roughnessSum += (1 - consonanceOfIC(ic));
+      const f1 = midiToFreq(activePitches[i]);
+      const f2 = midiToFreq(activePitches[j]);
+      const fMin = Math.min(f1, f2);
+      const freqDiff = Math.abs(f1 - f2);
+      // Critical bandwidth (Bark scale approximation): CBW ~ 24.7 * (4.37 * fMin / 1000 + 1)
+      const cbw = 24.7 * (4.37 * (fMin / 1000) + 1);
+      const x = freqDiff / cbw;
+      // Plomp-Levelt curve approximation: R(x) = C * (e^(-a*x) - e^(-b*x)) with peak near x = 0.25
+      const plompValue = 4 * Math.max(0, Math.exp(-3.5 * x) - Math.exp(-5.75 * x));
+      roughnessSum += plompValue;
     }
   }
   return roughnessSum / (activePitches.length * (activePitches.length - 1) / 2);
@@ -922,15 +929,13 @@ function getContextWarpedWeights(tensor) {
   const [S1, S2, S3, S4, S5] = tensor;
   const cw = STATE.cognitiveWeights || { W1:1, W2:1, W3:1, W4:1, W5:1, W6:1 };
 
-  // If S1 (Roughness) is extremely high, S2 (Template) becomes irrelevant, while S3 (Stream) becomes hyper-critical
-  let wStream = cw.W1;
-  let wTemplate = cw.W3;
-
   const thresh = STATE.contextThreshold != null ? STATE.contextThreshold : 0.6;
-  if (S1 > thresh) {
-    wTemplate *= 0.1; // Collapse template matching
-    wStream *= 2.5;   // Hyper-critical stream separation
-  }
+  // Continuous logistic / sigmoid transition around threshold to eliminate step function jumps
+  const k = 10; // Sigmoid slope
+  const warpFactor = 1 / (1 + Math.exp(-k * (S1 - thresh)));
+
+  const wStream = cw.W1 * (1 + 1.5 * warpFactor);
+  const wTemplate = cw.W3 * (1 - 0.9 * warpFactor);
 
   return {
     W1: wStream,
@@ -945,29 +950,30 @@ function getContextWarpedWeights(tensor) {
 // 4. MULTI-AGENT NEGOTIATION
 // Autonomous voice agents negotiate optimal Pareto choices
 function negotiateMultiAgentChoice(candidates, voiceIdx, prevPitch) {
-  if (!candidates.length) return null;
+  if (!candidates || !candidates.length) return null;
 
-  // Filter candidates onto the Pareto Frontier
-  const ParetoFrontier = computeParetoFrontier(candidates);
+  const mode = STATE.paretoMode || 'pareto';
+  const pf = (mode !== 'all' && candidates.length > 1) ? computeParetoFrontier(candidates) : candidates;
 
-  // Voice agent picks best trade-off on the frontier matching its local role
-  // Tensor S = [S1:Roughness, S2:Template, S3:StreamFusion, S4:Surprise, S5:Kuramoto]
-  ParetoFrontier.sort((a, b) => {
-    const wA = getContextWarpedWeights(a.tensor);
-    const wB = getContextWarpedWeights(b.tensor);
+  // Shared context weight evaluation (consistent, transitive comparator across all candidates)
+  const avgTensor = [0, 0, 0, 0, 0];
+  for (const c of pf) {
+    if (c.tensor) for (let i = 0; i < 5; i++) avgTensor[i] += c.tensor[i] / pf.length;
+  }
+  const sharedWarp = getContextWarpedWeights(avgTensor);
+  const sharedWeights = [sharedWarp.W5 || 1, sharedWarp.W3 || 1, sharedWarp.W1 || 1, sharedWarp.W2 || 1, sharedWarp.W4 || 1];
 
-    // Map weights directly to corresponding 5D tensor dimensions:
-    // S1 (Roughness) -> W5, S2 (Template) -> W3, S3 (Stream) -> W1, S4 (Surprise) -> W2, S5 (Kuramoto) -> W4
-    const weightsA = [wA.W5 || 1, wA.W3 || 1, wA.W1 || 1, wA.W2 || 1, wA.W4 || 1];
-    const weightsB = [wB.W5 || 1, wB.W3 || 1, wB.W1 || 1, wB.W2 || 1, wB.W4 || 1];
-
-    const costA = a.tensor.reduce((sum, val, idx) => sum + val * weightsA[idx], 0);
-    const costB = b.tensor.reduce((sum, val, idx) => sum + val * weightsB[idx], 0);
-
-    return costA - costB;
+  pf.sort((a, b) => {
+    const costA = a.tensor ? a.tensor.reduce((sum, val, idx) => sum + val * sharedWeights[idx], 0) : 0;
+    const costB = b.tensor ? b.tensor.reduce((sum, val, idx) => sum + val * sharedWeights[idx], 0) : 0;
+    const tensorDiff = (STATE.take === 'bold') ? (costB - costA) : (costA - costB);
+    if (Math.abs(tensorDiff) > 0.01) {
+      return tensorDiff;
+    }
+    return (a.ruleScore || 0) - (b.ruleScore || 0);
   });
 
-  return ParetoFrontier[0];
+  return pf[0];
 }
 
 /* =====================================================================
@@ -1676,11 +1682,12 @@ function pickNote(cands, ctx){
     if(ca!==cb) return ca-cb;
     return a-b;
   });
-  const candidateObjects = legal.map(m => {
+  const candidateObjects = legal.map((m, rankIdx) => {
     const currentPitches = [m, ...others.map(o => o.pitch)];
     const pastPitches = [prevPitch, ...others.map(o => o.prevPitch)];
     return {
       pitch: m,
+      ruleScore: rankIdx * 0.1, // Preserve initial legal rule ranking (preferRoot / approachPc / ruleCost)
       tensor: evaluateMusicalStateTensor(currentPitches, pastPitches)
     };
   });
@@ -1720,6 +1727,7 @@ function runVoiceWalk(chords){
     const atStart = prev.slice();
     const pitches=[null,null,null], deco=[false,false,false], fb=[false,false,false], cells=[null,null,null];
     updateBayesianPrior(chord.tones);
+    if (typeof GLOBAL_KURAMOTO_NETWORK !== 'undefined') GLOBAL_KURAMOTO_NETWORK.step(0.05);
 
     if(STATE.anchors[step]!=null && STATE.onsets[0][step]){
       pitches[0]=STATE.anchors[step]; prev[0]=pitches[0];
@@ -1914,9 +1922,12 @@ const CLASS_COLOR_DARK = {
 let SWEEP_KEY=null, SWEEP_VAL=null;
 function sweep(steps){
   STATE.isSweep = true;
-  const key=[STATE.root,STATE.scaleName,STATE.tension,STATE.extended?1:0,STATE.take,steps,
-    JSON.stringify(STATE.seed), profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
-  if(key===SWEEP_KEY) return SWEEP_VAL;
+  const cw = STATE.cognitiveWeights || {};
+  const key = [STATE.root, STATE.scaleName, STATE.tension, STATE.extended?1:0, STATE.take, STATE.paretoMode||'pareto', STATE.paretoEpsilon||0.15, STATE.paretoDiversity||0.25, STATE.contextThreshold||0.6, JSON.stringify(cw), steps, JSON.stringify(STATE.seed), profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
+  if (key === SWEEP_KEY && SWEEP_VAL) {
+    STATE.isSweep = false;
+    return SWEEP_VAL;
+  }
   const out=[];
   for(let i=0;i<=steps;i++){
     const lam=i/steps;
@@ -1934,9 +1945,12 @@ function sweep(steps){
 let BASIN_KEY=null, BASIN_VAL=null;
 function basins(){
   STATE.isBasinTraversal = true;
-  const key=[STATE.root,STATE.scaleName,STATE.tension,STATE.extended?1:0,STATE.take,STATE.lamC,
-    profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
-  if(key===BASIN_KEY) return BASIN_VAL;
+  const cw = STATE.cognitiveWeights || {};
+  const key = [STATE.root, STATE.scaleName, STATE.tension, STATE.extended?1:0, STATE.take, STATE.lamC, STATE.paretoMode||'pareto', STATE.paretoEpsilon||0.15, STATE.paretoDiversity||0.25, STATE.contextThreshold||0.6, JSON.stringify(cw), profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
+  if (key === BASIN_KEY && BASIN_VAL) {
+    STATE.isBasinTraversal = false;
+    return BASIN_VAL;
+  }
   const vocab = vocabularyFor(STATE.root, SCALES[STATE.scaleName], STATE.extended);
   const V=vocab.length, P=V+1, N=V*3*P, tbl=chordTable(), target=STATE.tension;
   const enc=(i,e,p)=>(i*3+e)*P+(p+1);
@@ -1993,6 +2007,13 @@ function detectSequence(chords){
    ===================================================================== */
 function compose(heavy){
   ensureGrids();
+  // Reset singletons for deterministic recomputation
+  if (typeof BAYESIAN_PRIOR !== 'undefined') BAYESIAN_PRIOR.fill(1 / 12);
+  if (typeof GLOBAL_KURAMOTO_NETWORK !== 'undefined') {
+    GLOBAL_KURAMOTO_NETWORK.phases = [0.1, 0.5, 1.2, 2.1];
+  }
+  if (typeof FRICTION_HISTORY_TIMELINE !== 'undefined') FRICTION_HISTORY_TIMELINE.length = 0;
+  if (typeof TENSOR_MEMO_CACHE !== 'undefined') TENSOR_MEMO_CACHE.clear();
   if(!STATE.life.grid) STATE.life.grid = randomLife(STATE.life.w, STATE.life.h, 0.3);
 
   const total = STATE.bars*STATE.stepsPerBar;
@@ -2346,10 +2367,22 @@ function drawLattice(){
     const f=HOVER.lattice;
     pushDisc(a, pts[f*2], pts[f*2+1], 10, rgba(THEME.ink,0.9), 0.85);
   }
+  // collinearity check across handles to warn if projection collapses dimensions
+  let collinearWarning = false;
+  for(let i=0; i<L.handles.length; i++) {
+    for(let j=i+1; j<L.handles.length; j++) {
+      const h1=L.handles[i], h2=L.handles[j];
+      const dx1=h1.x-L.org[0], dy1=h1.y-L.org[1];
+      const dx2=h2.x-L.org[0], dy2=h2.y-L.org[1];
+      const cross = Math.abs(dx1*dy2 - dy1*dx2);
+      if (cross < 80.0) collinearWarning = true;
+    }
+  }
+
   // the projection frame itself
   for(const h of L.handles){
-    pushLine(a, L.org[0], L.org[1], h.x, h.y, 1.2, rgba(THEME.ink, DRAG.axis===h.key?0.9:0.4));
-    pushDisc(a, h.x, h.y, DRAG.axis===h.key?6:4.6, rgba(THEME.ink, DRAG.axis===h.key?1:0.72));
+    pushLine(a, L.org[0], L.org[1], h.x, h.y, 1.2, rgba(collinearWarning?THEME.forbid:THEME.ink, DRAG.axis===h.key?0.9:0.4));
+    pushDisc(a, h.x, h.y, DRAG.axis===h.key?6:4.6, rgba(collinearWarning?THEME.forbid:THEME.ink, DRAG.axis===h.key?1:0.72));
   }
   pushDisc(a, L.org[0], L.org[1], 2.6, rgba(THEME.ink,0.7));
   drawGL(GL_LAT, a);
@@ -2760,6 +2793,14 @@ function drawBasin(){
   const si=Math.min(STATE.seed.chordIdx,b.V-1), se=STATE.seed.eta;
   g.strokeStyle=cssVar('--ink'); g.lineWidth=1.6;
   g.strokeRect((si*3+se)*cw-0.5, (seedP+1)*ch-0.5, cw+1, ch+1);
+
+  // Axis Labels for Basin Map
+  g.fillStyle=cssVar('--ink-faint');
+  g.font='9px '+cssVar('--mono').split(',')[0].replace(/'/g,'')+', monospace';
+  g.textAlign='left'; g.textBaseline='top';
+  g.fillText('x: Chords/Momenta →', 4, 2);
+  g.fillText('y: Phantom Predecessor ↓', 4, h - 11);
+
   BASIN_GEO={cw,ch,V:b.V,P:b.P,w,h};
 
   const leg=document.getElementById('basinLegend');
@@ -2981,6 +3022,7 @@ function playNote(v, midi, t0, e){
   o1.stop(off+rel+0.03); o2.stop(off+rel+0.03);
 }
 function scheduleStep(step, when){
+  if (typeof GLOBAL_KURAMOTO_NETWORK !== 'undefined') GLOBAL_KURAMOTO_NETWORK.step(0.05);
   const c=STATE.composed; if(!c||!c.byStep) return;
   const arr=c.byStep[step]; if(!arr) return;
   for(const nt of arr) playNote(nt.v, nt.pitch, when, nt.e);
