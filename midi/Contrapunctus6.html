@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Contrapunctus — a counterpoint automaton and its rule space</title>
+<title>Contrapunctus VI — 5D State-Space Manifold (Pareto Frontier, Context Topologies, Multi-Agent Negotiation)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap">
@@ -296,7 +296,7 @@ details[open] summary::before{content:"– ";}
   <header id="masthead">
     <div>
       <h1>Contrapunctus</h1>
-      <div class="sub">a deterministic counterpoint automaton, and the rule space it lives in</div>
+      <div class="sub">5D State Tensor S · Pareto Optimization · Context-Aware Rule Topologies · Autonomous Voice Agents</div>
     </div>
     <div class="transport">
       <button id="btnRecompute">Recompute</button>
@@ -314,6 +314,22 @@ details[open] summary::before{content:"– ";}
 
   <!-- ================= CONSOLE RAIL ================= -->
   <aside id="rail">
+
+    <section class="group">
+      <h2>5D State-Space Manifold (V6)</h2>
+      <div class="row"><label for="sW1">W₁ Stream Fusion (ASA)</label>
+        <div class="slide"><input type="range" id="sW1" min="0" max="200" value="100"><span class="num" id="nW1">1.0</span></div></div>
+      <div class="row"><label for="sW2">W₂ Predictive Entropy</label>
+        <div class="slide"><input type="range" id="sW2" min="0" max="200" value="100"><span class="num" id="nW2">1.0</span></div></div>
+      <div class="row"><label for="sW3">W₃ Template Error</label>
+        <div class="slide"><input type="range" id="sW3" min="0" max="200" value="100"><span class="num" id="nW3">1.0</span></div></div>
+      <div class="row"><label for="sW4">W₄ Kuramoto Motor Groove</label>
+        <div class="slide"><input type="range" id="sW4" min="0" max="200" value="100"><span class="num" id="nW4">1.0</span></div></div>
+      <div class="row"><label for="sW5">W₅ Spectral Inharmonicity</label>
+        <div class="slide"><input type="range" id="sW5" min="0" max="200" value="100"><span class="num" id="nW5">1.0</span></div></div>
+      <div class="row"><label for="sW6">W₆ 1/f Fractal Form</label>
+        <div class="slide"><input type="range" id="sW6" min="0" max="200" value="100"><span class="num" id="nW6">1.0</span></div></div>
+    </section>
 
     <section class="group">
       <h2>Material</h2>
@@ -559,6 +575,387 @@ details[open] summary::before{content:"– ";}
 <script>
 (function(){
 "use strict";
+
+/* =====================================================================
+   VERSION 4 ENGINE: COGNITIVE FRICTION (ASA + PREDICTIVE CODING + TEMPLATES)
+   ===================================================================== */
+
+// 1. STREAM FUSION LAW (ASA)
+// Measures cross-correlation and trajectory fusion across voice streams
+function calculateStreamFusion(voicePitches, prevPitches) {
+  let fusionPenalty = 0;
+  let activeVoices = 0;
+
+  for (let i = 0; i < voicePitches.length; i++) {
+    if (voicePitches[i] == null) continue;
+    activeVoices++;
+
+    // Stream Integration Bounds (critical band jump limit)
+    if (prevPitches && prevPitches[i] != null) {
+      const leap = Math.abs(voicePitches[i] - prevPitches[i]);
+      if (leap > 7) { // Leaps > 7 semitones strain stream tracking integration
+        fusionPenalty += (leap - 7) * 0.15;
+      }
+    }
+
+    // Parallel Motion Spectra Overlap (Fusion)
+    if (prevPitches) {
+      for (let j = i + 1; j < voicePitches.length; j++) {
+        if (voicePitches[j] == null || prevPitches[j] == null || prevPitches[i] == null) continue;
+        const d1 = voicePitches[i] - prevPitches[i];
+        const d2 = voicePitches[j] - prevPitches[j];
+
+        // Parallel direction check
+        if (d1 !== 0 && d2 !== 0 && Math.sign(d1) === Math.sign(d2)) {
+          const prevInterval = Math.abs(prevPitches[i] - prevPitches[j]) % 12;
+          const currInterval = Math.abs(voicePitches[i] - voicePitches[j]) % 12;
+          // Parallel Octaves (0) or Fifths (7) lock partial spectra, destroying stream separation
+          if (prevInterval === currInterval && (currInterval === 0 || currInterval === 7)) {
+            fusionPenalty += 2.5; // High Cognitive Friction (Stream Fusion Error)
+          }
+        }
+      }
+    }
+  }
+  return fusionPenalty;
+}
+
+// 2. PREDICTIVE ENTROPY LAW (Bayesian Predictive Coding)
+// Tracks rolling pitch probability distribution (prior) and calculates Information Surprise
+const BAYESIAN_PRIOR = new Array(12).fill(1 / 12); // Uniform initial prior
+
+function updateBayesianPrior(pitches) {
+  const learningRate = 0.08;
+  for (const p of pitches) {
+    if (p == null) continue;
+    const pc = Math.floor(pcOf(p)) % 12;
+    for (let i = 0; i < 12; i++) {
+      if (i === pc) {
+        BAYESIAN_PRIOR[i] = (1 - learningRate) * BAYESIAN_PRIOR[i] + learningRate;
+      } else {
+        BAYESIAN_PRIOR[i] = (1 - learningRate) * BAYESIAN_PRIOR[i];
+      }
+    }
+  }
+}
+
+function calculatePredictiveSurprise(pitches) {
+  let totalSurprise = 0;
+  let count = 0;
+  for (const p of pitches) {
+    if (p == null) continue;
+    const pc = Math.floor(pcOf(p)) % 12;
+    const prob = Math.max(0.001, BAYESIAN_PRIOR[pc] || 0.083);
+    totalSurprise += -Math.log2(prob); // Information Surprise in bits
+    count++;
+  }
+  return count > 0 ? totalSurprise / count : 0;
+}
+
+// 3. HARMONIC TEMPLATE LAW (Virtual Pitch / Fundamental Fitting)
+// Evaluates vertical frequency slices against natural harmonic series templates (1f, 2f, 3f, 4f, 5f, 6f...)
+function calculateTemplateMatchingError(pitches) {
+  const activePitches = pitches.filter(p => p != null);
+  if (activePitches.length < 2) return 0;
+
+  const freqs = activePitches.map(p => midiToFreq(p));
+  let minError = Infinity;
+
+  // Test candidate fundamental frequencies (sub-harmonics of lowest pitch)
+  const lowestFreq = Math.min(...freqs);
+  const candidates = [lowestFreq, lowestFreq / 2, lowestFreq / 3, lowestFreq / 4];
+
+  for (const fund of candidates) {
+    let errorSum = 0;
+    for (const f of freqs) {
+      const partialRatio = f / fund;
+      const nearestPartial = Math.round(partialRatio);
+      const diff = Math.abs(partialRatio - nearestPartial);
+      errorSum += diff;
+    }
+    if (errorSum < minError) {
+      minError = errorSum;
+    }
+  }
+  return minError / activePitches.length; // Normalized Template Error
+}
+
+// 4. UNIFIED COGNITIVE FRICTION OBJECTIVE FUNCTION
+// CognitiveFriction = W1 * StreamFusion + W2 * PredictiveSurprise + W3 * TemplateError
+function calculateCognitiveFriction(voicePitches, prevPitches, W1, W2, W3) {
+  W1 = W1 != null ? W1 : 1.0; // Stream Fusion weight
+  W2 = W2 != null ? W2 : 1.0; // Predictive Surprise weight
+  W3 = W3 != null ? W3 : 1.0; // Template Error weight
+
+  const fusion = calculateStreamFusion(voicePitches, prevPitches);
+  const surprise = calculatePredictiveSurprise(voicePitches);
+  const templateError = calculateTemplateMatchingError(voicePitches);
+
+  return {
+    totalFriction: W1 * fusion + W2 * surprise + W3 * templateError,
+    fusion,
+    surprise,
+    templateError
+  };
+}
+
+
+/* =====================================================================
+   VERSION 5 ENGINE: EMBODIED NEURAL DYNAMICS (KURAMOTO + SPECTRAL + 1/F FRACTAL)
+   ===================================================================== */
+
+// 4. COUPLED OSCILLATOR LAW (Kuramoto Model for Rhythmic Entrainment & Groove)
+// Simulates neural motor-cortex oscillators phase-locking to acoustic transients
+class KuramotoOscillatorNetwork {
+  constructor(numOscillators = 4, couplingStrength = 1.2) {
+    this.numOscillators = numOscillators;
+    this.K = couplingStrength; // Coupling constant
+    this.phases = new Array(numOscillators).fill(0).map(() => Math.random() * 2 * Math.PI);
+    this.freqs = [2.0, 4.0, 8.0, 16.0]; // Hz (hierarchy of pulse periodicities)
+  }
+
+  step(dt = 0.05) {
+    const nextPhases = [...this.phases];
+    for (let i = 0; i < this.numOscillators; i++) {
+      let couplingSum = 0;
+      for (let j = 0; j < this.numOscillators; j++) {
+        couplingSum += Math.sin(this.phases[j] - this.phases[i]);
+      }
+      const dPhase = 2 * Math.PI * this.freqs[i] + (this.K / this.numOscillators) * couplingSum;
+      nextPhases[i] = (this.phases[i] + dPhase * dt) % (2 * Math.PI);
+    }
+    this.phases = nextPhases;
+  }
+
+  // Phase-Coupling Index (Order Parameter R: 0 = chaotic syncopation, 1 = total entrainment)
+  getPhaseCouplingIndex() {
+    let sumCos = 0, sumSin = 0;
+    for (const phi of this.phases) {
+      sumCos += Math.cos(phi);
+      sumSin += Math.sin(phi);
+    }
+    const R = Math.hypot(sumCos, sumSin) / this.numOscillators;
+    return R; // Order parameter
+  }
+}
+
+const GLOBAL_KURAMOTO_NETWORK = new KuramotoOscillatorNetwork();
+
+function calculatePhaseEntrainmentIndex(stepIndex) {
+  GLOBAL_KURAMOTO_NETWORK.step(0.05);
+  const R = GLOBAL_KURAMOTO_NETWORK.getPhaseCouplingIndex();
+  // Groove metric: optimal syncopation threshold is R ~ 0.65 - 0.85
+  const idealGrooveThreshold = 0.75;
+  const entrainmentError = Math.abs(R - idealGrooveThreshold);
+  return { R, entrainmentError };
+}
+
+// 5. SPECTRAL-HARMONIC EQUIVALENCE (Unified Timbre and Harmony Surface)
+// Evaluates Spectral Centroid and Inharmonicity Vector
+function calculateSpectralInharmonicity(pitches) {
+  const activePitches = pitches.filter(p => p != null);
+  if (activePitches.length === 0) return { spectralCentroid: 0, inharmonicityVector: 0 };
+
+  const freqs = activePitches.map(p => midiToFreq(p)).sort((a, b) => a - b);
+  const spectralCentroid = freqs.reduce((a, b) => a + b, 0) / freqs.length;
+
+  let inharmonicitySum = 0;
+  for (let i = 0; i < freqs.length; i++) {
+    for (let j = i + 1; j < freqs.length; j++) {
+      const semitoneDiff = Math.abs(12 * Math.log2(freqs[j] / freqs[i])) % 12;
+      const ic = Math.min(semitoneDiff, 12 - semitoneDiff);
+      const roughness = 1 - consonanceOfIC(ic);
+      inharmonicitySum += roughness;
+    }
+  }
+  const inharmonicityVector = freqs.length > 1 ? inharmonicitySum / (freqs.length * (freqs.length - 1) / 2) : 0;
+  return { spectralCentroid, inharmonicityVector };
+}
+
+// 6. 1/F FRACTAL ATTENTION LAW (Scale-Free Entropy across Time)
+// Maintains historical Cognitive Friction timeline and measures 1/f Power Spectrum error
+const FRICTION_HISTORY_TIMELINE = [];
+
+function recordFrictionEvent(frictionVal) {
+  FRICTION_HISTORY_TIMELINE.push(frictionVal);
+  if (FRICTION_HISTORY_TIMELINE.length > 128) {
+    FRICTION_HISTORY_TIMELINE.shift();
+  }
+}
+
+function calculateFractal1fError() {
+  if (FRICTION_HISTORY_TIMELINE.length < 16) return 0;
+
+  // Measure low-frequency (macro) vs high-frequency (micro) variance
+  const N = FRICTION_HISTORY_TIMELINE.length;
+  let microVar = 0;
+  for (let i = 1; i < N; i++) {
+    microVar += Math.abs(FRICTION_HISTORY_TIMELINE[i] - FRICTION_HISTORY_TIMELINE[i - 1]);
+  }
+  microVar /= (N - 1);
+
+  let macroVar = 0;
+  const chunkSize = 8;
+  const blockMeans = [];
+  for (let i = 0; i < N; i += chunkSize) {
+    const chunk = FRICTION_HISTORY_TIMELINE.slice(i, i + chunkSize);
+    const mean = chunk.reduce((a, b) => a + b, 0) / chunk.length;
+    blockMeans.push(mean);
+  }
+  for (let i = 1; i < blockMeans.length; i++) {
+    macroVar += Math.abs(blockMeans[i] - blockMeans[i - 1]);
+  }
+  macroVar = blockMeans.length > 1 ? macroVar / (blockMeans.length - 1) : 0;
+
+  // Ideal 1/f ratio: macroVar / microVar ~ 0.5
+  const ratio = microVar > 0 ? macroVar / microVar : 0.5;
+  const fractalError = Math.abs(ratio - 0.5);
+  return fractalError;
+}
+
+// UNIFIED EMBODIED NEURAL DYNAMICS OBJECTIVE FUNCTION (V5)
+// FrictionV5 = CognitiveFrictionV4 + W4 * EntrainmentError + W5 * InharmonicityVector + W6 * Fractal1fError
+function calculateEmbodiedDynamicsFriction(voicePitches, prevPitches, cw) {
+  cw = cw || { W1:1, W2:1, W3:1, W4:1, W5:1, W6:1 };
+
+  const v4Friction = calculateCognitiveFriction(voicePitches, prevPitches, cw.W1, cw.W2, cw.W3);
+  const entrainment = calculatePhaseEntrainmentIndex();
+  const spectral = calculateSpectralInharmonicity(voicePitches);
+  const fractalError = calculateFractal1fError();
+
+  const total = v4Friction.totalFriction +
+    (cw.W4 || 1.0) * entrainment.entrainmentError +
+    (cw.W5 || 1.0) * spectral.inharmonicityVector +
+    (cw.W6 || 1.0) * fractalError;
+
+  return {
+    totalFriction: total,
+    v4Friction,
+    entrainment,
+    spectral,
+    fractalError
+  };
+}
+
+
+/* =====================================================================
+   VERSION 6 ENGINE: MULTI-DIMENSIONAL STATE-SPACE MANIFOLD (PARETO OPTIMIZATION)
+   ===================================================================== */
+
+// 1. THE MUSICAL STATE TENSOR S = [S1, S2, S3, S4, S5]
+// S1: Plomp-Levelt Roughness (Raw acoustic beating)
+// S2: Harmonic Template Match (Missing fundamental clarity)
+// S3: Auditory Stream Cross-Correlation (Voice independence)
+// S4: Bayesian Prediction Error (Syntactic surprise)
+// S5: Kuramoto Phase Alignment (Rhythmic entrainment)
+
+function evaluateMusicalStateTensor(voicePitches, prevPitches) {
+  const S1 = calculatePlompLeveltRoughness(voicePitches);
+  const S2 = calculateTemplateMatchingError(voicePitches);
+  const S3 = calculateStreamFusion(voicePitches, prevPitches);
+  const S4 = calculatePredictiveSurprise(voicePitches);
+  const S5 = calculatePhaseEntrainmentIndex().entrainmentError;
+
+  return [S1, S2, S3, S4, S5]; // 5D Coordinate Vector in Phase Space
+}
+
+function calculatePlompLeveltRoughness(pitches) {
+  const activePitches = pitches.filter(p => p != null);
+  if (activePitches.length < 2) return 0;
+
+  let roughnessSum = 0;
+  for (let i = 0; i < activePitches.length; i++) {
+    for (let j = i + 1; j < activePitches.length; j++) {
+      const semitoneDiff = Math.abs(12 * Math.log2(midiToFreq(activePitches[j]) / midiToFreq(activePitches[i]))) % 12;
+      const ic = Math.min(semitoneDiff, 12 - semitoneDiff);
+      roughnessSum += (1 - consonanceOfIC(ic));
+    }
+  }
+  return roughnessSum / (activePitches.length * (activePitches.length - 1) / 2);
+}
+
+// 2. PARETO FRONTIER NAVIGATION (Pruning Dominated Options)
+// A candidate A dominates B if A is <= B on all axes and strictly < B on at least one axis.
+function isParetoDominated(vectorA, vectorB) {
+  let strictlyBetterInOne = false;
+  for (let i = 0; i < vectorA.length; i++) {
+    if (vectorA[i] > vectorB[i]) return false; // A is worse than B on axis i
+    if (vectorA[i] < vectorB[i]) strictlyBetterInOne = true;
+  }
+  return strictlyBetterInOne;
+}
+
+function computeParetoFrontier(candidates) {
+  if (candidates.length <= 1) return candidates;
+
+  const frontier = [];
+  for (let i = 0; i < candidates.length; i++) {
+    let dominated = false;
+    for (let j = 0; j < candidates.length; j++) {
+      if (i !== j && isParetoDominated(candidates[j].tensor, candidates[i].length ? candidates[i] : candidates[i].tensor)) {
+        dominated = true;
+        break;
+      }
+    }
+    if (!dominated) {
+      frontier.push(candidates[i]);
+    }
+  }
+  return frontier.length > 0 ? frontier : candidates;
+}
+
+// 3. CONTEXT-DEPENDENT RULE TOPOLOGIES (Non-linear Manifold Warping)
+function getContextWarpedWeights(tensor) {
+  const [S1, S2, S3, S4, S5] = tensor;
+  const cw = STATE.cognitiveWeights || { W1:1, W2:1, W3:1, W4:1, W5:1, W6:1 };
+
+  // If S1 (Roughness) is extremely high, S2 (Template) becomes irrelevant, while S3 (Stream) becomes hyper-critical
+  let wStream = cw.W1;
+  let wTemplate = cw.W3;
+
+  if (S1 > 0.6) {
+    wTemplate *= 0.1; // Collapse template matching
+    wStream *= 2.5;   // Hyper-critical stream separation
+  }
+
+  return {
+    W1: wStream,
+    W2: cw.W2,
+    W3: wTemplate,
+    W4: cw.W4,
+    W5: cw.W5,
+    W6: cw.W6
+  };
+}
+
+// 4. MULTI-AGENT NEGOTIATION
+// Autonomous voice agents negotiate optimal Pareto choices
+function negotiateMultiAgentChoice(candidates, voiceIdx, prevPitch) {
+  if (!candidates.length) return null;
+
+  // Filter candidates onto the Pareto Frontier
+  const ParetoFrontier = computeParetoFrontier(candidates);
+
+  // Voice agent picks best trade-off on the frontier matching its local role
+  // Tensor S = [S1:Roughness, S2:Template, S3:StreamFusion, S4:Surprise, S5:Kuramoto]
+  ParetoFrontier.sort((a, b) => {
+    const wA = getContextWarpedWeights(a.tensor);
+    const wB = getContextWarpedWeights(b.tensor);
+
+    // Map weights directly to corresponding 5D tensor dimensions:
+    // S1 (Roughness) -> W5, S2 (Template) -> W3, S3 (Stream) -> W1, S4 (Surprise) -> W2, S5 (Kuramoto) -> W4
+    const weightsA = [wA.W5 || 1, wA.W3 || 1, wA.W1 || 1, wA.W2 || 1, wA.W4 || 1];
+    const weightsB = [wB.W5 || 1, wB.W3 || 1, wB.W1 || 1, wB.W2 || 1, wB.W4 || 1];
+
+    const costA = a.tensor.reduce((sum, val, idx) => sum + val * weightsA[idx], 0);
+    const costB = b.tensor.reduce((sum, val, idx) => sum + val * weightsB[idx], 0);
+
+    return costA - costB;
+  });
+
+  return ParetoFrontier[0];
+}
+
 /* =====================================================================
    1 · THEORY CORE
    ===================================================================== */
@@ -809,6 +1206,7 @@ const STATE = window.STATE = {
   extended:false, walkingBass:false, arp:'none',
   voiceOctaves: [5, 4, 3], // Base octaves for Melody, Mid, Bass
   take:'bold',   // which legal move to take: smooth | strong | bold
+  cognitiveWeights: { W1: 1.0, W2: 1.0, W3: 1.0, W4: 1.0, W5: 1.0, W6: 1.0 }, // Version 5 Embodied Neural Dynamics Weights
   seed:{ chordIdx:0, eta:1, prev2Idx:-1, voice:[null,null,null] },
   anchors:{},                          // step -> midi (melody)
   pins:{},                             // segIdx -> chord.key
@@ -1008,18 +1406,33 @@ function targetForSeg(g){
 STATE.barOverrides = {};
 
 function tieBreak(current, prev2, costOf){
-  // Three tiers first: real motion, backtracking to two chords ago, standing
-  // still. Without them the ranking below has two degenerate attractors once
-  // lambda stops constraining anything.
   const tier = (c)=>{
     if(c.rootPc===current.rootPc && c.quality===current.quality) return 2;
     if(prev2 && c.rootPc===prev2.rootPc && c.quality===prev2.quality) return 1;
     return 0;
   };
   const mode = STATE.take;
+  const cw = STATE.cognitiveWeights || { W1: 1.0, W2: 1.0, W3: 1.0 };
   return (a,b)=>{
     const ta=tier(a.c), tb=tier(b.c);
     if(ta!==tb) return ta-tb;
+
+    // Evaluate Cognitive Friction (ASA Fusion + Predictive Surprise + Template Matching Error)
+    // Version 6: Compute 5D Musical State Tensor S and evaluate Pareto Optimization
+    const tensorA = evaluateMusicalStateTensor(a.c.tones, current.tones);
+    const tensorB = evaluateMusicalStateTensor(b.c.tones, current.tones);
+    a.tensor = tensorA;
+    b.tensor = tensorB;
+
+    if (isParetoDominated(tensorA, tensorB)) return -1;
+    if (isParetoDominated(tensorB, tensorA)) return 1;
+
+    const fA = calculateEmbodiedDynamicsFriction(a.c.tones, current.tones, cw);
+    const fB = calculateEmbodiedDynamicsFriction(b.c.tones, current.tones, cw);
+    if (Math.abs(fA.totalFriction - fB.totalFriction) > 0.01) {
+      return fA.totalFriction - fB.totalFriction;
+    }
+
     const va=voiceLeadingDistance(current.tones,a.c.tones), vb=voiceLeadingDistance(current.tones,b.c.tones);
     if(mode==='strong'){ if(a.cost!==b.cost) return a.cost-b.cost; }
     else if(mode==='bold'){ if(a.cost!==b.cost) return b.cost-a.cost; }
@@ -1180,7 +1593,18 @@ function pickNote(cands, ctx){
   };
   const memo = new Map();
   const cl = (m)=>{ let v=memo.get(m); if(!v){ v=cls(m); memo.set(m,v); } return v; };
-  const costOf = (m)=>{ const c=cl(m); return tbl.costs[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]; };
+  const cw = STATE.cognitiveWeights || { W1: 1.0, W2: 1.0, W3: 1.0 };
+  const costOf = (m)=>{
+    const c=cl(m);
+    const baseCost = tbl.costs[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)];
+    const otherPitches = others.map(o => o.pitch);
+    const otherPrevPitches = others.map(o => o.prevPitch);
+    const currentPitches = [m, ...otherPitches];
+    const pastPitches = [prevPitch, ...otherPrevPitches];
+    const tensor = evaluateMusicalStateTensor(currentPitches, pastPitches);
+    const f = calculateEmbodiedDynamicsFriction(currentPitches, pastPitches, cw);
+    return baseCost + f.totalFriction;
+  };
   let legal = cands.filter(m=>{ const c=cl(m); return tbl.t[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]===1; });
   let fellBack=false;
   if(!legal.length){ legal=cands.slice(); fellBack=true; }
@@ -1210,7 +1634,16 @@ function pickNote(cands, ctx){
     if(ca!==cb) return ca-cb;
     return a-b;
   });
-  const chosen=legal[0];
+  const candidateObjects = legal.map(m => {
+    const currentPitches = [m, ...others.map(o => o.pitch)];
+    const pastPitches = [prevPitch, ...others.map(o => o.prevPitch)];
+    return {
+      pitch: m,
+      tensor: evaluateMusicalStateTensor(currentPitches, pastPitches)
+    };
+  });
+  const negotiated = negotiateMultiAgentChoice(candidateObjects, ctx.voiceRank || 0, prevPitch);
+  const chosen = negotiated ? negotiated.pitch : legal[0];
   return {pitch:chosen, cls:cls(chosen), fellBack};
 }
 function deterministicShuffle(arr, seed){
@@ -1244,6 +1677,7 @@ function runVoiceWalk(chords){
     const scalePCs = SCALES[scaleForSeg(g)].map(o=>(STATE.root+o)%12);
     const atStart = prev.slice();
     const pitches=[null,null,null], deco=[false,false,false], fb=[false,false,false], cells=[null,null,null];
+    updateBayesianPrior(chord.tones);
 
     if(STATE.anchors[step]!=null && STATE.onsets[0][step]){
       pitches[0]=STATE.anchors[step]; prev[0]=pitches[0];
@@ -2920,6 +3354,12 @@ function bindControls(){
     el.addEventListener('input', ()=>{ set((+el.value)); n.textContent=fmt((+el.value)); regenerate(false); });
     el.addEventListener('change', ()=> regenerate(true));
   };
+  slider('sW1','nW1', v=>{ STATE.cognitiveWeights.W1=v/100; }, v=>fmt2(v/100));
+  slider('sW2','nW2', v=>{ STATE.cognitiveWeights.W2=v/100; }, v=>fmt2(v/100));
+  slider('sW3','nW3', v=>{ STATE.cognitiveWeights.W3=v/100; }, v=>fmt2(v/100));
+  slider('sW4','nW4', v=>{ STATE.cognitiveWeights.W4=v/100; }, v=>fmt2(v/100));
+  slider('sW5','nW5', v=>{ STATE.cognitiveWeights.W5=v/100; }, v=>fmt2(v/100));
+  slider('sW6','nW6', v=>{ STATE.cognitiveWeights.W6=v/100; }, v=>fmt2(v/100));
   slider('sTension','nTension', v=>STATE.tension=v/100, v=>fmt2(v/100));
   slider('sLamC','nLamC', v=>STATE.lamC=v/100, v=>fmt2(v/100));
   slider('sLamV','nLamV', v=>STATE.lamV=v/100, v=>fmt2(v/100));
