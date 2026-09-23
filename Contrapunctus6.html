@@ -1034,6 +1034,7 @@ function annotate(c){
   if(c.applied==='dom') c.roman = 'V7/'+c.of;
   else if(c.applied==='lt') c.roman = 'vii\u00b07/'+c.of;
   else if(c.applied==='borrowed') c.roman = 'b' + romanNumeral(c.degree, c.quality);
+  else if(c.applied==='pivot') c.roman = 'p:' + romanNumeral(c.degree, c.quality);
   else c.roman = romanNumeral(c.degree, c.quality);
   c.tensionVal = chordTension(c.tones);
   c.key = c.rootPc+':'+c.quality+':'+(c.applied||'-');
@@ -1071,6 +1072,22 @@ function buildExtended(rootPc, steps){
       b.applied = 'borrowed';
       b.ring = 1;
       add(annotate(b));
+    }
+  }
+
+  // Common-Tone Pivot Chords (Dominant & Subdominant Key Pivot Modulations)
+  const dominantKeyRoot = (rootPc + 7) % 12;
+  const subdominantKeyRoot = (rootPc + 5) % 12;
+  const domPivotChords = buildDiatonic(dominantKeyRoot, steps);
+  const subPivotChords = buildDiatonic(subdominantKeyRoot, steps);
+
+  const currentPCs = new Set(dia.flatMap(c => c.tones));
+  for(const p of [...domPivotChords, ...subPivotChords]) {
+    const sharedCount = p.tones.filter(t => currentPCs.has(t)).length;
+    if (sharedCount >= 2) {
+      p.applied = 'pivot';
+      p.ring = 2;
+      add(annotate(p));
     }
   }
 
@@ -2848,8 +2865,9 @@ function renderTensor5DReadout() {
   const currentChord = STATE.composed.chords[g];
   const prevChord = g > 0 ? STATE.composed.chords[g - 1] : null;
   const tensor = evaluateMusicalStateTensor(currentChord.tones, prevChord ? prevChord.tones : null);
+  const typeTag = currentChord.applied === 'pivot' ? ' <span style="color:var(--hand)">[Pivot Modulation]</span>' : currentChord.applied === 'borrowed' ? ' <span style="color:var(--permit)">[Modal Borrowed]</span>' : '';
 
-  el.innerHTML = '<b>5D State Tensor S [Bar ' + (g + 1) + ' ' + currentChord.roman + ']:</b> ' +
+  el.innerHTML = '<b>5D State Tensor S [Bar ' + (g + 1) + ' ' + currentChord.roman + ']' + typeTag + ':</b> ' +
     'S₁ Roughness: <b>' + tensor[0].toFixed(2) + '</b> &nbsp;|&nbsp; ' +
     'S₂ Template Error: <b>' + tensor[1].toFixed(2) + '</b> &nbsp;|&nbsp; ' +
     'S₃ Stream Fusion: <b>' + tensor[2].toFixed(2) + '</b> &nbsp;|&nbsp; ' +
