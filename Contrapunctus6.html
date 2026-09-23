@@ -309,7 +309,16 @@ details[open] summary::before{content:"– ";}
 
     <section class="group">
       <h2>5D State-Space Manifold (V6)</h2>
-      <div class="row"><label for="sW1">W₁ Stream Fusion (ASA)</label>
+      <div class="row"><label>Pareto Frontier Pruning</label></div>
+      <div class="row" style="gap:4px">
+        <button class="tiny" id="paretoAll" style="flex:1">All</button>
+        <button class="tiny on" id="paretoOnly" style="flex:1">Pareto Only</button>
+        <button class="tiny" id="paretoRelaxed" style="flex:1">Relaxed</button>
+      </div>
+      <div class="row" style="margin-top:8px"><label for="sCtxThresh">Context Warp Threshold</label>
+        <div class="slide"><input type="range" id="sCtxThresh" min="10" max="90" value="60"><span class="num" id="nCtxThresh">0.60</span></div></div>
+
+      <div class="row" style="margin-top:10px"><label for="sW1">W₁ Stream Fusion (ASA)</label>
         <div class="slide"><input type="range" id="sW1" min="0" max="200" value="100"><span class="num" id="nW1">1.0</span></div></div>
       <div class="row"><label for="sW2">W₂ Predictive Entropy</label>
         <div class="slide"><input type="range" id="sW2" min="0" max="200" value="100"><span class="num" id="nW2">1.0</span></div></div>
@@ -444,6 +453,7 @@ details[open] summary::before{content:"– ";}
         <span><i class="sw" style="background:var(--hand)"></i>anchored by you</span>
         <span>faded bar = the rule ran out of legal moves and fell back</span>
       </div>
+      <div class="readout" id="tensor5DReadout" style="margin-top:10px; padding:8px 10px; background:var(--plate-lift); border:1px solid var(--rule); border-radius:var(--r);"></div>
       <figcaption>Bar length is the <b>gate</b> — how long the key is held — not the distance to the next note. The fading trail past the bar is the release, still sounding. Click the melody lane to anchor a pitch; anchors in bar 1 are part of the initial state.</figcaption>
     </section>
 
@@ -896,7 +906,8 @@ function getContextWarpedWeights(tensor) {
   let wStream = cw.W1;
   let wTemplate = cw.W3;
 
-  if (S1 > 0.6) {
+  const thresh = STATE.contextThreshold != null ? STATE.contextThreshold : 0.6;
+  if (S1 > thresh) {
     wTemplate *= 0.1; // Collapse template matching
     wStream *= 2.5;   // Hyper-critical stream separation
   }
@@ -1176,6 +1187,8 @@ const STATE = {
   extended:false, walkingBass:false, arp:'none',
   voiceOctaves: [5, 4, 3], // Base octaves for Melody, Mid, Bass
   take:'bold',   // which legal move to take: smooth | strong | bold
+  paretoMode: 'pareto', // V6 Pareto Filtering: 'all' | 'pareto' | 'relaxed'
+  contextThreshold: 0.60, // V6 Context-Warp Roughness Threshold
   cognitiveWeights: { W1: 1.0, W2: 1.0, W3: 1.0, W4: 1.0, W5: 1.0, W6: 1.0 }, // Version 5 Embodied Neural Dynamics Weights
   seed:{ chordIdx:0, eta:1, prev2Idx:-1, voice:[null,null,null] },
   anchors:{},                          // step -> midi (melody)
@@ -1445,7 +1458,15 @@ function chordStep(current, prev2, eta, tbl, vocab, target){
   const cw = STATE.cognitiveWeights || {};
   const isV6Active = (cw.W1 > 0 || cw.W2 > 0 || cw.W3 > 0 || cw.W4 > 0 || cw.W5 > 0 || cw.W6 > 0);
   const isSim = !!(STATE.isBasinTraversal || STATE.isSweep);
-  const paretoCands = (isV6Active && cands.length > 1 && !isSim) ? computeParetoFrontier(cands) : cands;
+  let paretoCands = cands;
+  if (isV6Active && cands.length > 1 && !isSim && STATE.paretoMode !== 'all') {
+    const pf = computeParetoFrontier(cands);
+    if (STATE.paretoMode === 'pareto') {
+      paretoCands = pf;
+    } else if (STATE.paretoMode === 'relaxed') {
+      paretoCands = Array.from(new Set([...pf, ...cands.slice(0, 4)]));
+    }
+  }
   return {legal:paretoCands.map(x=>x.c), cands:paretoCands, fellBack};
 }
 
@@ -2820,7 +2841,25 @@ function renderHandStat(){
     ? bits.join('<br>')
     : 'Nothing yet. Anything you change by hand is marked in magenta wherever it shows up.';
 }
+function renderTensor5DReadout() {
+  const el = $('tensor5DReadout');
+  if (!el || !STATE.composed) return;
+  const g = Math.max(0, Math.min(STATE.selectedSeg || 0, STATE.composed.chords.length - 1));
+  const currentChord = STATE.composed.chords[g];
+  const prevChord = g > 0 ? STATE.composed.chords[g - 1] : null;
+  const tensor = evaluateMusicalStateTensor(currentChord.tones, prevChord ? prevChord.tones : null);
+
+  el.innerHTML = '<b>5D State Tensor S [Bar ' + (g + 1) + ' ' + currentChord.roman + ']:</b> ' +
+    'S₁ Roughness: <b>' + tensor[0].toFixed(2) + '</b> &nbsp;|&nbsp; ' +
+    'S₂ Template Error: <b>' + tensor[1].toFixed(2) + '</b> &nbsp;|&nbsp; ' +
+    'S₃ Stream Fusion: <b>' + tensor[2].toFixed(2) + '</b> &nbsp;|&nbsp; ' +
+    'S₄ Surprise: <b>' + tensor[3].toFixed(2) + '</b> &nbsp;|&nbsp; ' +
+    'S₅ Kuramoto Error: <b>' + tensor[4].toFixed(2) + '</b> &nbsp;|&nbsp; ' +
+    'Mode: <b style="color:var(--hand)">' + (STATE.paretoMode || 'pareto') + '</b>';
+}
+
 function renderAll(){
+  renderTensor5DReadout();
   drawLattice();
   drawRoll(STATE.playing?STATE.stepFloat:-1);
   drawSeq();
@@ -3321,6 +3360,20 @@ function bindControls(){
     el.addEventListener('input', ()=>{ set((+el.value)); n.textContent=fmt((+el.value)); regenerate(false); });
     el.addEventListener('change', ()=> regenerate(true));
   };
+  slider('sCtxThresh','nCtxThresh', v=>{ STATE.contextThreshold=v/100; }, v=>fmt2(v/100));
+
+  const pModes=[['paretoAll','all'],['paretoOnly','pareto'],['paretoRelaxed','relaxed']];
+  for(const [id,mode] of pModes) {
+    const el = $(id);
+    if (el) {
+      el.addEventListener('click', ()=>{
+        STATE.paretoMode=mode;
+        for(const [i2] of pModes) if ($(i2)) $(i2).classList.toggle('on', i2===id);
+        regenerate();
+      });
+    }
+  }
+
   slider('sW1','nW1', v=>{ STATE.cognitiveWeights.W1=v/100; }, v=>fmt2(v/100));
   slider('sW2','nW2', v=>{ STATE.cognitiveWeights.W2=v/100; }, v=>fmt2(v/100));
   slider('sW3','nW3', v=>{ STATE.cognitiveWeights.W3=v/100; }, v=>fmt2(v/100));
