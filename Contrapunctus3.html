@@ -339,6 +339,7 @@ details[open] summary::before{content:"– ";}
         <option value="0">weak</option><option value="1" selected>neutral</option><option value="2">strong</option></select></div>
       <div class="row"><label for="selSeedPrev">Phantom <span class="num" style="min-width:0">c₋₁</span></label><select id="selSeedPrev"></select></div>
       <div class="row"><label>Voices start</label><div class="slide" id="seedVoices"></div></div>
+      <div class="row"><label>Base octaves</label><div class="slide" id="voiceOctaveControls"></div></div>
       <p class="aside">The walk is a function of this state alone. Everything below reads it; nothing writes to it but you.</p>
     </section>
 
@@ -675,8 +676,23 @@ function directedFifths(rootA, rootB){ return ((rootA-rootB)+12)%12; }
 /* =====================================================================
    2 · STATE
    ===================================================================== */
-const REGISTERS = [{lo:60,hi:84},{lo:48,hi:72},{lo:36,hi:60}];
+const DEFAULT_VOICE_OCTAVES = [5, 4, 3]; // Default base octaves: Melody (C5=60), Mid (C4=48), Bass (C3=36)
+function getRegisters() {
+  const octs = (typeof STATE !== 'undefined' && STATE && STATE.voiceOctaves) ? STATE.voiceOctaves : DEFAULT_VOICE_OCTAVES;
+  return octs.map(oct => {
+    const center = (oct + 1) * 12;
+    return { lo: center - 12, hi: center + 12, center };
+  });
+}
+// Proxy or backward-compatible getter for REGISTERS
+const REGISTERS = new Proxy([], {
+  get(target, prop) {
+    const regs = getRegisters();
+    return regs[prop];
+  }
+});
 const VOICE_NAMES = ['melody','middle','bass'];
+const MIDI_VOICE_NAMES = ['Melody', 'Mid', 'Bass'];
 
 // Cost surfaces are separable: cost(cell) = sum over axes of w * (1 - affinity[value]).
 // Defaults reproduce the classical ranking the first version hard-coded, but every
@@ -739,6 +755,7 @@ const STATE = {
   profiles: defaultProfiles(),
   cellFlips:{ chord:{}, voice:{} },   // "i0,i1,.." -> 0|1
   extended:false, walkingBass:false, arp:'none',
+  voiceOctaves: [5, 4, 3], // Base octaves for Melody, Mid, Bass
   take:'bold',   // which legal move to take: smooth | strong | bold
   seed:{ chordIdx:0, eta:1, prev2Idx:-1, voice:[null,null,null] },
   anchors:{},                          // step -> midi (melody)
@@ -1569,10 +1586,12 @@ function pushDash(a,x0,y0,x1,y1,w,c,dash){
 }
 function glSize(o){
   const c=o.gl.canvas, rect=c.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
-  const w=Math.max(2,Math.round(rect.width*dpr)), h=Math.max(2,Math.round(rect.height*dpr));
+  const rw = rect.width || c.clientWidth || 600;
+  const rh = rect.height || c.clientHeight || 300;
+  const w=Math.max(2,Math.round(rw*dpr)), h=Math.max(2,Math.round(rh*dpr));
   if(c.width!==w) c.width=w;
   if(c.height!==h) c.height=h;
-  o.w=rect.width; o.h=rect.height;
+  o.w=rw; o.h=rh;
 }
 function drawGL(o, arr){
   if(!o||!o.gl) return;
@@ -1621,13 +1640,15 @@ function coolWarm(t){ return mix(THEME.permit, THEME.forbid, clamp01(t)); }
 
 function ctx2d(canvas){
   const rect=canvas.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
-  const w=Math.max(2,Math.round(rect.width*dpr)), h=Math.max(2,Math.round(rect.height*dpr));
+  const rw = rect.width || canvas.clientWidth || 600;
+  const rh = rect.height || canvas.clientHeight || 150;
+  const w=Math.max(2,Math.round(rw*dpr)), h=Math.max(2,Math.round(rh*dpr));
   if(canvas.width!==w) canvas.width=w;
   if(canvas.height!==h) canvas.height=h;
   const g=canvas.getContext('2d');
   g.setTransform(dpr,0,0,dpr,0,0);
-  g.clearRect(0,0,rect.width,rect.height);
-  return {g, w:rect.width, h:rect.height};
+  g.clearRect(0,0,rw,rh);
+  return {g, w:rw, h:rh};
 }
 
 /* =====================================================================
@@ -2560,6 +2581,17 @@ function refreshSeedSelects(){
   fill($('selSeedPrev'), [['-1','none']].concat(v.map((c,i)=>[String(i), c.roman])), STATE.seed.prev2Idx);
   $('selSeedEta').value=String(STATE.seed.eta);
   const host=$('seedVoices'); host.innerHTML='';
+  const octHost=$('voiceOctaveControls'); if(octHost){ octHost.innerHTML='';
+    for(let i=0;i<3;i++){
+      const sel=document.createElement('select');
+      sel.style.flex='1'; sel.style.minWidth='0';
+      const opts=[[1,'C1'],[2,'C2'],[3,'C3'],[4,'C4'],[5,'C5'],[6,'C6'],[7,'C7']];
+      fill(sel, opts, STATE.voiceOctaves[i]);
+      sel.title=(typeof MIDI_VOICE_NAMES !== 'undefined' ? MIDI_VOICE_NAMES[i] : VOICE_NAMES[i])+' base octave';
+      sel.addEventListener('change', ()=>{ STATE.voiceOctaves[i]=+sel.value; refreshSeedSelects(); regenerate(); });
+      octHost.appendChild(sel);
+    }
+  }
   for(let i=0;i<3;i++){
     const sel=document.createElement('select');
     sel.style.flex='1'; sel.style.minWidth='0';
