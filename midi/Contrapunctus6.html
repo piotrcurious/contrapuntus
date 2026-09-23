@@ -323,7 +323,11 @@ details[open] summary::before{content:"– ";}
         <button class="tiny on" id="paretoOnly" style="flex:1">Pareto Only</button>
         <button class="tiny" id="paretoRelaxed" style="flex:1">Relaxed</button>
       </div>
-      <div class="row" style="margin-top:8px"><label for="sCtxThresh">Context Warp Threshold</label>
+      <div class="row" style="margin-top:8px"><label for="sParetoEps">ε-Tolerance (Variety)</label>
+        <div class="slide"><input type="range" id="sParetoEps" min="0" max="50" value="15"><span class="num" id="nParetoEps">0.15</span></div></div>
+      <div class="row"><label for="sParetoDiv">Niche Diversity Bonus</label>
+        <div class="slide"><input type="range" id="sParetoDiv" min="0" max="100" value="25"><span class="num" id="nParetoDiv">0.25</span></div></div>
+      <div class="row"><label for="sCtxThresh">Context Warp Threshold</label>
         <div class="slide"><input type="range" id="sCtxThresh" min="10" max="90" value="60"><span class="num" id="nCtxThresh">0.60</span></div></div>
 
       <div class="row" style="margin-top:10px"><label for="sW1">W₁ Stream Fusion (ASA)</label>
@@ -895,12 +899,13 @@ function calculatePlompLeveltRoughness(pitches) {
 
 // 2. PARETO FRONTIER NAVIGATION (Pruning Dominated Options)
 // A candidate A dominates B if A is <= B on all axes and strictly < B on at least one axis.
-function isParetoDominated(vectorA, vectorB) {
-  // Returns true if vectorA is dominated by vectorB (B is <= A on all axes and strictly < A on at least one)
+function isParetoDominated(vectorA, vectorB, eps) {
+  eps = eps != null ? eps : (STATE.paretoEpsilon != null ? STATE.paretoEpsilon : 0.15);
+  // Returns true if vectorA is epsilon-dominated by vectorB (B is significantly better across axes beyond tolerance eps)
   let B_is_strictly_better = false;
   for (let i = 0; i < vectorA.length; i++) {
-    if (vectorB[i] > vectorA[i]) return false; // B is worse than A on axis i, so B cannot dominate A
-    if (vectorB[i] < vectorA[i]) B_is_strictly_better = true;
+    if (vectorB[i] > vectorA[i] + eps) return false;
+    if (vectorB[i] < vectorA[i] - eps) B_is_strictly_better = true;
   }
   return B_is_strictly_better;
 }
@@ -908,7 +913,9 @@ function isParetoDominated(vectorA, vectorB) {
 function computeParetoFrontier(candidates) {
   if (candidates.length <= 1) return candidates;
 
-  // Ensure all candidates have a valid 5D State Tensor
+  const eps = STATE.paretoEpsilon != null ? STATE.paretoEpsilon : 0.15;
+  const divBonus = STATE.paretoDiversity != null ? STATE.paretoDiversity : 0.25;
+
   const prepared = candidates.map(c => {
     if (!c.tensor) {
       const pitches = c.c ? c.c.tones : (c.pitch ? [c.pitch] : [0]);
@@ -924,7 +931,7 @@ function computeParetoFrontier(candidates) {
     for (let j = 0; j < prepared.length; j++) {
       if (i === j) continue;
       const tensorJ = prepared[j].tensor;
-      if (isParetoDominated(tensorI, tensorJ)) {
+      if (isParetoDominated(tensorI, tensorJ, eps)) {
         dominated = true;
         break;
       }
@@ -933,6 +940,19 @@ function computeParetoFrontier(candidates) {
       frontier.push(prepared[i]);
     }
   }
+
+  // Niche Diversity / Novelty preservation: preserve candidates occupying distinct tensor regions
+  if (divBonus > 0 && frontier.length < candidates.length) {
+    const remaining = prepared.filter(c => !frontier.includes(c));
+    remaining.sort((a, b) => {
+      const minDistA = Math.min(...frontier.map(f => Math.hypot(...a.tensor.map((v, k) => v - f.tensor[k]))));
+      const minDistB = Math.min(...frontier.map(f => Math.hypot(...b.tensor.map((v, k) => v - f.tensor[k]))));
+      return minDistB - minDistA;
+    });
+    const extraCount = Math.ceil(remaining.length * divBonus);
+    frontier.push(...remaining.slice(0, extraCount));
+  }
+
   return frontier.length > 0 ? frontier : candidates;
 }
 
@@ -1257,6 +1277,8 @@ const STATE = window.STATE = {
   voiceOctaves: [5, 4, 3], // Base octaves for Melody, Mid, Bass
   take:'bold',   // which legal move to take: smooth | strong | bold
   paretoMode: 'pareto', // V6 Pareto Filtering: 'all' | 'pareto' | 'relaxed'
+  paretoEpsilon: 0.15,  // V6 epsilon-Pareto Tolerance (0.0 to 0.5) to prevent variety bottlenecks
+  paretoDiversity: 0.25,// V6 Niche Diversity / Novelty Bonus (0.0 to 1.0)
   contextThreshold: 0.60, // V6 Context-Warp Roughness Threshold
   cognitiveWeights: { W1: 1.0, W2: 1.0, W3: 1.0, W4: 1.0, W5: 1.0, W6: 1.0 }, // Version 5 Embodied Neural Dynamics Weights
   seed:{ chordIdx:0, eta:1, prev2Idx:-1, voice:[null,null,null] },
@@ -3450,6 +3472,8 @@ function bindControls(){
     el.addEventListener('input', ()=>{ set((+el.value)); n.textContent=fmt((+el.value)); regenerate(false); });
     el.addEventListener('change', ()=> regenerate(true));
   };
+  slider('sParetoEps','nParetoEps', v=>{ STATE.paretoEpsilon=v/100; }, v=>fmt2(v/100));
+  slider('sParetoDiv','nParetoDiv', v=>{ STATE.paretoDiversity=v/100; }, v=>fmt2(v/100));
   slider('sCtxThresh','nCtxThresh', v=>{ STATE.contextThreshold=v/100; }, v=>fmt2(v/100));
 
   const pModes=[['paretoAll','all'],['paretoOnly','pareto'],['paretoRelaxed','relaxed']];
