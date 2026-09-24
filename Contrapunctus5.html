@@ -1460,7 +1460,12 @@ function pickNote(cands, ctx){
   };
   let legal = cands.filter(m=>{ const c=cl(m); return tbl.t[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]===1; });
   let fellBack=false;
-  if(!legal.length){ legal=cands.slice(); fellBack=true; }
+  if(!legal.length){
+    // Fallback: prefer in-scale/in-chord tones first to prevent harsh chromatic dissonance
+    const scaleOnly = cands.filter(m => scalePCs.includes(pcOf(m)));
+    legal = scaleOnly.length ? scaleOnly : cands.slice();
+    fellBack=true;
+  }
   const approachScore = (m)=>{
     if(approachPc==null || prevPitch==null) return 2;
     const stepwise = Math.abs(m-prevPitch);
@@ -1477,6 +1482,10 @@ function pickNote(cands, ctx){
       const sa=approachScore(a), sb=approachScore(b);
       if(sa!==sb) return sa-sb;
     }
+    // Scale/chord fit (phi: chord tone 2 > scale tone 1 > chromatic 0) takes absolute priority over bold mode cost inversion
+    const pa = cl(a).phi, pb = cl(b).phi;
+    if(pa !== pb) return pb - pa;
+
     const ca=costOf(a), cb=costOf(b);
     if(mode==='strong' && ca!==cb) return ca-cb;
     if(mode==='bold'   && ca!==cb) return cb-ca;
