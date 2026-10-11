@@ -1391,6 +1391,204 @@ function pickNote(cands, ctx){
   return {pitch:chosen, cls:cls(chosen), fellBack};
 }
 
+/* =====================================================================
+   BEAM SEARCH BASS PLANNER
+   Evaluates N-beat trajectories holistically to construct smooth,
+   contrapuntally rich basslines.
+   ===================================================================== */
+
+const BEAM_WIDTH = 12; // Number of top trajectories retained per step
+
+/**
+ * Calculates a candidate note's step score given history and contrapuntal context.
+ */
+function scoreBassTransition(prevNode, candidatePitch, step, segInfo, walkData) {
+  const { chord, nextChord, targetTension, scalePCs, earAtStep, isLastBeatOfSeg } = walkData;
+  const chordPCs = chord.tones.map(pcOf);
+  const pc = pcOf(candidatePitch);
+
+  let deltaScore = 0;
+  const prevPitch = prevNode ? prevNode.pitch : null;
+  const dv = prevPitch != null ? (candidatePitch - prevPitch) : 0;
+  const stepDist = Math.abs(dv);
+  const dir = Math.sign(dv);
+
+  // --- 1. Dissonance & Resolution Check ---
+  let nextPendingDissonance = null;
+  if (prevNode && prevNode.pendingDissonance) {
+    const dis = prevNode.pendingDissonance;
+    if (dis.type === 'passing') {
+      // Passing tone MUST continue stepwise in the same direction
+      if (dir === dis.dir && (stepDist === 1 || stepDist === 2)) {
+        deltaScore += 45;
+      } else {
+        deltaScore -= 60; // Penalty for unresolved passing tone
+      }
+    } else if (dis.type === 'neighbor') {
+      // Neighbor tone MUST return to original pitch
+      if (candidatePitch === dis.originPitch) {
+        deltaScore += 50;
+      } else {
+        deltaScore -= 60;
+      }
+    }
+  }
+
+  // --- 2. Harmonic Alignment & Inversions ---
+  const isRoot = (pc === chord.rootPc);
+  const isChordTone = chordPCs.includes(pc);
+  const isScaleTone = scalePCs.includes(pc);
+
+  if (segInfo.first && isRoot) deltaScore += 35;          // Downbeat root preference
+  else if (segInfo.first && isChordTone) deltaScore += 25; // Inversion on downbeat
+  else if (isChordTone) deltaScore += 20;
+  else if (isScaleTone) deltaScore += 10;
+  else deltaScore -= 15;                                 // Chromatic tone penalty
+
+  // --- 3. Stepwise Motion & Interval Quality ---
+  if (prevPitch != null) {
+    if (stepDist === 1 || stepDist === 2) deltaScore += 30;       // Stepwise
+    else if (stepDist === 3 || stepDist === 4) deltaScore += 15;  // Small leap (3rd)
+    else if (stepDist === 7 || stepDist === 5) deltaScore += 10;  // Perfect 4th/5th
+    else if (stepDist === 0) deltaScore -= 5;                     // Static repeated note
+    else if (stepDist > 7) deltaScore -= 40;                      // Awkward leap
+  }
+
+  // --- 4. Directional Balance (Contour Management) ---
+  let newDirCount = 1;
+  let newLastDir = dir;
+  if (prevNode && dir !== 0) {
+    if (dir === prevNode.lastDir) {
+      newDirCount = prevNode.dirCount + 1;
+      if (newDirCount >= 3) {
+        deltaScore -= (newDirCount * 12); // Exponential penalty for 3+ steps in one direction
+      }
+    } else {
+      newLastDir = dir;
+      newDirCount = 1;
+      if (prevNode.dirCount >= 2 && Math.abs(prevNode.lastDv) >= 3) {
+        // Bonus for reversing direction after a leap
+        if (dir === -prevNode.lastDir) deltaScore += 20;
+      }
+    }
+  }
+
+  // --- 5. Cadential Approach (Last Beat of Segment) ---
+  if (isLastBeatOfSeg) {
+    const nextRoot = nextChord.rootPc;
+    const distToNextRoot = pcDist(pc, nextRoot);
+    if (distToNextRoot === 1) deltaScore += 40;       // Chromatic/diatonic leading tone
+    else if (distToNextRoot === 2) deltaScore += 25;  // Whole-step approach
+    else if (distToNextRoot === 5 || distToNextRoot === 7) deltaScore += 20; // 5th/4th move
+  }
+
+  // Set pending dissonance flag if taking a non-chord tone by step
+  if (!isChordTone && isScaleTone && stepDist <= 2 && prevPitch != null) {
+    nextPendingDissonance = {
+      type: 'passing',
+      dir: dir,
+      originPitch: prevPitch
+    };
+  }
+
+  return {
+    scoreDelta: deltaScore,
+    nodeData: {
+      pitch: candidatePitch,
+      dv: dv,
+      lastDv: dv,
+      lastDir: newLastDir,
+      dirCount: newDirCount,
+      pendingDissonance: nextPendingDissonance,
+      isChordTone: isChordTone
+    }
+  };
+}
+
+/**
+ * Runs Beam Search over a multi-step horizon (e.g., one or two chord segments).
+ *
+ * @param {Array} stepsRange - Array of absolute step indices [startStep ... endStep]
+ * @param {Object} walkContext - Current composition context & state
+ * @returns {Array} Best scoring path of notes for the sequence
+ */
+function planBassLineBeamSearch(stepsRange, walkContext) {
+  const { chords, tbl, initialPitch } = walkContext;
+
+  // Seed initial beam state
+  let beam = [{
+    pitch: initialPitch,
+    cumulativeScore: 0,
+    dv: 0,
+    lastDv: 0,
+    lastDir: 0,
+    dirCount: 0,
+    pendingDissonance: null,
+    path: []
+  }];
+
+  for (let idx = 0; idx < stepsRange.length; idx++) {
+    const step = stepsRange[idx];
+    const g = Math.min(segOfStep(step), chords.length - 1);
+    const chord = chords[g];
+    const nextChord = chords[Math.min(g + 1, chords.length - 1)];
+    const scalePCs = SCALES[scaleForSeg(g)].map(o => (STATE.root + o) % 12);
+
+    const isFirstBeat = firstOnsetOfSeg(2, step, g);
+    const isLastBeat = lastOnsetOfSeg(2, step, g);
+    const segInfo = { first: isFirstBeat, last: isLastBeat };
+
+    // Get active notes from upper voices to enforce register bounds
+    const ear = walkContext.hearsAtStep(2, step);
+    const above = [walkContext.curUpper(0, step), walkContext.curUpper(1, step)].filter(x => x != null);
+    const registerHi = above.length ? Math.min(...above) - 1 : REGISTERS[2].hi;
+
+    // Generate valid candidates in bass register
+    const validCands = bounded(rangeAll(REGISTERS[2].lo, registerHi), 0, registerHi);
+
+    const candidatesNextBeam = [];
+
+    // Expand each trajectory in the current beam
+    for (const pathNode of beam) {
+      // Filter out candidates violating parallel fifths/octaves
+      const nonParallelCands = filterParallels(validCands, pathNode.pitch, ear);
+
+      for (const pitch of nonParallelCands) {
+        const walkData = {
+          chord,
+          nextChord,
+          targetTension: targetForSeg(g),
+          scalePCs,
+          earAtStep: ear,
+          isLastBeatOfSeg: isLastBeat
+        };
+
+        const evalResult = scoreBassTransition(pathNode, pitch, step, segInfo, walkData);
+
+        candidatesNextBeam.push({
+          pitch: pitch,
+          cumulativeScore: pathNode.cumulativeScore + evalResult.scoreDelta,
+          dv: evalResult.nodeData.dv,
+          lastDv: evalResult.nodeData.lastDv,
+          lastDir: evalResult.nodeData.lastDir,
+          dirCount: evalResult.nodeData.dirCount,
+          pendingDissonance: evalResult.nodeData.pendingDissonance,
+          path: pathNode.path.concat([{ step, pitch, isChordTone: evalResult.nodeData.isChordTone, dv: evalResult.nodeData.dv }])
+        });
+      }
+    }
+
+    // Prune beam to retain top K trajectories
+    candidatesNextBeam.sort((a, b) => b.cumulativeScore - a.cumulativeScore);
+    beam = candidatesNextBeam.slice(0, BEAM_WIDTH);
+
+    if (beam.length === 0) break; // Fallback safeguard
+  }
+
+  // Return the path from the single highest-scoring trajectory
+  return beam[0] ? beam[0].path : [];
+}
+
 // Advanced Bass State Tracker
 const BASS_STATE = {
   lastDirection: 0,   // -1 (down), 0 (none), 1 (up)
@@ -1693,21 +1891,45 @@ function runVoiceWalk(chords){
     if (STATE.onsets[2][step]) {
       const first = firstOnsetOfSeg(2, step, g);
       const last = lastOnsetOfSeg(2, step, g);
+      const above = [cur(0), held[1]].filter(x => x != null);
+      const hi = above.length ? Math.min.apply(null, above) - 1 : 127;
       const ear = hears(2);
-      put(2, planSegmentBassLine(g, segLen(), {
-        chord,
-        nextChord: next,
-        tbl,
-        scalePCs,
-        earAtStep: ear,
+      const cands = filterParallels(
+        bounded(rangeAll(REGISTERS[2].lo, REGISTERS[2].hi), 0, hi),
+        held[2],
+        ear
+      );
+
+      // 1. Inversion Preference: Allow root, 3rd, or 5th for smooth voice-leading
+      let preferredPcs = [chord.rootPc];
+      if (first && held[2] != null) {
+        const chordPcs = chord.tones.map(pcOf);
+        // Rank chord tones by distance to previous pitch to favor stepwise bass motion
+        chordPcs.sort((a, b) => pcDist(a, pcOf(held[2])) - pcDist(b, pcOf(held[2])));
+        preferredPcs = chordPcs.slice(0, 2); // Top 2 candidates (e.g., root or 3rd)
+      }
+
+      // 2. Advanced Approach Logic on Last Beat (Enclosure or Leading Tone)
+      let approachTargetPc = null;
+      let isEnclosure = false;
+      if (STATE.walkingBass && !first && last) {
+        approachTargetPc = next.rootPc;
+        // Perform chromatic upper/lower enclosure if step count allows
+        if ((step % 2) === 1) isEnclosure = true;
+      }
+
+      // 3. Score Candidates with Inversions & Enclosure Context
+      put(2, pickEnhancedBassNote(cands, {
         prevPitch: held[2],
-        isLastBeatOfSeg: last,
-        first,
-        last,
-        step,
-        g,
-        cur0: cur(0),
-        held1: held[1]
+        others: ear,
+        chordTones: chord.tones,
+        scalePCs,
+        tbl,
+        preferredPcs,
+        structural: first,
+        approachPc: approachTargetPc,
+        isEnclosure,
+        stepInSeg: step - (g * segLen())
       }));
     }
     if(STATE.onsets[1][step]){
