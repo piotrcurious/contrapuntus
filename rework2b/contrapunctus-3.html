@@ -1391,6 +1391,173 @@ function pickNote(cands, ctx){
   return {pitch:chosen, cls:cls(chosen), fellBack};
 }
 
+// Advanced Bass State Tracker
+const BASS_STATE = {
+  lastDirection: 0,   // -1 (down), 0 (none), 1 (up)
+  dirCount: 0,        // consecutive steps in lastDirection
+  activeDissonance: null // { type: 'passing'|'neighbor'|'suspension', targetPc: number, dir: number }
+};
+
+function planSegmentBassLine(segIdx, totalStepsInSeg, walkData) {
+  const { chord, nextChord, tbl, scalePCs, earAtStep, prevPitch, first, last, step, g, cur0, held1 } = walkData;
+  const chordPCs = chord.tones.map(pcOf);
+  const nextRootPc = nextChord.rootPc;
+
+  // 1. Enforce Dissonance Resolution from previous step
+  if (BASS_STATE.activeDissonance && prevPitch != null) {
+    const res = BASS_STATE.activeDissonance;
+    BASS_STATE.activeDissonance = null; // Clear trigger
+
+    if (res.type === 'passing') {
+      // Must continue in the same direction by 1 or 2 semitones
+      const targetPitch = prevPitch + (res.dir * (res.stepSize || 1));
+      if (targetPitch >= REGISTERS[2].lo && targetPitch <= REGISTERS[2].hi) {
+        return { pitch: targetPitch, cls: { kappa: Math.min(2, consonanceCount(targetPitch, earAtStep)), mu: motionClass(targetPitch - prevPitch), phi: fitClass(pcOf(targetPitch), chordPCs, scalePCs), sigma: 1, gamma: relativeMotion(targetPitch - prevPitch, earAtStep) }, fellBack: false };
+      }
+    } else if (res.type === 'neighbor') {
+      // Must return to origin
+      if (res.originPitch != null) {
+        return { pitch: res.originPitch, cls: { kappa: Math.min(2, consonanceCount(res.originPitch, earAtStep)), mu: motionClass(res.originPitch - prevPitch), phi: fitClass(pcOf(res.originPitch), chordPCs, scalePCs), sigma: 0, gamma: relativeMotion(res.originPitch - prevPitch, earAtStep) }, fellBack: false };
+      }
+    }
+  }
+
+  // 1b. Inversion Preference & Approach Logic context
+  let preferredPcs = [chord.rootPc];
+  if (first && prevPitch != null) {
+    const chordPcs = chord.tones.map(pcOf);
+    chordPcs.sort((a, b) => pcDist(a, pcOf(prevPitch)) - pcDist(b, pcOf(prevPitch)));
+    preferredPcs = chordPcs.slice(0, 2);
+  }
+
+  let approachTargetPc = null;
+  let isEnclosure = false;
+  if (STATE.walkingBass && !first && last) {
+    approachTargetPc = nextRootPc;
+    if ((step % 2) === 1) isEnclosure = true;
+  }
+
+  // 2. Candidate Bounding & Parallels Filter
+  const above = [cur0, held1].filter(x => x != null);
+  const hi = above.length ? Math.min.apply(null, above) - 1 : 127;
+  const baseCands = filterParallels(
+    bounded(rangeAll(REGISTERS[2].lo, REGISTERS[2].hi), 0, hi),
+    prevPitch,
+    earAtStep
+  );
+  const cands = baseCands.length ? baseCands : bounded(rangeAll(REGISTERS[2].lo, REGISTERS[2].hi), 0, 127);
+
+  // 3. Candidate Scoring with Contour Penalties & Functional Intent
+  const scoredCands = cands.map(m => {
+    let score = 0;
+    const pc = pcOf(m);
+    const dv = prevPitch == null ? 0 : (m - prevPitch);
+    const stepDist = Math.abs(dv);
+    const dir = Math.sign(dv);
+
+    // --- Factor A: Chord Tone Fitness & Inversions ---
+    const isRoot = pc === chord.rootPc;
+    const isChordTone = chordPCs.includes(pc);
+    if (isChordTone) score += 20;
+    if (isRoot) score += 15;
+    if (preferredPcs && preferredPcs.includes(pc)) score += (15 - preferredPcs.indexOf(pc) * 5);
+
+    // --- Factor B: Contour Balance (Avoid Mono-directional Runs) ---
+    if (dir !== 0 && dir === BASS_STATE.lastDirection && BASS_STATE.dirCount >= 2) {
+      score -= (BASS_STATE.dirCount * 12); // Heavy penalty for 3+ steps in one direction
+    }
+
+    // --- Factor C: Smooth Stepwise Motion ---
+    if (stepDist === 1 || stepDist === 2) score += 25; // Stepwise
+    else if (stepDist === 3 || stepDist === 4) score += 10; // Small leap (3rd)
+    else if (stepDist > 7) score -= 30; // Unreasonable leap
+
+    // --- Factor D: Approach to Next Chord Root ---
+    if (last || walkData.isLastBeatOfSeg) {
+      if (approachTargetPc != null) {
+        const distToNextRoot = pcDist(pc, approachTargetPc);
+        if (isEnclosure) {
+          if (distToNextRoot === 1) score += 35;
+        } else {
+          if (distToNextRoot === 1) score += 35; // Chromatic leading tone (highest priority)
+          if (distToNextRoot === 2) score += 20; // Whole-step approach
+          if (distToNextRoot === 5 || distToNextRoot === 7) score += 15; // Dominant 5th move
+        }
+      } else {
+        const distToNextRoot = pcDist(pc, nextRootPc);
+        if (distToNextRoot === 1) score += 35;
+        if (distToNextRoot === 2) score += 20;
+        if (distToNextRoot === 5 || distToNextRoot === 7) score += 15;
+      }
+    }
+
+    return { pitch: m, score, dv, dir, isChordTone };
+  });
+
+  // Sort candidates by total score descending
+  scoredCands.sort((a, b) => b.score - a.score);
+
+  // Cross-reference with pickEnhancedBassNote for table legal candidates
+  const enhancedRes = pickEnhancedBassNote(cands, {
+    prevPitch,
+    others: earAtStep,
+    chordTones: chord.tones,
+    scalePCs,
+    tbl,
+    preferredPcs,
+    structural: first,
+    approachPc: approachTargetPc,
+    isEnclosure,
+    stepInSeg: step - (g * segLen())
+  });
+
+  const legalCands = scoredCands.filter(sc => {
+    const c = {
+      kappa: Math.min(2, consonanceCount(sc.pitch, earAtStep)),
+      mu: prevPitch == null ? 2 : motionClass(sc.dv),
+      phi: fitClass(pcOf(sc.pitch), chordPCs, scalePCs),
+      sigma: first ? 0 : 1,
+      gamma: relativeMotion(sc.dv, earAtStep)
+    };
+    return tbl.t[vIdx(c.kappa, c.mu, c.phi, c.sigma, c.gamma)] === 1;
+  });
+
+  const bestScored = legalCands.length ? legalCands[0] : scoredCands[0];
+  const best = bestScored || { pitch: enhancedRes.pitch, dv: prevPitch == null ? 0 : enhancedRes.pitch - prevPitch, dir: Math.sign(prevPitch == null ? 0 : enhancedRes.pitch - prevPitch), isChordTone: chordPCs.includes(pcOf(enhancedRes.pitch)) };
+
+  // 4. Register Dissonance Intent for the NEXT Step
+  if (prevPitch != null && !best.isChordTone) {
+    const dv = best.dv;
+    const dir = best.dir;
+    if (Math.abs(dv) <= 2) {
+      BASS_STATE.activeDissonance = {
+        type: 'passing',
+        dir: dir,
+        stepSize: Math.abs(dv),
+        originPitch: prevPitch
+      };
+    }
+  }
+
+  // 5. Update Direction History
+  if (best.dir !== 0) {
+    if (best.dir === BASS_STATE.lastDirection) BASS_STATE.dirCount++;
+    else { BASS_STATE.lastDirection = best.dir; BASS_STATE.dirCount = 1; }
+  }
+
+  return {
+    pitch: best.pitch,
+    cls: {
+      kappa: Math.min(2, consonanceCount(best.pitch, earAtStep)),
+      mu: motionClass(best.dv),
+      phi: fitClass(pcOf(best.pitch), chordPCs, scalePCs),
+      sigma: best.isChordTone ? 0 : 1,
+      gamma: relativeMotion(best.dv, earAtStep)
+    },
+    fellBack: false
+  };
+}
+
 function pickEnhancedBassNote(cands, ctx) {
   const { prevPitch, others, chordTones, scalePCs, tbl, preferredPcs, structural, approachPc, isEnclosure } = ctx;
   const chordPCs = chordTones.map(pcOf);
@@ -1478,6 +1645,10 @@ function arpSequence(tones, pattern, seed){
 // melody, the melody above whatever is held beneath it. A constraint that would
 // leave no candidate at all yields.
 function runVoiceWalk(chords){
+  BASS_STATE.lastDirection = 0;
+  BASS_STATE.dirCount = 0;
+  BASS_STATE.activeDissonance = null;
+
   const tbl = voiceTable();
   const total = STATE.onsets[0].length;
   const held=[null,null,null];
@@ -1522,45 +1693,21 @@ function runVoiceWalk(chords){
     if (STATE.onsets[2][step]) {
       const first = firstOnsetOfSeg(2, step, g);
       const last = lastOnsetOfSeg(2, step, g);
-      const above = [cur(0), held[1]].filter(x => x != null);
-      const hi = above.length ? Math.min.apply(null, above) - 1 : 127;
       const ear = hears(2);
-      const cands = filterParallels(
-        bounded(rangeAll(REGISTERS[2].lo, REGISTERS[2].hi), 0, hi),
-        held[2],
-        ear
-      );
-
-      // 1. Inversion Preference: Allow root, 3rd, or 5th for smooth voice-leading
-      let preferredPcs = [chord.rootPc];
-      if (first && held[2] != null) {
-        const chordPcs = chord.tones.map(pcOf);
-        // Rank chord tones by distance to previous pitch to favor stepwise bass motion
-        chordPcs.sort((a, b) => pcDist(a, pcOf(held[2])) - pcDist(b, pcOf(held[2])));
-        preferredPcs = chordPcs.slice(0, 2); // Top 2 candidates (e.g., root or 3rd)
-      }
-
-      // 2. Advanced Approach Logic on Last Beat (Enclosure or Leading Tone)
-      let approachTargetPc = null;
-      let isEnclosure = false;
-      if (STATE.walkingBass && !first && last) {
-        approachTargetPc = next.rootPc;
-        // Perform chromatic upper/lower enclosure if step count allows
-        if ((step % 2) === 1) isEnclosure = true;
-      }
-
-      // 3. Score Candidates with Inversions & Enclosure Context
-      put(2, pickEnhancedBassNote(cands, {
-        prevPitch: held[2],
-        others: ear,
-        chordTones: chord.tones,
-        scalePCs,
+      put(2, planSegmentBassLine(g, segLen(), {
+        chord,
+        nextChord: next,
         tbl,
-        preferredPcs,
-        structural: first,
-        approachPc: approachTargetPc,
-        isEnclosure,
-        stepInSeg: step - (g * segLen())
+        scalePCs,
+        earAtStep: ear,
+        prevPitch: held[2],
+        isLastBeatOfSeg: last,
+        first,
+        last,
+        step,
+        g,
+        cur0: cur(0),
+        held1: held[1]
       }));
     }
     if(STATE.onsets[1][step]){
