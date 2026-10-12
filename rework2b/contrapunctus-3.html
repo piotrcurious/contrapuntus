@@ -1805,10 +1805,13 @@ function pickEnhancedBassNote(cands, ctx) {
       }
     }
 
-    // C. Favor Stepwise Motion (avoid large awkward leaps)
-    const stepA = prevPitch == null ? 0 : Math.abs(a - prevPitch);
-    const stepB = prevPitch == null ? 0 : Math.abs(b - prevPitch);
-    if (Math.abs(stepA - stepB) >= 5) return stepA - stepB;
+    // C. Favor Stepwise Motion (avoid large awkward leaps & disfavor static repetition)
+    if (prevPitch != null) {
+      const stepA = Math.abs(a - prevPitch);
+      const stepB = Math.abs(b - prevPitch);
+      if ((stepA === 0) !== (stepB === 0)) return stepA === 0 ? 1 : -1;
+      if (stepA !== stepB) return stepA - stepB;
+    }
 
     return a - b;
   });
@@ -1901,12 +1904,16 @@ function runVoiceWalk(chords){
       );
 
       // 1. Inversion Preference: Allow root, 3rd, or 5th for smooth voice-leading
-      let preferredPcs = [chord.rootPc];
-      if (first && held[2] != null) {
-        const chordPcs = chord.tones.map(pcOf);
-        // Rank chord tones by distance to previous pitch to favor stepwise bass motion
-        chordPcs.sort((a, b) => pcDist(a, pcOf(held[2])) - pcDist(b, pcOf(held[2])));
-        preferredPcs = chordPcs.slice(0, 2); // Top 2 candidates (e.g., root or 3rd)
+      let preferredPcs = null;
+      if (first) {
+        if (held[2] != null) {
+          const chordPcs = chord.tones.map(pcOf);
+          // Rank chord tones by distance to previous pitch to favor stepwise bass motion
+          chordPcs.sort((a, b) => pcDist(a, pcOf(held[2])) - pcDist(b, pcOf(held[2])));
+          preferredPcs = chordPcs.slice(0, 2); // Top 2 candidates (e.g., root or 3rd)
+        } else {
+          preferredPcs = [chord.rootPc];
+        }
       }
 
       // 2. Advanced Approach Logic on Last Beat (Enclosure or Leading Tone)
