@@ -1267,10 +1267,11 @@ function renderExpansionUI() {
 
   const trackerEl = document.getElementById('phraseTrackerRead');
   if (trackerEl) {
-    const curStep = STATE.step || 0;
-    const pCtx = getPhraseStructure(curStep, (c && c.segments) ? c.segments : K);
+    const totalSegs = (c && c.segments) ? c.segments : K;
+    const activeStep = (typeof STATE.step === 'number' && STATE.step >= 0) ? STATE.step : (STATE.selectedSeg || 0);
+    const pCtx = getPhraseStructure(activeStep, totalSegs);
     trackerEl.innerHTML = `<strong>Live Macro-Phrase Position & Target:</strong><br>` +
-      `Current Step: ${curStep + 1} of ${(c && c.segments) ? c.segments : K}<br>` +
+      `Current Step: ${activeStep + 1} of ${totalSegs}<br>` +
       `Bar Position: Bar ${pCtx.bar + 1} of ${pCtx.totalBars}<br>` +
       `Phrase Progress: ${(pCtx.progress * 100).toFixed(1)}%<br>` +
       `Harmonic Goal Target: <strong>${pCtx.harmonicGoal.toUpperCase()}</strong>`;
@@ -1608,32 +1609,44 @@ function tieBreak(current, prev2, phraseCtx){
   }
 
   // Weighted Rule Domain Evaluation
+  const currentPcs = new Set((current.tones || []).map(pcOf));
   const scoreCandidate = (item)=>{
     const c = item.c;
     let score = 0;
 
-    // Motion penalty / bonus
+    // 1. Motion penalty / bonus
     let tierPenalty = 0;
     if(c.rootPc===current.rootPc && c.quality===current.quality) tierPenalty = 10.0;
     else if(prev2 && c.rootPc===prev2.rootPc && c.quality===prev2.quality) tierPenalty = 4.0;
     score -= tierPenalty * tr.wMotion;
 
-    // Voice leading distance penalty
+    // 2. Voice leading distance penalty
     const vl = voiceLeadingDistance(current.tones, c.tones);
     score -= (vl / 12.0) * tr.wVoice;
 
-    // Rule cost
+    // 3. Rule cost & take mode
     const mode = STATE.take;
     let cCost = item.cost;
     if(mode==='bold') score += cCost * tr.wCost;
     else score -= cCost * tr.wCost;
 
-    // Circle of 5ths root fall bonus
+    // 4. Circle of 5ths root fall & applied secondary resolution bonus
     const fall = (current.rootPc - c.rootPc + 12) % 12;
     if(fall === 7) score += 1.5 * tr.wFifths; // perfect 5th down
     else if(fall === 5) score += 0.8 * tr.wFifths;
 
-    // Cadential Phrase Goal alignment
+    if(current.ring > 0 && fall === 7) {
+      score += 1.2 * tr.wFifths; // applied secondary dominant / leading tone resolution
+    }
+
+    // 5. Common Tone Smoothness Bonus
+    let commonCount = 0;
+    if(c.tones) {
+      for(const t of c.tones) if(currentPcs.has(pcOf(t))) commonCount++;
+    }
+    score += (commonCount * 0.4) * tr.wVoice;
+
+    // 6. Cadential Phrase Goal alignment
     if(phraseCtx && phraseCtx.harmonicGoal === 'dominant' && (c.degree === 4 || fall === 7)){
       score += 2.0 * tr.wGoal;
     } else if(phraseCtx && phraseCtx.harmonicGoal === 'tonic' && c.degree === 0){
@@ -1687,13 +1700,17 @@ const KIT_CACHE = new WeakMap();
 function vocabKit(vocab, target){
   let k = KIT_CACHE.get(vocab);
   if(!k){
-    const V=vocab.length, vl=new Int16Array(V*V), fall=new Uint8Array(V*V), same=new Uint8Array(V*V);
+    const V=vocab.length, vl=new Int16Array(V*V), fall=new Uint8Array(V*V), same=new Uint8Array(V*V), common=new Uint8Array(V*V);
     for(let i=0;i<V;i++) for(let j=0;j<V;j++){
       vl[i*V+j]   = voiceLeadingDistance(vocab[i].tones, vocab[j].tones);
       fall[i*V+j] = rootFall(vocab[i].rootPc, vocab[j].rootPc);
       same[i*V+j] = (vocab[i].rootPc===vocab[j].rootPc && vocab[i].quality===vocab[j].quality) ? 1 : 0;
+      const pcsA = new Set(vocab[i].tones.map(pcOf));
+      let ct = 0;
+      for(const t of vocab[j].tones) if(pcsA.has(pcOf(t))) ct++;
+      common[i*V+j] = ct;
     }
-    k = {V, vl, fall, same, root:Int8Array.from(vocab.map(c=>c.rootPc)), byTarget:new Map()};
+    k = {V, vl, fall, same, common, root:Int8Array.from(vocab.map(c=>c.rootPc)), ring:Uint8Array.from(vocab.map(c=>c.ring)), byTarget:new Map()};
     KIT_CACHE.set(vocab, k);
   }
   const tk = target.toFixed(4);
@@ -1706,11 +1723,11 @@ function vocabKit(vocab, target){
     if(k.byTarget.size>8) k.byTarget.clear();
     k.byTarget.set(tk, t);
   }
-  return {V:k.V, vl:k.vl, same:k.same, fall:k.fall, root:k.root, fidx:t.fidx};
+  return {V:k.V, vl:k.vl, same:k.same, common:k.common, fall:k.fall, root:k.root, ring:k.ring, fidx:t.fidx};
 }
 // index of the move the rule plays from (cur, prev2, eta); prev2 = -1 for none
 function chordNext(cur, prev2, eta, tbl, kit, mode, phraseCtx, tieRules){
-  const V=kit.V, vl=kit.vl, same=kit.same, fidx=kit.fidx, root=kit.root, fall=kit.fall, tt=tbl.t, cs=tbl.costs;
+  const V=kit.V, vl=kit.vl, same=kit.same, common=kit.common, fidx=kit.fidx, root=kit.root, ring=kit.ring, fall=kit.fall, tt=tbl.t, cs=tbl.costs;
   const eo=eta*CS[3], row=cur*V, prow=prev2>=0 ? prev2*V : -1;
   tieRules = tieRules || STATE.tieRules || { mode:'weighted', wMotion:1, wVoice:1, wCost:1, wFifths:0.5, wGoal:0.5 };
   mode = mode || STATE.take || 'bold';
@@ -1738,6 +1755,13 @@ function chordNext(cur, prev2, eta, tbl, kit, mode, phraseCtx, tieRules){
         const rf = fall[row+j];
         if(rf === 7) score += 1.5 * tieRules.wFifths;
         else if(rf === 5) score += 0.8 * tieRules.wFifths;
+
+        if(ring[cur] > 0 && rf === 7) {
+          score += 1.2 * tieRules.wFifths;
+        }
+
+        const ct = common ? common[row+j] : 0;
+        score += (ct * 0.4) * tieRules.wVoice;
 
         if(phraseCtx && phraseCtx.harmonicGoal === 'dominant' && (rf === 7 || root[j] === 7)){
           score += 2.0 * tieRules.wGoal;
@@ -2119,7 +2143,11 @@ function pickEnhancedBassNote(cands, ctx) {
     return tbl.t[vIdx(c.kappa, c.mu, c.phi, c.sigma, c.gamma)] === 1;
   });
 
-  if (!legal.length) legal = filtered.slice();
+  let fellBack = false;
+  if (!legal.length) {
+    legal = filtered.slice();
+    fellBack = true;
+  }
 
   legal.sort((a, b) => {
     // A. Prioritize Smooth Inversions over rigid Root notes
@@ -2159,7 +2187,7 @@ function pickEnhancedBassNote(cands, ctx) {
   });
 
   const chosen = legal[0];
-  return { pitch: chosen, cls: cls(chosen), fellBack: false };
+  return { pitch: chosen, cls: cls(chosen), fellBack };
 }
 
 function deterministicShuffle(arr, seed){
@@ -2467,8 +2495,10 @@ function orbitClass(period, pieceChords){
 // Everything that decides the chord automaton; the analyses are cached on it.
 function ruleKey(){
   const tr = STATE.tieRules || {};
+  const rr = STATE.ruleRing || {};
   return [STATE.root, STATE.scaleName, STATE.extended?1:0, STATE.tension.toFixed(4), STATE.take,
           STATE.bars, STATE.stepsPerBar, tr.mode, tr.wMotion, tr.wVoice, tr.wCost, tr.wFifths, tr.wGoal,
+          rr.enabled?1:0, rr.op, rr.ruleA, rr.ruleB,
           profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
 }
 
