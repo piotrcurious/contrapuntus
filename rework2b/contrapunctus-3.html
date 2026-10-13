@@ -1188,13 +1188,15 @@ function evaluateAdaptationState(segIdx, totalSegments, chordsHistory, currentCh
    - verifyFastPathEquivalence()
    ===================================================================== */
 
-function verifyRuleAlgebraInvariants(tableA, tableB) {
+function verifyRuleAlgebraInvariants(tableA, tableB, tableC) {
   const violations = [];
-  if (tableA.length !== tableB.length) {
+  if (tableA.length !== tableB.length || (tableC && tableA.length !== tableC.length)) {
     violations.push('Table length mismatch');
     return { passed: false, violations };
   }
   const size = tableA.length;
+
+  // 1. Commutativity: A ∩ B = B ∩ A, A ∪ B = B ∪ A
   const interAB = ruleIntersection(tableA, tableB);
   const interBA = ruleIntersection(tableB, tableA);
   for (let i = 0; i < size; i++) {
@@ -1213,11 +1215,49 @@ function verifyRuleAlgebraInvariants(tableA, tableB) {
     }
   }
 
+  // 2. Idempotence: A ∩ A = A, A ∪ A = A
+  const interAA = ruleIntersection(tableA, tableA);
+  const unionAA = ruleUnion(tableA, tableA);
+  for (let i = 0; i < size; i++) {
+    if (interAA[i] !== tableA[i]) {
+      violations.push(`Idempotence violation at cell ${i} for Intersection`);
+      break;
+    }
+    if (unionAA[i] !== tableA[i]) {
+      violations.push(`Idempotence violation at cell ${i} for Union`);
+      break;
+    }
+  }
+
+  // 3. Nilpotency / Self-Inverse: A ⊕ A = 0
   const xorSelf = ruleXor(tableA, tableA);
   for (let i = 0; i < size; i++) {
     if (xorSelf[i] !== 0) {
       violations.push(`Nilpotency/Self-inverse violation at cell ${i} for XOR`);
       break;
+    }
+  }
+
+  // 4. Associativity and Distributivity (if tableC provided)
+  if (tableC) {
+    // Associativity: (A ∩ B) ∩ C = A ∩ (B ∩ C)
+    const interAB_C = ruleIntersection(interAB, tableC);
+    const interBC = ruleIntersection(tableB, tableC);
+    const interA_BC = ruleIntersection(tableA, interBC);
+    for (let i = 0; i < size; i++) {
+      if (interAB_C[i] !== interA_BC[i]) {
+        violations.push(`Associativity violation at cell ${i} for Intersection`);
+        break;
+      }
+    }
+
+    // Absorption: A ∩ (A ∪ B) = A
+    const absorb = ruleIntersection(tableA, unionAB);
+    for (let i = 0; i < size; i++) {
+      if (absorb[i] !== tableA[i]) {
+        violations.push(`Absorption violation at cell ${i}`);
+        break;
+      }
     }
   }
 
@@ -3361,15 +3401,23 @@ function latticeReadout(f){
   }
   const c=cellList(sp.dims)[f], maxCost=Math.max.apply(null, Array.from(sp.tbl.costs));
   const parts=sp.axes.map((a,i)=>a.label+' <b>'+a.tick(c[i])+'</b>');
-  const legal=sp.tbl.t[f], flipped=sp.flips[c.join(',')]!=null, n=sp.counts.get(f)||0;
+  const legal=sp.tbl.t[f], n=sp.counts.get(f)||0;
+
+  // Explicit Provenance & Overrides
+  const baseVal = sp.tbl.base ? sp.tbl.base[f] : legal;
+  const ov = sp.tbl.overrides ? sp.tbl.overrides[f] : OVERRIDE_INHERIT;
+  const provState = ov === OVERRIDE_FORCE_ALLOW ? 'FORCE_ALLOW' : (ov === OVERRIDE_FORCE_DENY ? 'FORCE_DENY' : 'INHERIT');
+  const provText = ov === OVERRIDE_FORCE_ALLOW ? '<span class="hand">FORCE_ALLOW (by hand)</span>' : (ov === OVERRIDE_FORCE_DENY ? '<span class="hand">FORCE_DENY (by hand)</span>' : 'INHERIT (from λ prof)');
+
   const k=latCellClass(sp,f);
   let l2;
   if(sp.set==='chord'){
     if(!k.reach) l2='no move in this vocabulary lands here, so the rule never asks about this cell';
     else { const ex=chordCellExamples(f,3); l2='asked by moves like '+(ex.length?ex.join(', '):'(depends on momentum)'); }
   } else l2='';
-  el.innerHTML = parts.join('  ')+'   ·   cost <b>'+(sp.tbl.costs[f]/Math.max(1e-9,maxCost)).toFixed(2)+'</b>   ·   <b>'+(legal?'legal':'not legal')+'</b>'
-    + (flipped?'   ·   <span class="hand">flipped by you</span>':'')
+  el.innerHTML = parts.join('  ')+'   ·   cost <b>'+(sp.tbl.costs[f]/Math.max(1e-9,maxCost)).toFixed(2)+'</b>   ·   effective: <b>'+(legal?'LEGAL':'FORBIDDEN')+'</b>'
+    + '   ·   base: <b>'+(baseVal?'ALLOW':'DENY')+'</b>'
+    + '   ·   override: <b>'+provText+'</b>'
     + '<br>'+(l2?l2+'   ·   ':'')
     + (n?'used <b>'+n+'×</b> by this piece':'not used by this piece')
     + (sp.dep && sp.dep.has(f)?'   ·   <b>flipping it changes the piece</b>':'');
@@ -5582,7 +5630,7 @@ function boot(){
 
   if(window.__CP_DEBUG){          // a handle for the browser tests; absent in normal use
     window.__cp={ STATE, PROJ, AUD, THEME, TUNINGS, compose, regenerate, buildMidi, serializeState, restoreState, stateToCode, parseStateText,
-      midiSummary, selectNote, setPreset, setLatticeSet, drawLattice, drawRoll, renderAll, play, stop, togglePlay, layoutLattice, snapshot,
+      midiSummary, selectNote, setPreset, setLatticeSet, drawLattice, drawRoll, renderAll, play, stop, togglePlay, layoutLattice, snapshot, latticeReadout,
       chordTable, voiceTable, vocabularyFor, SCALES, scaleForSeg, targetForSeg, forkFrom,
       verifyRuleAlgebraInvariants, verifyAutomatonInvariants, verifyFastPathEquivalence,
       get LAYOUT(){ return LAYOUT; }, get GL_LAT(){ return GL_LAT; }, get GL_ROLL(){ return GL_ROLL; }, get HIST(){ return HIST; },
