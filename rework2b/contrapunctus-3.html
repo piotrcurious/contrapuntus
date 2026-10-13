@@ -1120,6 +1120,106 @@ function etaOf(d){
   return a>=0.72 ? 2 : a>=0.34 ? 1 : 0;
 }
 
+/* =====================================================================
+   ENDOGENOUS RULE ADAPTATION MODEL
+   Deterministic discrete state machine governing non-stationary rule evolution:
+   - ENDOGENOUS_ADAPTATION_STATES: STABLE, INCREASING_ENTROPY, DECREASING_ENTROPY, CADENTIAL
+   - Evaluates local pitch-class entropy and cadential triggers
+   - Manual overrides (R_edits) retain strict precedence
+   ===================================================================== */
+
+const ENDOGENOUS_ADAPTATION_STATES = {
+  STABLE: 'STABLE',
+  INCREASING_ENTROPY: 'INCREASING_ENTROPY',
+  DECREASING_ENTROPY: 'DECREASING_ENTROPY',
+  CADENTIAL: 'CADENTIAL'
+};
+
+function calculateLocalPitchClassEntropy(chords) {
+  if (!chords || !chords.length) return 0;
+  const pcCounts = new Array(12).fill(0);
+  let totalTones = 0;
+  for (const c of chords) {
+    if (!c || !c.tones) continue;
+    for (const t of c.tones) {
+      pcCounts[pcOf(t)]++;
+      totalTones++;
+    }
+  }
+  if (totalTones === 0) return 0;
+  let H = 0;
+  for (let pc = 0; pc < 12; pc++) {
+    const p = pcCounts[pc] / totalTones;
+    if (p > 0) H -= p * Math.log2(p);
+  }
+  return H;
+}
+
+function evaluateAdaptationState(segIdx, totalSegments, chordsHistory, currentChord) {
+  const isCadentialSegment = (segIdx >= totalSegments - 2) || (currentChord && currentChord.roman && currentChord.roman.startsWith('V'));
+  if (isCadentialSegment) {
+    return ENDOGENOUS_ADAPTATION_STATES.CADENTIAL;
+  }
+
+  if (chordsHistory.length < 2) {
+    return ENDOGENOUS_ADAPTATION_STATES.STABLE;
+  }
+
+  const currentWindow = chordsHistory.slice(-2);
+  const previousWindow = chordsHistory.slice(-4, -2);
+
+  const H_curr = calculateLocalPitchClassEntropy(currentWindow);
+  const H_prev = previousWindow.length ? calculateLocalPitchClassEntropy(previousWindow) : H_curr;
+
+  const diff = H_curr - H_prev;
+  if (diff > 0.08) {
+    return ENDOGENOUS_ADAPTATION_STATES.INCREASING_ENTROPY;
+  } else if (diff < -0.08) {
+    return ENDOGENOUS_ADAPTATION_STATES.DECREASING_ENTROPY;
+  }
+  return ENDOGENOUS_ADAPTATION_STATES.STABLE;
+}
+
+function adaptChordTable(baseTbl, adaptationState, lambdaC) {
+  if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.STABLE) {
+    return baseTbl;
+  }
+
+  const effectiveTable = new Uint8Array(baseTbl.t.length);
+  effectiveTable.set(baseTbl.t);
+
+  // Discrete adaptation shifts on lambda cutoff
+  let deltaLambda = 0;
+  if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.INCREASING_ENTROPY) {
+    deltaLambda = 0.05; // Slightly relax rule space during high entropy
+  } else if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.DECREASING_ENTROPY) {
+    deltaLambda = -0.05; // Constrain rule space during low entropy
+  } else if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.CADENTIAL) {
+    deltaLambda = -0.10; // Tighten rule space at cadences
+  }
+
+  const targetLambda = clamp01(lambdaC + deltaLambda);
+  const adaptedBase = buildTable(CHORD_AXES, CHORD_DIMS, CHORD_STR.strides, STATE.profiles.chord, targetLambda, STATE.cellFlips.chord);
+
+  // Preserve strict precedence of manual cell overrides
+  for (let f = 0; f < effectiveTable.length; f++) {
+    if (baseTbl.overrides[f] === OVERRIDE_FORCE_ALLOW) {
+      effectiveTable[f] = 1;
+    } else if (baseTbl.overrides[f] === OVERRIDE_FORCE_DENY) {
+      effectiveTable[f] = 0;
+    } else {
+      effectiveTable[f] = adaptedBase.t[f];
+    }
+  }
+
+  return {
+    ...baseTbl,
+    t: effectiveTable,
+    adaptationState,
+    effectiveLambda: targetLambda
+  };
+}
+
 /* ---- statistics over a table: this is what "statistical control" means ---- */
 function marginals(axes, dims, strides, table){
   const cells = cellList(dims);
@@ -1423,12 +1523,20 @@ function runChordWalk(totalSegments){
     status: 'FEASIBLE'
   }];
 
+  const chordsHistory = [s0.chord];
+
   for(let g=1; g<totalSegments; g++){
     const vocab = vocabAt(g), target = targetForSeg(g);
+
+    // Endogenous Rule Adaptation State Evaluation
+    const adaptationState = evaluateAdaptationState(g, totalSegments, chordsHistory, walkerState.current);
+    const adaptedTbl = adaptChordTable(tbl, adaptationState, STATE.lamC);
+
     const stateInput = {
       ...walkerState,
       vocab,
       target,
+      tbl: adaptedTbl,
       segIdx: g,
       pin: STATE.pins[g]
     };
@@ -1440,6 +1548,8 @@ function runChordWalk(totalSegments){
     const { nextState, record } = ChordComposerPolicy.updateState(stateInput, selection);
 
     walkerState = nextState;
+    chordsHistory.push(record.chord);
+    record.adaptationState = adaptationState;
     out.push(record);
   }
   return out;
