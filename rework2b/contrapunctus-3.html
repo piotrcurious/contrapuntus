@@ -1283,7 +1283,8 @@ function adaptChordTable(baseTbl, adaptationState, lambdaC) {
   const targetLambda = clamp01(lambdaC + deltaLambda);
   const adaptedBase = buildTable(CHORD_AXES, CHORD_DIMS, CHORD_STR.strides, STATE.profiles.chord, targetLambda, STATE.cellFlips.chord);
 
-  // Preserve strict precedence of manual cell overrides
+  // Preserve strict precedence of manual cell overrides & recompute table metadata
+  let legal = 0;
   for (let f = 0; f < effectiveTable.length; f++) {
     if (baseTbl.overrides[f] === OVERRIDE_FORCE_ALLOW) {
       effectiveTable[f] = 1;
@@ -1292,11 +1293,14 @@ function adaptChordTable(baseTbl, adaptationState, lambdaC) {
     } else {
       effectiveTable[f] = adaptedBase.t[f];
     }
+    if (effectiveTable[f]) legal++;
   }
 
   return {
     ...baseTbl,
     t: effectiveTable,
+    legalCount: legal,
+    cut: adaptedBase.cut,
     adaptationState,
     effectiveLambda: targetLambda
   };
@@ -1646,20 +1650,45 @@ function forkFrom(walk, segIdx, alt, horizon){
   const vocabAt = (g)=>{ const n=scaleForSeg(g); return cache[n] || (cache[n]=vocabularyFor(STATE.root, SCALES[n], STATE.extended)); };
   const w = walk[segIdx];
   if(!w || !w.from) return {chords:[], cells:[]};
-  let current = alt, prev2 = w.from;
+
+  let walkerState = {
+    vocab: vocabAt(segIdx),
+    current: alt,
+    prev2: w.from,
+    eta: etaOf(cellOfMove(w.from, alt, w.target, w.etaIn).d),
+    target: w.target,
+    tbl,
+    segIdx
+  };
+
   const firstCell = cellOfMove(w.from, alt, w.target, w.etaIn);
-  let eta = etaOf(firstCell.d);
   const chords=[alt], cells=[firstCell];
+  const chordsHistory = walk.slice(0, segIdx).map(x => x.chord).concat([alt]);
+
   for(let g=segIdx+1; g<Math.min(walk.length, segIdx+1+horizon); g++){
     const vocab = vocabAt(g), target = targetForSeg(g);
-    const {legal} = chordStep(current, prev2, eta, tbl, vocab, target);
-    let chosen = legal[0];
-    const pin = STATE.pins[g];
-    if(pin){ const f = legal.find(c=>c.key===pin); if(f) chosen=f; }
-    cells.push(cellOfMove(current, chosen, target, eta));
-    eta = etaOf(rootFall(current.rootPc, chosen.rootPc));
-    prev2 = current; current = chosen;
-    chords.push(chosen);
+    const adaptationState = evaluateAdaptationState(g, walk.length, chordsHistory, walkerState.current);
+    const adaptedTbl = adaptChordTable(tbl, adaptationState, STATE.lamC);
+
+    const stateInput = {
+      ...walkerState,
+      vocab,
+      target,
+      tbl: adaptedTbl,
+      segIdx: g,
+      pin: STATE.pins[g]
+    };
+
+    const cands = ChordComposerPolicy.buildCandidates(stateInput);
+    const { legal } = ChordComposerPolicy.evaluateRules(stateInput, cands);
+    const filtered = ChordComposerPolicy.applyHardConstraints(stateInput, legal);
+    const selection = ChordComposerPolicy.selectCandidate(stateInput, cands, filtered);
+    const { nextState, record } = ChordComposerPolicy.updateState(stateInput, selection);
+
+    walkerState = nextState;
+    chordsHistory.push(record.chord);
+    cells.push(record.cell);
+    chords.push(record.chord);
   }
   return {chords, cells};
 }
@@ -1733,9 +1762,10 @@ function pickNote(cands, ctx){
   const costOf = (m)=>{ const c=cl(m); return tbl.costs[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]; };
   let legal = cands.filter(m=>{ const c=cl(m); return tbl.t[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]===1; });
   let fellBack=false;
-  if(!legal.length){ legal=cands.slice(); fellBack=true; }
-  // A walking bass leads into the next root from a half step or a whole step away,
-  // not by sounding the next root early.
+  if(!legal.length){
+    legal=cands.slice();
+    fellBack=true;
+  }
   const approachScore = (m)=>{ const d=pcDist(pcOf(m), approachPc); return d===1?0 : d===2?1 : 2; };
   const mode = STATE.take;
   legal.sort((a,b)=>{
@@ -1758,7 +1788,7 @@ function pickNote(cands, ctx){
     return a-b;
   });
   const chosen=legal[0];
-  return {pitch:chosen, cls:cls(chosen), fellBack};
+  return {pitch:chosen, cls:cls(chosen), fellBack, status: fellBack ? 'INFEASIBLE' : 'FEASIBLE'};
 }
 
 /* =====================================================================
@@ -2147,7 +2177,11 @@ function pickEnhancedBassNote(cands, ctx) {
     return tbl.t[vIdx(c.kappa, c.mu, c.phi, c.sigma, c.gamma)] === 1;
   });
 
-  if (!legal.length) legal = cands.slice();
+  let fellBack = false;
+  if (!legal.length) {
+    legal = cands.slice();
+    fellBack = true;
+  }
 
   legal.sort((a, b) => {
     // A. Prioritize Smooth Inversions over rigid Root notes
@@ -2187,7 +2221,7 @@ function pickEnhancedBassNote(cands, ctx) {
   });
 
   const chosen = legal[0];
-  return { pitch: chosen, cls: cls(chosen), fellBack: false };
+  return { pitch: chosen, cls: cls(chosen), fellBack, status: fellBack ? 'INFEASIBLE' : 'FEASIBLE' };
 }
 
 function deterministicShuffle(arr, seed){
@@ -5549,7 +5583,7 @@ function boot(){
   if(window.__CP_DEBUG){          // a handle for the browser tests; absent in normal use
     window.__cp={ STATE, PROJ, AUD, THEME, TUNINGS, compose, regenerate, buildMidi, serializeState, restoreState, stateToCode, parseStateText,
       midiSummary, selectNote, setPreset, setLatticeSet, drawLattice, drawRoll, renderAll, play, stop, togglePlay, layoutLattice, snapshot,
-      chordTable, voiceTable, vocabularyFor, SCALES, scaleForSeg, targetForSeg,
+      chordTable, voiceTable, vocabularyFor, SCALES, scaleForSeg, targetForSeg, forkFrom,
       verifyRuleAlgebraInvariants, verifyAutomatonInvariants, verifyFastPathEquivalence,
       get LAYOUT(){ return LAYOUT; }, get GL_LAT(){ return GL_LAT; }, get GL_ROLL(){ return GL_ROLL; }, get HIST(){ return HIST; },
       ENVED, SEQ, HOVER, ROLL, rollGeom, seqLayout, envTarget, secondsPerStep, envSchedule, envLevel, ENV_PEAK, ENV_FLOOR, soundingPitch, readTheme };
