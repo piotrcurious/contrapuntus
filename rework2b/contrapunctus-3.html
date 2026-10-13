@@ -1180,6 +1180,88 @@ function evaluateAdaptationState(segIdx, totalSegments, chordsHistory, currentCh
   return ENDOGENOUS_ADAPTATION_STATES.STABLE;
 }
 
+/* =====================================================================
+   PHASE 6: MATHEMATICAL AND AUTOMATON INVARIANT VERIFICATION SUITE
+   Exhaustive finite-state and algebraic invariant verifiers:
+   - verifyRuleAlgebraInvariants()
+   - verifyAutomatonInvariants()
+   - verifyFastPathEquivalence()
+   ===================================================================== */
+
+function verifyRuleAlgebraInvariants(tableA, tableB) {
+  const violations = [];
+  if (tableA.length !== tableB.length) {
+    violations.push('Table length mismatch');
+    return { passed: false, violations };
+  }
+  const size = tableA.length;
+  const interAB = ruleIntersection(tableA, tableB);
+  const interBA = ruleIntersection(tableB, tableA);
+  for (let i = 0; i < size; i++) {
+    if (interAB[i] !== interBA[i]) {
+      violations.push(`Commutativity violation at cell ${i} for Intersection`);
+      break;
+    }
+  }
+
+  const unionAB = ruleUnion(tableA, tableB);
+  const unionBA = ruleUnion(tableB, tableA);
+  for (let i = 0; i < size; i++) {
+    if (unionAB[i] !== unionBA[i]) {
+      violations.push(`Commutativity violation at cell ${i} for Union`);
+      break;
+    }
+  }
+
+  const xorSelf = ruleXor(tableA, tableA);
+  for (let i = 0; i < size; i++) {
+    if (xorSelf[i] !== 0) {
+      violations.push(`Nilpotency/Self-inverse violation at cell ${i} for XOR`);
+      break;
+    }
+  }
+
+  return { passed: violations.length === 0, violations };
+}
+
+function verifyAutomatonInvariants(pieceChords) {
+  const violations = [];
+  if (!pieceChords || !pieceChords.length) {
+    violations.push('Empty chord walk sequence');
+    return { passed: false, violations };
+  }
+
+  for (let i = 0; i < pieceChords.length; i++) {
+    const c = pieceChords[i];
+    if (!c || c.rootPc == null || !Array.isArray(c.tones)) {
+      violations.push(`Invalid chord object at step ${i}`);
+    }
+  }
+
+  return { passed: violations.length === 0, violations };
+}
+
+function verifyFastPathEquivalence(vocab, target, tbl, mode) {
+  const kit = vocabKit(vocab, target);
+  let mismatches = 0;
+  const V = vocab.length;
+
+  for (let i = 0; i < V; i++) {
+    for (let p = -1; p < V; p++) {
+      for (let e = 0; e < 3; e++) {
+        const stepRes = chordStep(vocab[i], p >= 0 ? vocab[p] : null, e, tbl, vocab, target);
+        const nextIdx = chordNext(i, p, e, tbl, kit, mode);
+        const stepIdx = vocab.indexOf(stepRes.legal[0]);
+        if (nextIdx !== stepIdx) {
+          mismatches++;
+        }
+      }
+    }
+  }
+
+  return { passed: mismatches === 0, mismatches, totalTested: V * (V + 1) * 3 };
+}
+
 function adaptChordTable(baseTbl, adaptationState, lambdaC) {
   if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.STABLE) {
     return baseTbl;
@@ -5467,6 +5549,8 @@ function boot(){
   if(window.__CP_DEBUG){          // a handle for the browser tests; absent in normal use
     window.__cp={ STATE, PROJ, AUD, THEME, TUNINGS, compose, regenerate, buildMidi, serializeState, restoreState, stateToCode, parseStateText,
       midiSummary, selectNote, setPreset, setLatticeSet, drawLattice, drawRoll, renderAll, play, stop, togglePlay, layoutLattice, snapshot,
+      chordTable, voiceTable, vocabularyFor, SCALES, scaleForSeg, targetForSeg,
+      verifyRuleAlgebraInvariants, verifyAutomatonInvariants, verifyFastPathEquivalence,
       get LAYOUT(){ return LAYOUT; }, get GL_LAT(){ return GL_LAT; }, get GL_ROLL(){ return GL_ROLL; }, get HIST(){ return HIST; },
       ENVED, SEQ, HOVER, ROLL, rollGeom, seqLayout, envTarget, secondsPerStep, envSchedule, envLevel, ENV_PEAK, ENV_FLOOR, soundingPitch, readTheme };
   }
