@@ -1018,12 +1018,18 @@ function costOrder(axes, dims, prof){
 }
 
 const TABLE_CACHE = new Map();
+// 3-State Cell Override Constants
+const OVERRIDE_INHERIT = 0;
+const OVERRIDE_FORCE_ALLOW = 1;
+const OVERRIDE_FORCE_DENY = -1;
+
 function buildTable(axes, dims, strides, prof, lambda, flips){
   const sig = dims.join('x')+'#'+profileSig(axes,prof)+'#'+lambda.toFixed(4)+'#'+flipSig(flips);
   let hit = TABLE_CACHE.get(sig);
   if(hit) return hit;
   const {order, costs, rank} = costOrder(axes, dims, prof);
   const t = new Uint8Array(order.length);
+  const overrides = new Int8Array(order.length); // 0: INHERIT, 1: FORCE_ALLOW, -1: FORCE_DENY
   const n = Math.round(clamp01(lambda)*order.length);
   for(let i=0;i<n;i++) t[order[i]]=1;
   for(const k in flips){
@@ -1031,12 +1037,16 @@ function buildTable(axes, dims, strides, prof, lambda, flips){
     if(v==null) continue;
     const c = k.split(',').map(Number);
     let f=0; for(let i=0;i<c.length;i++) f += c[i]*strides[i];
-    t[f]=v;
+    if (v === 1) {
+      overrides[f] = OVERRIDE_FORCE_ALLOW;
+      t[f] = 1;
+    } else if (v === 0) {
+      overrides[f] = OVERRIDE_FORCE_DENY;
+      t[f] = 0;
+    }
   }
-  // legalCount is what is really legal, hand flips included; cut is how many cells fall
-  // under the threshold before any flip (the first version reported only the latter).
   let legal=0; for(let i=0;i<t.length;i++) legal+=t[i];
-  hit = {t, costs, order, rank, legalCount:legal, cut:n, size:t.length};
+  hit = {t, overrides, costs, order, rank, legalCount:legal, cut:n, size:t.length};
   if(TABLE_CACHE.size>48) TABLE_CACHE.clear();
   TABLE_CACHE.set(sig, hit);
   return hit;
@@ -1123,10 +1133,16 @@ function targetForSeg(g){
   return (o && typeof o.tension==='number') ? o.tension : STATE.tension;
 }
 
+/**
+ * Pure Lexicographic Candidate Comparator: K(s, a)
+ * Ordered evaluation tuple:
+ * 1. Motion tier (real motion [0] > backtrack to two chords ago [1] > repetition [2])
+ * 2. Rule cost direction based on take mode ('strong': lowest cost, 'bold': highest cost)
+ * 3. Minimal Voice Leading Distance
+ * 4. Rule cost (ascending tie-break)
+ * 5. Canonical tie-break (rootPc ascending, quality ascending)
+ */
 function tieBreak(current, prev2){
-  // Three tiers first: real motion, backtracking to two chords ago, standing
-  // still. Without them the ranking below has two degenerate attractors once
-  // lambda stops constraining anything.
   const tier = (c)=>{
     if(c.rootPc===current.rootPc && c.quality===current.quality) return 2;
     if(prev2 && c.rootPc===prev2.rootPc && c.quality===prev2.quality) return 1;
@@ -1141,15 +1157,12 @@ function tieBreak(current, prev2){
     else if(mode==='bold'){ if(a.cost!==b.cost) return b.cost-a.cost; }
     if(va!==vb) return va-vb;
     if(a.cost!==b.cost) return a.cost-b.cost;
-    return a.c.rootPc-b.c.rootPc;
+    if(a.c.rootPc!==b.c.rootPc) return a.c.rootPc-b.c.rootPc;
+    return String(a.c.quality||'').localeCompare(String(b.c.quality||''));
   };
 }
 
-// The reference successor function: used by the piece, the what-if forks and the
-// tests. The rule table only says what is allowed; the same cost surface also
-// ranks the survivors, and which end of that ranking is played is a control.
-// (The first version always took the smoothest, which made most of the 2^540
-// tables produce the same music.)
+// The reference successor function: strict rule evaluation with explicit status contract.
 function chordStep(current, prev2, eta, tbl, vocab, target){
   const cands=[];
   for(let j=0;j<vocab.length;j++){
@@ -1157,9 +1170,11 @@ function chordStep(current, prev2, eta, tbl, vocab, target){
     const f=cIdx(rootFall(current.rootPc,c.rootPc), tensionBucket(c.tensionVal-target), c.ring, eta);
     if(tbl.t[f]) cands.push({c, cost:tbl.costs[f], f});
   }
-  let fellBack=false;
+  let status = 'FEASIBLE';
+  let fellBack = false;
   if(cands.length===0){
-    fellBack=true;
+    status = 'INFEASIBLE';
+    fellBack = true;
     for(let j=0;j<vocab.length;j++){
       const c=vocab[j];
       const f=cIdx(rootFall(current.rootPc,c.rootPc), tensionBucket(c.tensionVal-target), c.ring, eta);
@@ -1167,7 +1182,7 @@ function chordStep(current, prev2, eta, tbl, vocab, target){
     }
   }
   cands.sort(tieBreak(current, prev2));
-  return {legal:cands.map(x=>x.c), cands, fellBack};
+  return {legal:cands.map(x=>x.c), cands, fellBack, status};
 }
 
 /* ---- the fast path ---------------------------------------------------
@@ -1187,7 +1202,7 @@ function vocabKit(vocab, target){
       fall[i*V+j] = rootFall(vocab[i].rootPc, vocab[j].rootPc);
       same[i*V+j] = (vocab[i].rootPc===vocab[j].rootPc && vocab[i].quality===vocab[j].quality) ? 1 : 0;
     }
-    k = {V, vl, fall, same, root:Int8Array.from(vocab.map(c=>c.rootPc)), byTarget:new Map()};
+    k = {V, vocab, vl, fall, same, root:Int8Array.from(vocab.map(c=>c.rootPc)), byTarget:new Map()};
     KIT_CACHE.set(vocab, k);
   }
   const tk = target.toFixed(4);
@@ -1200,19 +1215,19 @@ function vocabKit(vocab, target){
     if(k.byTarget.size>8) k.byTarget.clear();
     k.byTarget.set(tk, t);
   }
-  return {V:k.V, vl:k.vl, same:k.same, fall:k.fall, root:k.root, fidx:t.fidx};
+  return {V:k.V, vocab:k.vocab, vl:k.vl, same:k.same, fall:k.fall, root:k.root, fidx:t.fidx};
 }
 // index of the move the rule plays from (cur, prev2, eta); prev2 = -1 for none
 function chordNext(cur, prev2, eta, tbl, kit, mode){
   const V=kit.V, vl=kit.vl, same=kit.same, fidx=kit.fidx, root=kit.root, tt=tbl.t, cs=tbl.costs;
   const eo=eta*CS[3], row=cur*V, prow=prev2>=0 ? prev2*V : -1;
-  let best=-1, bT=0, bV=0, bC=0, bR=0;
-  for(let pass=0; pass<2 && best<0; pass++){        // pass 1 is the total-rule fallback: everything
+  let best=-1, bT=0, bV=0, bC=0, bR=0, bQ='';
+  for(let pass=0; pass<2 && best<0; pass++){
     for(let j=0;j<V;j++){
       const f=fidx[row+j]+eo;
       if(pass===0 && !tt[f]) continue;
       const tier = same[row+j] ? 2 : (prow>=0 && same[prow+j]) ? 1 : 0;
-      const v=vl[row+j], c=cs[f], r=root[j];
+      const v=vl[row+j], c=cs[f], r=root[j], q=String(kit.vocab[j].quality||'');
       if(best>=0){
         let cmp;
         if(tier!==bT) cmp = tier<bT ? -1 : 1;
@@ -1223,10 +1238,11 @@ function chordNext(cur, prev2, eta, tbl, kit, mode){
           if(cmp===0 && v!==bV) cmp = v<bV ? -1 : 1;
           if(cmp===0 && c!==bC) cmp = c<bC ? -1 : 1;
           if(cmp===0 && r!==bR) cmp = r<bR ? -1 : 1;
+          if(cmp===0 && q!==bQ) cmp = q.localeCompare(bQ);
         }
-        if(cmp>=0) continue;                          // ties keep the earlier index, as a stable sort does
+        if(cmp>=0) continue;
       }
-      best=j; bT=tier; bV=v; bC=c; bR=r;
+      best=j; bT=tier; bV=v; bC=c; bR=r; bQ=q;
     }
   }
   return best;
