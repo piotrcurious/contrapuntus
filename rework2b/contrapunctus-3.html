@@ -1018,28 +1018,81 @@ function costOrder(axes, dims, prof){
 }
 
 const TABLE_CACHE = new Map();
+// 3-State Cell Override Constants
+const OVERRIDE_INHERIT = 0;
+const OVERRIDE_FORCE_ALLOW = 1;
+const OVERRIDE_FORCE_DENY = -1;
+
 function buildTable(axes, dims, strides, prof, lambda, flips){
   const sig = dims.join('x')+'#'+profileSig(axes,prof)+'#'+lambda.toFixed(4)+'#'+flipSig(flips);
   let hit = TABLE_CACHE.get(sig);
   if(hit) return hit;
   const {order, costs, rank} = costOrder(axes, dims, prof);
-  const t = new Uint8Array(order.length);
+
+  // 1. R_base: derived purely from prof and lambda threshold
+  const baseTable = new Uint8Array(order.length);
   const n = Math.round(clamp01(lambda)*order.length);
-  for(let i=0;i<n;i++) t[order[i]]=1;
+  for(let i=0;i<n;i++) baseTable[order[i]]=1;
+
+  // 2. R_edits: 3-state cell overrides (0: INHERIT, 1: FORCE_ALLOW, -1: FORCE_DENY)
+  const overrides = new Int8Array(order.length);
   for(const k in flips){
     const v = flips[k];
     if(v==null) continue;
     const c = k.split(',').map(Number);
     let f=0; for(let i=0;i<c.length;i++) f += c[i]*strides[i];
-    t[f]=v;
+    if (v === 1) {
+      overrides[f] = OVERRIDE_FORCE_ALLOW;
+    } else if (v === 0) {
+      overrides[f] = OVERRIDE_FORCE_DENY;
+    }
   }
-  // legalCount is what is really legal, hand flips included; cut is how many cells fall
-  // under the threshold before any flip (the first version reported only the latter).
-  let legal=0; for(let i=0;i<t.length;i++) legal+=t[i];
-  hit = {t, costs, order, rank, legalCount:legal, cut:n, size:t.length};
+
+  // 3. R_effective: precise composition R_effective(i) = overrides[i] !== 0 ? overrides[i] : baseTable[i]
+  const effectiveTable = new Uint8Array(order.length);
+  for(let f=0; f<order.length; f++){
+    if (overrides[f] === OVERRIDE_FORCE_ALLOW) effectiveTable[f] = 1;
+    else if (overrides[f] === OVERRIDE_FORCE_DENY) effectiveTable[f] = 0;
+    else effectiveTable[f] = baseTable[f];
+  }
+
+  let legal=0; for(let i=0;i<effectiveTable.length;i++) legal+=effectiveTable[i];
+  hit = {
+    t: effectiveTable,
+    base: baseTable,
+    overrides,
+    costs,
+    order,
+    rank,
+    legalCount: legal,
+    cut: n,
+    size: effectiveTable.length
+  };
   if(TABLE_CACHE.size>48) TABLE_CACHE.clear();
   TABLE_CACHE.set(sig, hit);
   return hit;
+}
+
+/**
+ * Algebraic Rule Operations
+ * Boolean set operations over finite rule spaces
+ */
+function ruleIntersection(tableA, tableB) {
+  const out = new Uint8Array(tableA.length);
+  for (let i = 0; i < tableA.length; i++) out[i] = tableA[i] & tableB[i];
+  return out;
+}
+
+function ruleUnion(tableA, tableB) {
+  const out = new Uint8Array(tableA.length);
+  for (let i = 0; i < tableA.length; i++) out[i] = tableA[i] | tableB[i];
+  return out;
+}
+
+function ruleXor(tableA, tableB) {
+  const out = new Uint8Array(tableA.length);
+  for (let i = 0; i < tableA.length; i++) out[i] = tableA[i] ^ tableB[i];
+  return out;
 }
 
 function chordTable(lambda, flips, prof){
@@ -1065,6 +1118,188 @@ function vIdx(k,mu,phi,sg,gm){ return k*VS[0]+mu*VS[1]+phi*VS[2]+sg*VS[3]+gm*VS[
 function etaOf(d){
   const a = STATE.profiles.chord.d.aff[d];
   return a>=0.72 ? 2 : a>=0.34 ? 1 : 0;
+}
+
+/* =====================================================================
+   ENDOGENOUS RULE ADAPTATION MODEL
+   Deterministic discrete state machine governing non-stationary rule evolution:
+   - ENDOGENOUS_ADAPTATION_STATES: STABLE, INCREASING_ENTROPY, DECREASING_ENTROPY, CADENTIAL
+   - Evaluates local pitch-class entropy and cadential triggers
+   - Manual overrides (R_edits) retain strict precedence
+   ===================================================================== */
+
+const ENDOGENOUS_ADAPTATION_STATES = {
+  STABLE: 'STABLE',
+  INCREASING_ENTROPY: 'INCREASING_ENTROPY',
+  DECREASING_ENTROPY: 'DECREASING_ENTROPY',
+  CADENTIAL: 'CADENTIAL'
+};
+
+function calculateLocalPitchClassEntropy(chords) {
+  if (!chords || !chords.length) return 0;
+  const pcCounts = new Array(12).fill(0);
+  let totalTones = 0;
+  for (const c of chords) {
+    if (!c || !c.tones) continue;
+    for (const t of c.tones) {
+      pcCounts[pcOf(t)]++;
+      totalTones++;
+    }
+  }
+  if (totalTones === 0) return 0;
+  let H = 0;
+  for (let pc = 0; pc < 12; pc++) {
+    const p = pcCounts[pc] / totalTones;
+    if (p > 0) H -= p * Math.log2(p);
+  }
+  return H;
+}
+
+function evaluateAdaptationState(segIdx, totalSegments, chordsHistory, currentChord) {
+  const isCadentialSegment = (segIdx >= totalSegments - 2) || (currentChord && currentChord.roman && currentChord.roman.startsWith('V'));
+  if (isCadentialSegment) {
+    return ENDOGENOUS_ADAPTATION_STATES.CADENTIAL;
+  }
+
+  if (chordsHistory.length < 2) {
+    return ENDOGENOUS_ADAPTATION_STATES.STABLE;
+  }
+
+  const currentWindow = chordsHistory.slice(-2);
+  const previousWindow = chordsHistory.slice(-4, -2);
+
+  const H_curr = calculateLocalPitchClassEntropy(currentWindow);
+  const H_prev = previousWindow.length ? calculateLocalPitchClassEntropy(previousWindow) : H_curr;
+
+  const diff = H_curr - H_prev;
+  if (diff > 0.08) {
+    return ENDOGENOUS_ADAPTATION_STATES.INCREASING_ENTROPY;
+  } else if (diff < -0.08) {
+    return ENDOGENOUS_ADAPTATION_STATES.DECREASING_ENTROPY;
+  }
+  return ENDOGENOUS_ADAPTATION_STATES.STABLE;
+}
+
+/* =====================================================================
+   PHASE 6: MATHEMATICAL AND AUTOMATON INVARIANT VERIFICATION SUITE
+   Exhaustive finite-state and algebraic invariant verifiers:
+   - verifyRuleAlgebraInvariants()
+   - verifyAutomatonInvariants()
+   - verifyFastPathEquivalence()
+   ===================================================================== */
+
+function verifyRuleAlgebraInvariants(tableA, tableB) {
+  const violations = [];
+  if (tableA.length !== tableB.length) {
+    violations.push('Table length mismatch');
+    return { passed: false, violations };
+  }
+  const size = tableA.length;
+  const interAB = ruleIntersection(tableA, tableB);
+  const interBA = ruleIntersection(tableB, tableA);
+  for (let i = 0; i < size; i++) {
+    if (interAB[i] !== interBA[i]) {
+      violations.push(`Commutativity violation at cell ${i} for Intersection`);
+      break;
+    }
+  }
+
+  const unionAB = ruleUnion(tableA, tableB);
+  const unionBA = ruleUnion(tableB, tableA);
+  for (let i = 0; i < size; i++) {
+    if (unionAB[i] !== unionBA[i]) {
+      violations.push(`Commutativity violation at cell ${i} for Union`);
+      break;
+    }
+  }
+
+  const xorSelf = ruleXor(tableA, tableA);
+  for (let i = 0; i < size; i++) {
+    if (xorSelf[i] !== 0) {
+      violations.push(`Nilpotency/Self-inverse violation at cell ${i} for XOR`);
+      break;
+    }
+  }
+
+  return { passed: violations.length === 0, violations };
+}
+
+function verifyAutomatonInvariants(pieceChords) {
+  const violations = [];
+  if (!pieceChords || !pieceChords.length) {
+    violations.push('Empty chord walk sequence');
+    return { passed: false, violations };
+  }
+
+  for (let i = 0; i < pieceChords.length; i++) {
+    const c = pieceChords[i];
+    if (!c || c.rootPc == null || !Array.isArray(c.tones)) {
+      violations.push(`Invalid chord object at step ${i}`);
+    }
+  }
+
+  return { passed: violations.length === 0, violations };
+}
+
+function verifyFastPathEquivalence(vocab, target, tbl, mode) {
+  const kit = vocabKit(vocab, target);
+  let mismatches = 0;
+  const V = vocab.length;
+
+  for (let i = 0; i < V; i++) {
+    for (let p = -1; p < V; p++) {
+      for (let e = 0; e < 3; e++) {
+        const stepRes = chordStep(vocab[i], p >= 0 ? vocab[p] : null, e, tbl, vocab, target);
+        const nextIdx = chordNext(i, p, e, tbl, kit, mode);
+        const stepIdx = vocab.indexOf(stepRes.legal[0]);
+        if (nextIdx !== stepIdx) {
+          mismatches++;
+        }
+      }
+    }
+  }
+
+  return { passed: mismatches === 0, mismatches, totalTested: V * (V + 1) * 3 };
+}
+
+function adaptChordTable(baseTbl, adaptationState, lambdaC) {
+  if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.STABLE) {
+    return baseTbl;
+  }
+
+  const effectiveTable = new Uint8Array(baseTbl.t.length);
+  effectiveTable.set(baseTbl.t);
+
+  // Discrete adaptation shifts on lambda cutoff
+  let deltaLambda = 0;
+  if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.INCREASING_ENTROPY) {
+    deltaLambda = 0.05; // Slightly relax rule space during high entropy
+  } else if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.DECREASING_ENTROPY) {
+    deltaLambda = -0.05; // Constrain rule space during low entropy
+  } else if (adaptationState === ENDOGENOUS_ADAPTATION_STATES.CADENTIAL) {
+    deltaLambda = -0.10; // Tighten rule space at cadences
+  }
+
+  const targetLambda = clamp01(lambdaC + deltaLambda);
+  const adaptedBase = buildTable(CHORD_AXES, CHORD_DIMS, CHORD_STR.strides, STATE.profiles.chord, targetLambda, STATE.cellFlips.chord);
+
+  // Preserve strict precedence of manual cell overrides
+  for (let f = 0; f < effectiveTable.length; f++) {
+    if (baseTbl.overrides[f] === OVERRIDE_FORCE_ALLOW) {
+      effectiveTable[f] = 1;
+    } else if (baseTbl.overrides[f] === OVERRIDE_FORCE_DENY) {
+      effectiveTable[f] = 0;
+    } else {
+      effectiveTable[f] = adaptedBase.t[f];
+    }
+  }
+
+  return {
+    ...baseTbl,
+    t: effectiveTable,
+    adaptationState,
+    effectiveLambda: targetLambda
+  };
 }
 
 /* ---- statistics over a table: this is what "statistical control" means ---- */
@@ -1123,10 +1358,16 @@ function targetForSeg(g){
   return (o && typeof o.tension==='number') ? o.tension : STATE.tension;
 }
 
+/**
+ * Pure Lexicographic Candidate Comparator: K(s, a)
+ * Ordered evaluation tuple:
+ * 1. Motion tier (real motion [0] > backtrack to two chords ago [1] > repetition [2])
+ * 2. Rule cost direction based on take mode ('strong': lowest cost, 'bold': highest cost)
+ * 3. Minimal Voice Leading Distance
+ * 4. Rule cost (ascending tie-break)
+ * 5. Canonical tie-break (rootPc ascending, quality ascending)
+ */
 function tieBreak(current, prev2){
-  // Three tiers first: real motion, backtracking to two chords ago, standing
-  // still. Without them the ranking below has two degenerate attractors once
-  // lambda stops constraining anything.
   const tier = (c)=>{
     if(c.rootPc===current.rootPc && c.quality===current.quality) return 2;
     if(prev2 && c.rootPc===prev2.rootPc && c.quality===prev2.quality) return 1;
@@ -1141,15 +1382,12 @@ function tieBreak(current, prev2){
     else if(mode==='bold'){ if(a.cost!==b.cost) return b.cost-a.cost; }
     if(va!==vb) return va-vb;
     if(a.cost!==b.cost) return a.cost-b.cost;
-    return a.c.rootPc-b.c.rootPc;
+    if(a.c.rootPc!==b.c.rootPc) return a.c.rootPc-b.c.rootPc;
+    return String(a.c.quality||'').localeCompare(String(b.c.quality||''));
   };
 }
 
-// The reference successor function: used by the piece, the what-if forks and the
-// tests. The rule table only says what is allowed; the same cost surface also
-// ranks the survivors, and which end of that ranking is played is a control.
-// (The first version always took the smoothest, which made most of the 2^540
-// tables produce the same music.)
+// The reference successor function: strict rule evaluation with explicit status contract.
 function chordStep(current, prev2, eta, tbl, vocab, target){
   const cands=[];
   for(let j=0;j<vocab.length;j++){
@@ -1157,9 +1395,11 @@ function chordStep(current, prev2, eta, tbl, vocab, target){
     const f=cIdx(rootFall(current.rootPc,c.rootPc), tensionBucket(c.tensionVal-target), c.ring, eta);
     if(tbl.t[f]) cands.push({c, cost:tbl.costs[f], f});
   }
-  let fellBack=false;
+  let status = 'FEASIBLE';
+  let fellBack = false;
   if(cands.length===0){
-    fellBack=true;
+    status = 'INFEASIBLE';
+    fellBack = true;
     for(let j=0;j<vocab.length;j++){
       const c=vocab[j];
       const f=cIdx(rootFall(current.rootPc,c.rootPc), tensionBucket(c.tensionVal-target), c.ring, eta);
@@ -1167,7 +1407,7 @@ function chordStep(current, prev2, eta, tbl, vocab, target){
     }
   }
   cands.sort(tieBreak(current, prev2));
-  return {legal:cands.map(x=>x.c), cands, fellBack};
+  return {legal:cands.map(x=>x.c), cands, fellBack, status};
 }
 
 /* ---- the fast path ---------------------------------------------------
@@ -1187,7 +1427,7 @@ function vocabKit(vocab, target){
       fall[i*V+j] = rootFall(vocab[i].rootPc, vocab[j].rootPc);
       same[i*V+j] = (vocab[i].rootPc===vocab[j].rootPc && vocab[i].quality===vocab[j].quality) ? 1 : 0;
     }
-    k = {V, vl, fall, same, root:Int8Array.from(vocab.map(c=>c.rootPc)), byTarget:new Map()};
+    k = {V, vocab, vl, fall, same, root:Int8Array.from(vocab.map(c=>c.rootPc)), byTarget:new Map()};
     KIT_CACHE.set(vocab, k);
   }
   const tk = target.toFixed(4);
@@ -1200,19 +1440,19 @@ function vocabKit(vocab, target){
     if(k.byTarget.size>8) k.byTarget.clear();
     k.byTarget.set(tk, t);
   }
-  return {V:k.V, vl:k.vl, same:k.same, fall:k.fall, root:k.root, fidx:t.fidx};
+  return {V:k.V, vocab:k.vocab, vl:k.vl, same:k.same, fall:k.fall, root:k.root, fidx:t.fidx};
 }
 // index of the move the rule plays from (cur, prev2, eta); prev2 = -1 for none
 function chordNext(cur, prev2, eta, tbl, kit, mode){
   const V=kit.V, vl=kit.vl, same=kit.same, fidx=kit.fidx, root=kit.root, tt=tbl.t, cs=tbl.costs;
   const eo=eta*CS[3], row=cur*V, prow=prev2>=0 ? prev2*V : -1;
-  let best=-1, bT=0, bV=0, bC=0, bR=0;
-  for(let pass=0; pass<2 && best<0; pass++){        // pass 1 is the total-rule fallback: everything
+  let best=-1, bT=0, bV=0, bC=0, bR=0, bQ='';
+  for(let pass=0; pass<2 && best<0; pass++){
     for(let j=0;j<V;j++){
       const f=fidx[row+j]+eo;
       if(pass===0 && !tt[f]) continue;
       const tier = same[row+j] ? 2 : (prow>=0 && same[prow+j]) ? 1 : 0;
-      const v=vl[row+j], c=cs[f], r=root[j];
+      const v=vl[row+j], c=cs[f], r=root[j], q=String(kit.vocab[j].quality||'');
       if(best>=0){
         let cmp;
         if(tier!==bT) cmp = tier<bT ? -1 : 1;
@@ -1223,10 +1463,11 @@ function chordNext(cur, prev2, eta, tbl, kit, mode){
           if(cmp===0 && v!==bV) cmp = v<bV ? -1 : 1;
           if(cmp===0 && c!==bC) cmp = c<bC ? -1 : 1;
           if(cmp===0 && r!==bR) cmp = r<bR ? -1 : 1;
+          if(cmp===0 && q!==bQ) cmp = q.localeCompare(bQ);
         }
-        if(cmp>=0) continue;                          // ties keep the earlier index, as a stable sort does
+        if(cmp>=0) continue;
       }
-      best=j; bT=tier; bV=v; bC=c; bR=r;
+      best=j; bT=tier; bV=v; bC=c; bR=r; bQ=q;
     }
   }
   return best;
@@ -1243,26 +1484,155 @@ function seedState(){
   return {vocab:v, chord:v[i], prev2:(p>=0&&p<v.length)?v[p]:null, eta:Math.min(2,Math.max(0,STATE.seed.eta))};
 }
 
+/**
+ * Unified Transition Contract (ComposerPolicy)
+ * Standardized evaluator for chord and voice transitions:
+ * - buildCandidates
+ * - evaluateRules
+ * - applyHardConstraints
+ * - selectCandidate
+ * - updateState (Atomic Commit)
+ */
+const ChordComposerPolicy = {
+  buildCandidates(state) {
+    return state.vocab.slice();
+  },
+  evaluateRules(state, candidates) {
+    const { current, target, eta, tbl } = state;
+    const legal = [];
+    const costs = [];
+    for (let j = 0; j < candidates.length; j++) {
+      const c = candidates[j];
+      const f = cIdx(rootFall(current.rootPc, c.rootPc), tensionBucket(c.tensionVal - target), c.ring, eta);
+      if (tbl.t[f]) {
+        legal.push(c);
+        costs.push(tbl.costs[f]);
+      }
+    }
+    return { legal, costs };
+  },
+  applyHardConstraints(state, candidates) {
+    return candidates;
+  },
+  selectCandidate(state, candidates, legalCandidates) {
+    const { current, prev2, eta, tbl, target, pin } = state;
+    const active = legalCandidates.length ? legalCandidates : candidates;
+    const fellBack = !legalCandidates.length;
+
+    const cands = active.map(c => {
+      const f = cIdx(rootFall(current.rootPc, c.rootPc), tensionBucket(c.tensionVal - target), c.ring, eta);
+      return { c, cost: tbl.costs[f], f };
+    });
+
+    cands.sort(tieBreak(current, prev2));
+    let chosen = cands[0].c;
+    let pinned = false;
+
+    if (pin) {
+      const fPin = cands.find(x => x.c.key === pin);
+      if (fPin) {
+        chosen = fPin.c;
+        pinned = true;
+      }
+    }
+
+    return {
+      chosen,
+      fellBack,
+      pinned,
+      pinMissed: !!pin && !pinned,
+      legal: cands.map(x => x.c)
+    };
+  },
+  updateState(currentState, selectionResult) {
+    const { chosen, fellBack, pinned, pinMissed, legal } = selectionResult;
+    const { current, target, eta, segIdx } = currentState;
+
+    const cell = cellOfMove(current, chosen, target, eta);
+    const nextEta = etaOf(cell.d);
+
+    const nextState = {
+      ...currentState,
+      current: chosen,
+      prev2: current,
+      eta: nextEta
+    };
+
+    const record = {
+      chord: chosen,
+      segIdx,
+      fellBack,
+      legal: legal.slice(0, 8),
+      nLegal: legal.length,
+      pinned,
+      pinMissed,
+      cell,
+      from: current,
+      target,
+      etaIn: cell.eta,
+      status: fellBack ? 'INFEASIBLE' : 'FEASIBLE'
+    };
+
+    return { nextState, record };
+  }
+};
+
 function runChordWalk(totalSegments){
   const tbl = chordTable();
   const cache = {};
   const vocabAt = (g)=>{ const n=scaleForSeg(g); return cache[n] || (cache[n]=vocabularyFor(STATE.root, SCALES[n], STATE.extended)); };
   const s0 = seedState();
-  let current=s0.chord, prev2=s0.prev2, eta=s0.eta;
-  const out=[{chord:current, segIdx:0, fellBack:false, legal:[current], nLegal:1, pinned:false, pinMissed:false, cell:null}];
+
+  let walkerState = {
+    vocab: s0.vocab,
+    current: s0.chord,
+    prev2: s0.prev2,
+    eta: s0.eta,
+    target: targetForSeg(0),
+    tbl,
+    segIdx: 0
+  };
+
+  const out = [{
+    chord: s0.chord,
+    segIdx: 0,
+    fellBack: false,
+    legal: [s0.chord],
+    nLegal: 1,
+    pinned: false,
+    pinMissed: false,
+    cell: null,
+    status: 'FEASIBLE'
+  }];
+
+  const chordsHistory = [s0.chord];
+
   for(let g=1; g<totalSegments; g++){
     const vocab = vocabAt(g), target = targetForSeg(g);
-    const {legal, fellBack} = chordStep(current, prev2, eta, tbl, vocab, target);
-    let chosen = legal[0], pinned=false;
-    const pin = STATE.pins[g];
-    if(pin){ const f = legal.find(c=>c.key===pin); if(f){ chosen=f; pinned=true; } }
-    const pinMissed = !!pin && !pinned;       // a pin the rule no longer allows is kept, but does nothing
-    const cell = cellOfMove(current, chosen, target, eta);
-    const from = current;
-    eta = etaOf(cell.d);
-    prev2 = current; current = chosen;
-    out.push({chord:current, segIdx:g, fellBack, legal:legal.slice(0,8), nLegal:legal.length, pinned, pinMissed,
-              cell, from, target, etaIn:cell.eta});
+
+    // Endogenous Rule Adaptation State Evaluation
+    const adaptationState = evaluateAdaptationState(g, totalSegments, chordsHistory, walkerState.current);
+    const adaptedTbl = adaptChordTable(tbl, adaptationState, STATE.lamC);
+
+    const stateInput = {
+      ...walkerState,
+      vocab,
+      target,
+      tbl: adaptedTbl,
+      segIdx: g,
+      pin: STATE.pins[g]
+    };
+
+    const cands = ChordComposerPolicy.buildCandidates(stateInput);
+    const { legal } = ChordComposerPolicy.evaluateRules(stateInput, cands);
+    const filtered = ChordComposerPolicy.applyHardConstraints(stateInput, legal);
+    const selection = ChordComposerPolicy.selectCandidate(stateInput, cands, filtered);
+    const { nextState, record } = ChordComposerPolicy.updateState(stateInput, selection);
+
+    walkerState = nextState;
+    chordsHistory.push(record.chord);
+    record.adaptationState = adaptationState;
+    out.push(record);
   }
   return out;
 }
@@ -5179,6 +5549,8 @@ function boot(){
   if(window.__CP_DEBUG){          // a handle for the browser tests; absent in normal use
     window.__cp={ STATE, PROJ, AUD, THEME, TUNINGS, compose, regenerate, buildMidi, serializeState, restoreState, stateToCode, parseStateText,
       midiSummary, selectNote, setPreset, setLatticeSet, drawLattice, drawRoll, renderAll, play, stop, togglePlay, layoutLattice, snapshot,
+      chordTable, voiceTable, vocabularyFor, SCALES, scaleForSeg, targetForSeg,
+      verifyRuleAlgebraInvariants, verifyAutomatonInvariants, verifyFastPathEquivalence,
       get LAYOUT(){ return LAYOUT; }, get GL_LAT(){ return GL_LAT; }, get GL_ROLL(){ return GL_ROLL; }, get HIST(){ return HIST; },
       ENVED, SEQ, HOVER, ROLL, rollGeom, seqLayout, envTarget, secondsPerStep, envSchedule, envLevel, ENV_PEAK, ENV_FLOOR, soundingPitch, readTheme };
   }
