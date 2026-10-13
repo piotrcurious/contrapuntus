@@ -1302,26 +1302,145 @@ function seedState(){
   return {vocab:v, chord:v[i], prev2:(p>=0&&p<v.length)?v[p]:null, eta:Math.min(2,Math.max(0,STATE.seed.eta))};
 }
 
+/**
+ * Unified Transition Contract (ComposerPolicy)
+ * Standardized evaluator for chord and voice transitions:
+ * - buildCandidates
+ * - evaluateRules
+ * - applyHardConstraints
+ * - selectCandidate
+ * - updateState (Atomic Commit)
+ */
+const ChordComposerPolicy = {
+  buildCandidates(state) {
+    return state.vocab.slice();
+  },
+  evaluateRules(state, candidates) {
+    const { current, target, eta, tbl } = state;
+    const legal = [];
+    const costs = [];
+    for (let j = 0; j < candidates.length; j++) {
+      const c = candidates[j];
+      const f = cIdx(rootFall(current.rootPc, c.rootPc), tensionBucket(c.tensionVal - target), c.ring, eta);
+      if (tbl.t[f]) {
+        legal.push(c);
+        costs.push(tbl.costs[f]);
+      }
+    }
+    return { legal, costs };
+  },
+  applyHardConstraints(state, candidates) {
+    return candidates;
+  },
+  selectCandidate(state, candidates, legalCandidates) {
+    const { current, prev2, eta, tbl, target, pin } = state;
+    const active = legalCandidates.length ? legalCandidates : candidates;
+    const fellBack = !legalCandidates.length;
+
+    const cands = active.map(c => {
+      const f = cIdx(rootFall(current.rootPc, c.rootPc), tensionBucket(c.tensionVal - target), c.ring, eta);
+      return { c, cost: tbl.costs[f], f };
+    });
+
+    cands.sort(tieBreak(current, prev2));
+    let chosen = cands[0].c;
+    let pinned = false;
+
+    if (pin) {
+      const fPin = cands.find(x => x.c.key === pin);
+      if (fPin) {
+        chosen = fPin.c;
+        pinned = true;
+      }
+    }
+
+    return {
+      chosen,
+      fellBack,
+      pinned,
+      pinMissed: !!pin && !pinned,
+      legal: cands.map(x => x.c)
+    };
+  },
+  updateState(currentState, selectionResult) {
+    const { chosen, fellBack, pinned, pinMissed, legal } = selectionResult;
+    const { current, target, eta, segIdx } = currentState;
+
+    const cell = cellOfMove(current, chosen, target, eta);
+    const nextEta = etaOf(cell.d);
+
+    const nextState = {
+      ...currentState,
+      current: chosen,
+      prev2: current,
+      eta: nextEta
+    };
+
+    const record = {
+      chord: chosen,
+      segIdx,
+      fellBack,
+      legal: legal.slice(0, 8),
+      nLegal: legal.length,
+      pinned,
+      pinMissed,
+      cell,
+      from: current,
+      target,
+      etaIn: cell.eta,
+      status: fellBack ? 'INFEASIBLE' : 'FEASIBLE'
+    };
+
+    return { nextState, record };
+  }
+};
+
 function runChordWalk(totalSegments){
   const tbl = chordTable();
   const cache = {};
   const vocabAt = (g)=>{ const n=scaleForSeg(g); return cache[n] || (cache[n]=vocabularyFor(STATE.root, SCALES[n], STATE.extended)); };
   const s0 = seedState();
-  let current=s0.chord, prev2=s0.prev2, eta=s0.eta;
-  const out=[{chord:current, segIdx:0, fellBack:false, legal:[current], nLegal:1, pinned:false, pinMissed:false, cell:null}];
+
+  let walkerState = {
+    vocab: s0.vocab,
+    current: s0.chord,
+    prev2: s0.prev2,
+    eta: s0.eta,
+    target: targetForSeg(0),
+    tbl,
+    segIdx: 0
+  };
+
+  const out = [{
+    chord: s0.chord,
+    segIdx: 0,
+    fellBack: false,
+    legal: [s0.chord],
+    nLegal: 1,
+    pinned: false,
+    pinMissed: false,
+    cell: null,
+    status: 'FEASIBLE'
+  }];
+
   for(let g=1; g<totalSegments; g++){
     const vocab = vocabAt(g), target = targetForSeg(g);
-    const {legal, fellBack} = chordStep(current, prev2, eta, tbl, vocab, target);
-    let chosen = legal[0], pinned=false;
-    const pin = STATE.pins[g];
-    if(pin){ const f = legal.find(c=>c.key===pin); if(f){ chosen=f; pinned=true; } }
-    const pinMissed = !!pin && !pinned;       // a pin the rule no longer allows is kept, but does nothing
-    const cell = cellOfMove(current, chosen, target, eta);
-    const from = current;
-    eta = etaOf(cell.d);
-    prev2 = current; current = chosen;
-    out.push({chord:current, segIdx:g, fellBack, legal:legal.slice(0,8), nLegal:legal.length, pinned, pinMissed,
-              cell, from, target, etaIn:cell.eta});
+    const stateInput = {
+      ...walkerState,
+      vocab,
+      target,
+      segIdx: g,
+      pin: STATE.pins[g]
+    };
+
+    const cands = ChordComposerPolicy.buildCandidates(stateInput);
+    const { legal } = ChordComposerPolicy.evaluateRules(stateInput, cands);
+    const filtered = ChordComposerPolicy.applyHardConstraints(stateInput, legal);
+    const selection = ChordComposerPolicy.selectCandidate(stateInput, cands, filtered);
+    const { nextState, record } = ChordComposerPolicy.updateState(stateInput, selection);
+
+    walkerState = nextState;
+    out.push(record);
   }
   return out;
 }
