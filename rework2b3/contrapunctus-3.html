@@ -715,6 +715,26 @@ details.fold[open] > summary::before{content:"\2013 ";}
       </div>
     </section>
 
+    <!-- Plate: Hierarchical State Space Expansion -->
+    <section class="plate" aria-labelledby="hExpansion">
+      <div class="heading">
+        <h2 id="hExpansion">Hierarchical State Space Expansion &amp; Macro-Phrase Tracker</h2>
+        <div class="tools"><span class="readout" id="expansionRatioRead">Expansion: 16x (10,080 States)</span></div>
+      </div>
+      <div class="split">
+        <div style="flex:1">
+          <div class="readout" id="expansionStat"></div>
+          <p class="aside" style="margin-top:10px">
+            Naive memory Markov chains collapse into 2&ndash;9 step limit cycles due to a small state space (N &le; 1,260).
+            State space expansion factors in structural step position k &in; {0 &hellip; K-1} into the state tuple (c_t, &eta;_t, c_{t-2}, k), expanding the state space by K&times; and driving macro-phrase structural cadences.
+          </p>
+        </div>
+        <div style="flex:1">
+          <div class="readout" id="phraseTrackerRead"></div>
+        </div>
+      </div>
+    </section>
+
 <!-- Plate: basins -->
     <section class="plate" aria-labelledby="hBasin">
       <div class="heading">
@@ -1225,12 +1245,45 @@ function renderHeteroclinicCanvas(points) {
   }
 }
 
+function renderExpansionUI() {
+  const c = STATE.composed;
+  const b = basins();
+  const V = b ? b.V : 14;
+  const P = b ? b.P : 15;
+  const K = totalPhraseSteps();
+  const N0 = V * 3 * P;
+  const N = V * 3 * P * K;
+
+  const ratioEl = document.getElementById('expansionRatioRead');
+  if (ratioEl) ratioEl.textContent = `Expansion Factor: ${K}x (${N.toLocaleString()} States)`;
+
+  const statEl = document.getElementById('expansionStat');
+  if (statEl) {
+    statEl.innerHTML = `<strong>State Space Dimension Breakdown:</strong><br>` +
+      `Base Memory Markov States N<sub>0</sub>: ${V} &times; 3 &times; ${P} = ${N0.toLocaleString()} states<br>` +
+      `Expanded Macro-Phrase States N: N<sub>0</sub> &times; K (${K}) = <strong>${N.toLocaleString()} states</strong><br>` +
+      `Macro-Phrase Cadence Length: ${STATE.bars || 8} bars (${K} phrase steps)`;
+  }
+
+  const trackerEl = document.getElementById('phraseTrackerRead');
+  if (trackerEl) {
+    const curStep = STATE.step || 0;
+    const pCtx = getPhraseStructure(curStep, (c && c.segments) ? c.segments : K);
+    trackerEl.innerHTML = `<strong>Live Macro-Phrase Position & Target:</strong><br>` +
+      `Current Step: ${curStep + 1} of ${(c && c.segments) ? c.segments : K}<br>` +
+      `Bar Position: Bar ${pCtx.bar + 1} of ${pCtx.totalBars}<br>` +
+      `Phrase Progress: ${(pCtx.progress * 100).toFixed(1)}%<br>` +
+      `Harmonic Goal Target: <strong>${pCtx.harmonicGoal.toUpperCase()}</strong>`;
+  }
+}
+
 function renderTieUI() {
   const el = document.getElementById('tieExprRead');
   if (el) {
     const mode = STATE.tieRules ? STATE.tieRules.mode : 'weighted';
     el.textContent = `Mode: ${mode === 'weighted' ? 'Weighted Rule Domain' : 'Strict Tiered Hardcoded'}`;
   }
+  renderExpansionUI();
 }
 
 function renderOverhaulUI() {
@@ -1656,33 +1709,48 @@ function vocabKit(vocab, target){
   return {V:k.V, vl:k.vl, same:k.same, fall:k.fall, root:k.root, fidx:t.fidx};
 }
 // index of the move the rule plays from (cur, prev2, eta); prev2 = -1 for none
-function chordNext(cur, prev2, eta, tbl, kit, mode){
+function chordNext(cur, prev2, eta, tbl, kit, mode, phraseCtx, tieRules){
   const V=kit.V, vl=kit.vl, same=kit.same, fidx=kit.fidx, root=kit.root, tt=tbl.t, cs=tbl.costs;
   const eo=eta*CS[3], row=cur*V, prow=prev2>=0 ? prev2*V : -1;
-  let best=-1, bT=0, bV=0, bC=0, bR=0;
-  for(let pass=0; pass<2 && best<0; pass++){        // pass 1 is the total-rule fallback: everything
+  tieRules = tieRules || STATE.tieRules || { mode:'weighted', wMotion:1, wVoice:1, wCost:1, wFifths:0.5, wGoal:0.5 };
+
+  let best=-1, bestScore=-Infinity;
+  for(let pass=0; pass<2 && best<0; pass++){
     for(let j=0;j<V;j++){
       const f=fidx[row+j]+eo;
       if(pass===0 && !tt[f]) continue;
-      const tier = same[row+j] ? 2 : (prow>=0 && same[prow+j]) ? 1 : 0;
-      const v=vl[row+j], c=cs[f], r=root[j];
-      if(best>=0){
-        let cmp;
-        if(tier!==bT) cmp = tier<bT ? -1 : 1;
-        else {
-          cmp = 0;
-          if(mode==='strong'){ if(c!==bC) cmp = c<bC ? -1 : 1; }
-          else if(mode==='bold'){ if(c!==bC) cmp = c>bC ? -1 : 1; }
-          if(cmp===0 && v!==bV) cmp = v<bV ? -1 : 1;
-          if(cmp===0 && c!==bC) cmp = c<bC ? -1 : 1;
-          if(cmp===0 && r!==bR) cmp = r<bR ? -1 : 1;
-        }
-        if(cmp>=0) continue;                          // ties keep the earlier index, as a stable sort does
+
+      const isMotion = !same[row+j] && !(prow>=0 && same[prow+j]);
+      const motionPenalty = isMotion ? 0 : 2.0;
+      const vDist = vl[row+j];
+      const cost = cs[f];
+      const isFifths = (root[j]===5 || root[j]===7);
+
+      let goalBonus = 0;
+      if(phraseCtx && phraseCtx.harmonicGoal){
+        if(phraseCtx.harmonicGoal==='dominant' && (root[j]===7 || root[j]===11)) goalBonus = 2.0;
+        if(phraseCtx.harmonicGoal==='tonic' && root[j]===0) goalBonus = 2.0;
       }
-      best=j; bT=tier; bV=v; bC=c; bR=r;
+
+      let score = 0;
+      if(tieRules.mode === 'weighted'){
+        score = - (tieRules.wMotion * motionPenalty)
+                - (tieRules.wVoice * vDist)
+                - (tieRules.wCost * cost)
+                + (tieRules.wFifths * (isFifths ? 1 : 0))
+                + (tieRules.wGoal * goalBonus);
+      } else {
+        const tier = same[row+j] ? 2 : (prow>=0 && same[prow+j]) ? 1 : 0;
+        score = - (tier * 100 + vDist * 10 + cost);
+      }
+
+      if(score > bestScore){
+        bestScore = score;
+        best = j;
+      }
     }
   }
-  return best;
+  return best < 0 ? 0 : best;
 }
 
 function cellOfMove(from, to, target, eta){
@@ -2248,14 +2316,23 @@ const ETA_NAMES = ['weak','neutral','strong'];
 function baseVocab(){ return vocabularyFor(STATE.root, SCALES[STATE.scaleName], STATE.extended); }
 function etaTable(){ const t=new Uint8Array(12); for(let d=0;d<12;d++) t[d]=etaOf(d); return t; }
 
-// a state is (chord i, momentum e, chord two back p in -1..V-1)
-function stateCoder(V){
+function totalPhraseSteps() {
+  const bars = STATE.bars || 8;
+  const stepsPerBar = STATE.stepsPerBar || 8;
+  return bars * stepsPerBar;
+}
+
+// a state is (chord i, momentum e, chord two back p in -1..V-1, phrase step k in 0..K-1)
+function stateCoder(V, K){
+  K = Math.max(1, K || totalPhraseSteps());
   const P=V+1;
-  return { V, P, N:V*3*P,
-    enc:(i,e,p)=>(i*3+e)*P+(p+1),
-    chordOf:(s)=>Math.floor(Math.floor(s/P)/3),
-    etaOf:(s)=>Math.floor(s/P)%3,
-    prevOf:(s)=>(s%P)-1 };
+  const N=V*3*P*K;
+  return { V, P, K, N,
+    enc:(i,e,p,k)=>(((i*3+e)*P+(p+1))*K)+((k%K+K)%K),
+    chordOf:(s)=>Math.floor(Math.floor(Math.floor(s/K)/P)/3),
+    etaOf:(s)=>Math.floor(Math.floor(s/K)/P)%3,
+    prevOf:(s)=>(Math.floor(s/K)%P)-1,
+    phraseOf:(s)=>s%K };
 }
 function seedIdx(vocab){
   const V=vocab.length, p=STATE.seed.prev2Idx;
@@ -2290,14 +2367,24 @@ function decompose(succ, N){
 }
 
 // the successor of every seedable state under the rule at this lambda
-function buildGraph(lambda, vocab){
+function buildGraph(lambda, vocab, K){
   vocab = vocab || baseVocab();
-  const C=stateCoder(vocab.length), V=C.V, enc=C.enc;
+  K = K || totalPhraseSteps();
+  const C=stateCoder(vocab.length, K), V=C.V, enc=C.enc;
   const tbl=chordTable(lambda), kit=vocabKit(vocab, STATE.tension), eta=etaTable(), mode=STATE.take;
   const succ=new Int32Array(C.N);
-  for(let i=0;i<V;i++) for(let p=-1;p<V;p++) for(let e=0;e<3;e++){
-    const n=chordNext(i,p,e,tbl,kit,mode);
-    succ[enc(i,e,p)] = enc(n, eta[kit.fall[i*V+n]], i);
+
+  for(let i=0;i<V;i++){
+    for(let p=-1;p<V;p++){
+      for(let e=0;e<3;e++){
+        for(let k=0;k<K;k++){
+          const phraseCtx = getPhraseStructure(k, K);
+          const n = chordNext(i, p, e, tbl, kit, mode, phraseCtx, STATE.tieRules);
+          const nextK = (k + 1) % K;
+          succ[enc(i, e, p, k)] = enc(n, eta[kit.fall[i*V+n]], i, nextK);
+        }
+      }
+    }
   }
   const g=decompose(succ, C.N);
   g.C=C; g.vocab=vocab; g.tbl=tbl; g.lambda=lambda;
@@ -2308,17 +2395,19 @@ function buildGraph(lambda, vocab){
 // chord two back) that land in a different attractor
 function seedMemory(g){
   if(g.cycles.length<2) return 0;
-  const {V,enc}=g.C; let pairs=0, diff=0;
-  for(let i=0;i<V;i++) for(let e=0;e<3;e++) for(let p=-1;p<V;p++){
-    const a=g.attr[enc(i,e,p)];
-    for(let i2=0;i2<V;i2++) if(i2!==i){ pairs++; if(g.attr[enc(i2,e,p)]!==a) diff++; }
-    for(let e2=0;e2<3;e2++) if(e2!==e){ pairs++; if(g.attr[enc(i,e2,p)]!==a) diff++; }
-    for(let p2=-1;p2<V;p2++) if(p2!==p){ pairs++; if(g.attr[enc(i,e,p2)]!==a) diff++; }
+  const {V,enc,K}=g.C; let pairs=0, diff=0;
+  const kLimit = Math.min(K, 4);
+  for(let i=0;i<V;i++) for(let e=0;e<3;e++) for(let p=-1;p<V;p++) for(let k=0;k<kLimit;k++){
+    const a=g.attr[enc(i,e,p,k)];
+    for(let i2=0;i2<V;i2++) if(i2!==i){ pairs++; if(g.attr[enc(i2,e,p,k)]!==a) diff++; }
+    for(let e2=0;e2<3;e2++) if(e2!==e){ pairs++; if(g.attr[enc(i,e2,p,k)]!==a) diff++; }
+    for(let p2=-1;p2<V;p2++) if(p2!==p){ pairs++; if(g.attr[enc(i,e,p2,k)]!==a) diff++; }
   }
   return pairs ? diff/pairs : 0;
 }
-function seedOrbit(g, i, e, p){
-  const s=g.C.enc(i,e,p), c=g.cycles[g.attr[s]];
+function seedOrbit(g, i, e, p, k){
+  k = k || 0;
+  const s=g.C.enc(i,e,p,k), c=g.cycles[g.attr[s]];
   return {state:s, transient:g.trans[s], period:c.period, cycle:c.id, basin:c.size};
 }
 // fixed: stands still. loop: goes round at least twice inside the piece.
@@ -2329,10 +2418,10 @@ function orbitClass(period, pieceChords){
 }
 
 // Everything that decides the chord automaton; the analyses are cached on it.
-// (The first version left the "take" control out of the key, so the sweep and the
-// basin map kept showing the previous stance after it was changed.)
 function ruleKey(){
+  const tr = STATE.tieRules || {};
   return [STATE.root, STATE.scaleName, STATE.extended?1:0, STATE.tension.toFixed(4), STATE.take,
+          STATE.bars, STATE.stepsPerBar, tr.mode, tr.wMotion, tr.wVoice, tr.wCost, tr.wFifths, tr.wGoal,
           profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
 }
 
