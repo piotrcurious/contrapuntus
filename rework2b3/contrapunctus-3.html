@@ -1710,9 +1710,10 @@ function vocabKit(vocab, target){
 }
 // index of the move the rule plays from (cur, prev2, eta); prev2 = -1 for none
 function chordNext(cur, prev2, eta, tbl, kit, mode, phraseCtx, tieRules){
-  const V=kit.V, vl=kit.vl, same=kit.same, fidx=kit.fidx, root=kit.root, tt=tbl.t, cs=tbl.costs;
+  const V=kit.V, vl=kit.vl, same=kit.same, fidx=kit.fidx, root=kit.root, fall=kit.fall, tt=tbl.t, cs=tbl.costs;
   const eo=eta*CS[3], row=cur*V, prow=prev2>=0 ? prev2*V : -1;
   tieRules = tieRules || STATE.tieRules || { mode:'weighted', wMotion:1, wVoice:1, wCost:1, wFifths:0.5, wGoal:0.5 };
+  mode = mode || STATE.take || 'bold';
 
   let best=-1, bestScore=-Infinity;
   for(let pass=0; pass<2 && best<0; pass++){
@@ -1720,28 +1721,34 @@ function chordNext(cur, prev2, eta, tbl, kit, mode, phraseCtx, tieRules){
       const f=fidx[row+j]+eo;
       if(pass===0 && !tt[f]) continue;
 
-      const isMotion = !same[row+j] && !(prow>=0 && same[prow+j]);
-      const motionPenalty = isMotion ? 0 : 2.0;
-      const vDist = vl[row+j];
-      const cost = cs[f];
-      const isFifths = (root[j]===5 || root[j]===7);
-
-      let goalBonus = 0;
-      if(phraseCtx && phraseCtx.harmonicGoal){
-        if(phraseCtx.harmonicGoal==='dominant' && (root[j]===7 || root[j]===11)) goalBonus = 2.0;
-        if(phraseCtx.harmonicGoal==='tonic' && root[j]===0) goalBonus = 2.0;
-      }
-
       let score = 0;
       if(tieRules.mode === 'weighted'){
-        score = - (tieRules.wMotion * motionPenalty)
-                - (tieRules.wVoice * vDist)
-                - (tieRules.wCost * cost)
-                + (tieRules.wFifths * (isFifths ? 1 : 0))
-                + (tieRules.wGoal * goalBonus);
+        let tierPenalty = 0;
+        if(same[row+j]) tierPenalty = 10.0;
+        else if(prow>=0 && same[prow+j]) tierPenalty = 4.0;
+        score -= tierPenalty * tieRules.wMotion;
+
+        const vDist = vl[row+j];
+        score -= (vDist / 12.0) * tieRules.wVoice;
+
+        const cCost = cs[f];
+        if(mode === 'bold') score += cCost * tieRules.wCost;
+        else score -= cCost * tieRules.wCost;
+
+        const rf = fall[row+j];
+        if(rf === 7) score += 1.5 * tieRules.wFifths;
+        else if(rf === 5) score += 0.8 * tieRules.wFifths;
+
+        if(phraseCtx && phraseCtx.harmonicGoal === 'dominant' && (rf === 7 || root[j] === 7)){
+          score += 2.0 * tieRules.wGoal;
+        } else if(phraseCtx && phraseCtx.harmonicGoal === 'tonic' && root[j] === 0){
+          score += 3.0 * tieRules.wGoal;
+        }
       } else {
         const tier = same[row+j] ? 2 : (prow>=0 && same[prow+j]) ? 1 : 0;
-        score = - (tier * 100 + vDist * 10 + cost);
+        const vDist = vl[row+j];
+        const cCost = cs[f];
+        score = - (tier * 100 + vDist * 10 + (mode==='bold' ? -cCost : cCost));
       }
 
       if(score > bestScore){
@@ -1891,9 +1898,27 @@ function pickNote(cands, ctx){
   const memo = new Map();
   const cl = (m)=>{ let v=memo.get(m); if(!v){ v=cls(m); memo.set(m,v); } return v; };
   const costOf = (m)=>{ const c=cl(m); return tbl.costs[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]; };
-  let legal = cands.filter(m=>{ const c=cl(m); return tbl.t[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]===1; });
+
+  // Disallow raw chromatic leaps (> 2 semitones) or harsh minor-second collisions with active voices
+  const isSmoothChromatic = (m) => {
+    const c = cl(m);
+    if (c.phi !== 0) return true; // Non-chromatic choices pass
+    // Chromatic notes MUST be stepwise (1-2 semitones) from prevPitch
+    if (prevPitch != null && Math.abs(m - prevPitch) > 2) return false;
+    // Chromatic notes MUST NOT create harsh minor-second collisions with active sounding voices
+    for (const o of others) {
+      if (o.pitch != null && ic(m - o.pitch) === 1) return false;
+    }
+    return true;
+  };
+
+  let filtered = cands.filter(isSmoothChromatic);
+  if (!filtered.length) filtered = cands.slice();
+
+  let legal = filtered.filter(m=>{ const c=cl(m); return tbl.t[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]===1; });
   let fellBack=false;
-  if(!legal.length){ legal=cands.slice(); fellBack=true; }
+  if(!legal.length){ legal=filtered.slice(); fellBack=true; }
+
   // A walking bass leads into the next root from a half step or a whole step away,
   // not by sounding the next root early.
   const approachScore = (m)=>{ const d=pcDist(pcOf(m), approachPc); return d===1?0 : d===2?1 : 2; };
@@ -1907,6 +1932,14 @@ function pickNote(cands, ctx){
       const sa=approachScore(a), sb=approachScore(b);
       if(sa!==sb) return sa-sb;
     }
+    // Prefer half-step chromatic motion over larger steps if phi=0
+    const ca_phi = cl(a).phi, cb_phi = cl(b).phi;
+    if (ca_phi === 0 || cb_phi === 0) {
+      const stepA = prevPitch != null ? Math.abs(a - prevPitch) : 0;
+      const stepB = prevPitch != null ? Math.abs(b - prevPitch) : 0;
+      if (ca_phi === 0 && cb_phi === 0 && stepA !== stepB) return stepA - stepB;
+    }
+
     const ca=costOf(a), cb=costOf(b);
     if(mode==='strong' && ca!==cb) return ca-cb;
     if(mode==='bold'   && ca!==cb) return cb-ca;
@@ -1918,7 +1951,7 @@ function pickNote(cands, ctx){
     return a-b;
   });
   const chosen=legal[0];
-  return {pitch:chosen, cls:cls(chosen), fellBack};
+  return {pitch:chosen, cls:cl(chosen), fellBack};
 }
 
 /* =====================================================================
@@ -2067,12 +2100,26 @@ function pickEnhancedBassNote(cands, ctx) {
     };
   };
 
-  let legal = cands.filter(m => {
+  // Disallow raw chromatic leaps (> 2 semitones) or harsh minor-second collisions in bass
+  const isSmoothBassChromatic = (m) => {
+    const c = cls(m);
+    if (c.phi !== 0) return true;
+    if (prevPitch != null && Math.abs(m - prevPitch) > 2) return false;
+    for (const o of others) {
+      if (o.pitch != null && ic(m - o.pitch) === 1) return false;
+    }
+    return true;
+  };
+
+  let filtered = cands.filter(isSmoothBassChromatic);
+  if (!filtered.length) filtered = cands.slice();
+
+  let legal = filtered.filter(m => {
     const c = cls(m);
     return tbl.t[vIdx(c.kappa, c.mu, c.phi, c.sigma, c.gamma)] === 1;
   });
 
-  if (!legal.length) legal = cands.slice();
+  if (!legal.length) legal = filtered.slice();
 
   legal.sort((a, b) => {
     // A. Prioritize Smooth Inversions over rigid Root notes
