@@ -1882,6 +1882,30 @@ function pickNote(cands, ctx){
   let filtered = cands.filter(isSmoothChromatic);
   if (!filtered.length) filtered = cands.slice();
 
+  // Contrapuntal Phi Rank Filtering:
+  // 1. Mandatory NCT Stepwise Resolution: If previous note was a low-rank non-chord tone (prevPhi < 3),
+  //    MUST step (1-2 semitones) to a consonant chord tone (phi >= 3).
+  if (prevPhi != null && prevPhi < 3 && prevPitch != null) {
+    const resCands = filtered.filter(m => {
+      const stepDist = Math.abs(m - prevPitch);
+      return cl(m).phi >= 3 && stepDist >= 1 && stepDist <= 2;
+    });
+    if (resCands.length) filtered = resCands;
+  }
+
+  // 2. Metric Accent Structural Guard: On structural/accented beats (structural = true),
+  //    MUST favor chord tones (phi >= 3). Only yield to scale passing tones if no chord tones exist.
+  if (structural) {
+    const chordToneCands = filtered.filter(m => cl(m).phi >= 3);
+    if (chordToneCands.length) filtered = chordToneCands;
+  }
+
+  // 3. Ban foreign ungrounded chromatic tones (phi = 0) on unaccented beats unless figMode === 'chrom'
+  if (figMode !== 'chrom') {
+    const groundedCands = filtered.filter(m => cl(m).phi > 0);
+    if (groundedCands.length) filtered = groundedCands;
+  }
+
   let legal = filtered.filter(m=>{ const c=cl(m); return tbl.t[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]===1; });
   let fellBack=false;
   if(!legal.length){ legal=filtered.slice(); fellBack=true; }
@@ -1965,6 +1989,12 @@ function pickEnhancedBassNote(cands, ctx) {
 
   let filtered = cands.filter(isSmoothBassChromatic);
   if (!filtered.length) filtered = cands.slice();
+
+  // Structural Bass Guard: Bass on structural beats MUST sound chord tones (phi >= 3)
+  if (structural) {
+    const chordToneCands = filtered.filter(m => cls(m).phi >= 3);
+    if (chordToneCands.length) filtered = chordToneCands;
+  }
 
   let legal = filtered.filter(m => {
     const c = cls(m);
