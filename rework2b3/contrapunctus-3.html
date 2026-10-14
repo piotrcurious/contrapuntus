@@ -1039,6 +1039,7 @@ const STATE = {
   touched:[false,false,false],         // a lane the composer has painted stops following the defaults
   onsets:null,
   motionConstraints:[[],[],[]],
+  melodyFigures:[],
   voiceEnv:[defaultVoiceEnv(0), defaultVoiceEnv(1), defaultVoiceEnv(2)],
   noteEnv:{},                          // "v:step" -> partial env
   selectedNote:null,                   // {v, step}
@@ -1847,7 +1848,7 @@ function applyMotionConstraint(cands, prevPitch, motionMode, ear) {
 
 function pickNote(cands, ctx){
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
-  const {prevPitch, prev2Pitch, others, chordTones, scalePCs, tbl, preferRoot, structural, approachPc} = ctx;
+  const {prevPitch, prev2Pitch, others, chordTones, scalePCs, tbl, preferRoot, structural, approachPc, figMode} = ctx;
   const chordPCs = chordTones.map(pcOf);
   const sigma = structural?0:1;
   const cls = (m)=>{
@@ -1933,8 +1934,42 @@ function pickNote(cands, ctx){
         if (prev2Pitch != null && m === prevPitch && prevPitch === prev2Pitch) penalty += 60;
 
         // 5. Penalize excessive wide leaps (> 7 semitones) unless structural
-        if (absDv > 7) penalty += 40;
+        if (absDv > 7 && figMode !== 'arp_up' && figMode !== 'arp_dn') penalty += 40;
       }
+
+      // --- Melody Figure Guidance Attractors ---
+      if (figMode && figMode !== 'auto') {
+        const dv = prevPitch != null ? (m - prevPitch) : 0;
+        const absDv = Math.abs(dv);
+        const pc = pcOf(m);
+        const isChordTone = chordPCs.includes(pc);
+
+        if (figMode === 'cpt') {
+          // Strict stepwise cantus firmus counterpoint (1-2 semitones)
+          if (absDv >= 1 && absDv <= 2) penalty -= 45;
+          else if (absDv > 2) penalty += 40;
+        } else if (figMode === 'arp_up') {
+          // Arpeggiated ascending figure (favor upward leaps on chord tones)
+          if (dv > 0 && isChordTone) penalty -= 50;
+          if (dv < 0) penalty += 30;
+        } else if (figMode === 'arp_dn') {
+          // Arpeggiated descending figure (favor downward leaps on chord tones)
+          if (dv < 0 && isChordTone) penalty -= 50;
+          if (dv > 0) penalty += 30;
+        } else if (figMode === 'susp') {
+          // Suspension figure (favor holding common-tone from previous step, or stepwise resolution)
+          if (dv === 0) penalty -= 40;
+          else if (absDv <= 2) penalty -= 20;
+        } else if (figMode === 'chrom') {
+          // Chromatic run (favor half-step motion)
+          if (absDv === 1) penalty -= 50;
+          else if (absDv > 2) penalty += 35;
+        } else if (figMode === 'pedal') {
+          // Pedal point (attract to tonic/root or dominant pitch)
+          if (pc === STATE.root || pc === (STATE.root + 7) % 12) penalty -= 45;
+        }
+      }
+
       return penalty;
     };
 
@@ -2237,7 +2272,8 @@ function runVoiceWalk(chords){
         const ear=hears(0);
         const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), lo, 127), held[0], ear);
         const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
-        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode0,
+        const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
+        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode0, figMode:figMode0,
           structural:firstOnsetOfSeg(0,step,g)}));
       }
     }
@@ -2329,6 +2365,12 @@ function euclid(steps,pulses){
 function ensureGrids(){
   const total = STATE.bars*STATE.stepsPerBar, walk=STATE.walkingBass;
   const fresh = (v)=>defaultOnsets(v,total,STATE.stepsPerBar,STATE.harmonic,walk);
+  if(!STATE.melodyFigures || STATE.melodyFigures.length !== total){
+    const old = STATE.melodyFigures || [];
+    const out = new Array(total);
+    for(let s=0; s<total; s++) out[s] = s < old.length ? old[s] : 'auto';
+    STATE.melodyFigures = out;
+  }
   if(!STATE.motionConstraints) STATE.motionConstraints = [[],[],[]];
   for(let v=0; v<3; v++){
     if(!STATE.motionConstraints[v] || !STATE.motionConstraints[v].length){
@@ -3701,15 +3743,19 @@ function rollClickAt(mx,my){
    Where the bar runs past the next onset the gate is longer than the space to
    the next note, which is how a held voice rubs against the next harmony.
    ===================================================================== */
-const SEQ={ruler:22, lane:60, onset:26, env:16, motion:18, minStep:7, cursor:{v:0, step:0}};
+const SEQ={ruler:22, lane:60, figLane:22, onset:26, env:16, motion:18, minStep:7, cursor:{v:0, step:0}};
 const MOTION_MODES = ['auto', 'step', 'leap', 'hold', 'contrary', 'oblique'];
 const MOTION_LABELS = { auto:'A', step:'S', leap:'L', hold:'H', contrary:'C', oblique:'O' };
 const MOTION_COLORS = { auto:'#64748b', step:'#3b82f6', leap:'#8b5cf6', hold:'#10b981', contrary:'#f59e0b', oblique:'#ec4899' };
+const FIGURE_MODES = ['auto', 'cpt', 'arp_up', 'arp_dn', 'susp', 'chrom', 'pedal'];
+const FIGURE_LABELS = { auto:'AUT', cpt:'CPT', arp_up:'A▲', arp_dn:'A▼', susp:'SUS', chrom:'CHR', pedal:'PED' };
+const FIGURE_COLORS = { auto:'#475569', cpt:'#0284c7', arp_up:'#16a34a', arp_dn:'#d97706', susp:'#dc2626', chrom:'#9333ea', pedal:'#0d9488' };
+
 
 function seqLayout(){
   const sc=$('seqScroll'), total=STATE.bars*STATE.stepsPerBar;
   const avail=(sc&&sc.clientWidth)||600, w=Math.max(avail, total*SEQ.minStep);
-  return {w, total, stepW:w/total, h:SEQ.ruler+3*SEQ.lane, scrolls:w>avail+1};
+  return {w, total, stepW:w/total, h:SEQ.ruler+3*SEQ.lane+SEQ.figLane, scrolls:w>avail+1};
 }
 function sizeSeq(){
   const L=seqLayout();
@@ -3737,6 +3783,7 @@ function renderSeqGutter(){
   b.addEventListener('click', ()=>{ STATE.lane='all'; renderSeqGutter(); drawSeq(); });
   host.appendChild(b);
   for(let v=0;v<3;v++) mkBtn(VOICE_NAMES[v], SEQ.ruler+v*SEQ.lane, SEQ.lane-2, v, THEME.str.voice[v]);
+  mkBtn('fig attractor', SEQ.ruler+3*SEQ.lane, SEQ.figLane-2, 'fig', '#0284c7');
 }
 
 function drawSeq(){
@@ -3798,6 +3845,24 @@ function drawSeq(){
     g.strokeStyle=css(THEME.grid,0.28); g.lineWidth=1;
     g.beginPath(); g.moveTo(0,mTop+SEQ.motion+0.5); g.lineTo(w,mTop+SEQ.motion+0.5); g.stroke();
   }
+  // Melody Figure Guidance Attractor Lane at bottom
+  const figTop = SEQ.ruler + 3 * SEQ.lane;
+  g.fillStyle = css(THEME.grid, 0.18);
+  g.fillRect(0, figTop, w, SEQ.figLane);
+  for (let s = 0; s < total; s++) {
+    const x = s * stepW;
+    const fMode = (STATE.melodyFigures && STATE.melodyFigures[s]) || 'auto';
+    g.fillStyle = FIGURE_COLORS[fMode] || FIGURE_COLORS.auto;
+    g.fillRect(x + 1, figTop + 2, Math.max(1, stepW - 2), SEQ.figLane - 4);
+    if (stepW >= 12) {
+      g.fillStyle = '#ffffff';
+      g.font = '9px ' + THEME.font.mono;
+      g.textAlign = 'center';
+      g.fillText(FIGURE_LABELS[fMode] || 'AUT', x + stepW / 2, figTop + SEQ.figLane / 2 + 1);
+    }
+  }
+  g.strokeStyle = css(THEME.grid, 0.4); g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, figTop + 0.5); g.lineTo(w, figTop + 0.5); g.stroke();
   for(let b=0;b<=STATE.bars;b++){
     const x=b*spb*stepW;
     g.strokeStyle=css(THEME.grid, b%4===0?0.5:0.3); g.lineWidth=1;
@@ -3816,9 +3881,11 @@ function seqHit(e){
   const s=Math.floor(x/stepW);
   if(s<0||s>=total) return null;
   if(y<SEQ.ruler) return {kind:'bar', bar:Math.floor(s/STATE.stepsPerBar), step:s};
-  const v=Math.floor((y-SEQ.ruler)/SEQ.lane);
+  const relY = y - SEQ.ruler;
+  if(relY >= 3 * SEQ.lane) return {kind:'figure', step:s};
+  const v = Math.floor(relY / SEQ.lane);
   if(v<0||v>2) return null;
-  const within=(y-SEQ.ruler)-v*SEQ.lane;
+  const within = relY - v * SEQ.lane;
   if(within < SEQ.onset) return {kind:'onset', v, step:s};
   if(within < SEQ.onset + SEQ.env) return {kind:'env', v, step:s};
   return {kind:'motion', v, step:s};
@@ -4318,6 +4385,17 @@ function renderSeqTools(){
     host.appendChild(mb);
   }
 
+  const fLab=mk('span','aside','figure attractor:'); fLab.style.margin='0 2px 0 8px'; host.appendChild(fLab);
+  for(const fMode of FIGURE_MODES){
+    const fb=mk('button','tiny',fMode); fb.type='button'; fb.title='Set melody figure guidance attractor to '+fMode;
+    fb.addEventListener('click', ()=>{
+      const total=STATE.bars*STATE.stepsPerBar;
+      STATE.melodyFigures=new Array(total).fill(fMode);
+      regenerate(); histCommit(); drawSeq();
+    });
+    host.appendChild(fb);
+  }
+
   if(STATE.selectedBar!=null){
     const b=STATE.selectedBar, ov=STATE.barOverrides[b]||{};
     const box=mk('span'); box.style.display='inline-flex'; box.style.gap='6px'; box.style.alignItems='center'; box.style.flexWrap='wrap';
@@ -4555,6 +4633,7 @@ function serializeState(opts){
     touched:STATE.touched.slice(),
     onsets:STATE.touched.map((t,v)=> t && STATE.onsets ? STATE.onsets[v].map(b=>b?1:0).join('') : null),
     motionConstraints: STATE.motionConstraints ? STATE.motionConstraints.map(arr => arr ? arr.slice() : []) : [[],[],[]],
+    melodyFigures: STATE.melodyFigures ? STATE.melodyFigures.slice() : [],
     voiceEnv:STATE.voiceEnv.map(e=>({a:r4(e.a), d:r4(e.d), s:r4(e.s), r:r4(e.r), gateRatio:r4(e.gateRatio)})),
     noteEnv:canonNoteEnv(STATE.noteEnv),
   };
@@ -4712,7 +4791,12 @@ function restoreState(o){
   } else {
     N.motionConstraints = [[],[],[]];
   }
-  STATE.barOverrides=N.barOverrides; STATE.touched=N.touched; STATE.onsets=N.onsets; STATE.motionConstraints=N.motionConstraints;
+  if(Array.isArray(o.melodyFigures)){
+    N.melodyFigures = o.melodyFigures.slice();
+  } else {
+    N.melodyFigures = [];
+  }
+  STATE.barOverrides=N.barOverrides; STATE.touched=N.touched; STATE.onsets=N.onsets; STATE.motionConstraints=N.motionConstraints; STATE.melodyFigures=N.melodyFigures;
   if(N.tieRules) STATE.tieRules = N.tieRules;
   if(N.ruleRing) STATE.ruleRing = N.ruleRing;
   STATE.voiceEnv=N.voiceEnv; STATE.noteEnv=N.noteEnv;
@@ -5425,6 +5509,14 @@ function bindSeq(){
       if(!STATE.motionConstraints) STATE.motionConstraints=[[],[],[]];
       if(!STATE.motionConstraints[h.v]) STATE.motionConstraints[h.v]=new Array(STATE.bars*STATE.stepsPerBar).fill('auto');
       STATE.motionConstraints[h.v][h.step]=nextMode;
+      regenerate(); histCommit(); drawSeq(); return;
+    }
+    if(h.kind==='figure'){
+      const cur=(STATE.melodyFigures && STATE.melodyFigures[h.step]) || 'auto';
+      const idx=FIGURE_MODES.indexOf(cur);
+      const nextMode=FIGURE_MODES[(idx+1)%FIGURE_MODES.length];
+      if(!STATE.melodyFigures) STATE.melodyFigures=new Array(STATE.bars*STATE.stepsPerBar).fill('auto');
+      STATE.melodyFigures[h.step]=nextMode;
       regenerate(); histCommit(); drawSeq(); return;
     }
     SEQ.cursor.v=h.v; SEQ.cursor.step=h.step;
