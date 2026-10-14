@@ -1866,15 +1866,15 @@ function pickNote(cands, ctx){
   const cl = (m)=>{ let v=memo.get(m); if(!v){ v=cls(m); memo.set(m,v); } return v; };
   const costOf = (m)=>{ const c=cl(m); return tbl.costs[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]; };
 
-  // Disallow raw chromatic leaps (> 2 semitones) or harsh minor-second collisions with active voices
+  // Disallow raw chromatic leaps (> 2 semitones) or harsh minor-second / tritone clashes against active sounding voices
   const isSmoothChromatic = (m) => {
     const c = cl(m);
-    if (c.phi !== 0) return true; // Non-chromatic choices pass
-    // Chromatic notes MUST be stepwise (1-2 semitones) from prevPitch
-    if (prevPitch != null && Math.abs(m - prevPitch) > 2) return false;
-    // Chromatic notes MUST NOT create harsh minor-second collisions with active sounding voices
+    if (c.phi === 0 && prevPitch != null && Math.abs(m - prevPitch) > 2) return false;
     for (const o of others) {
-      if (o.pitch != null && ic(m - o.pitch) === 1) return false;
+      if (o.pitch == null) continue;
+      const intervalClass = ic(m - o.pitch);
+      // Forbid minor 2nd (IC 1) clashes against any active voice; forbid tritone (IC 6) on structural beats
+      if (intervalClass === 1 || (structural && intervalClass === 6)) return false;
     }
     return true;
   };
@@ -2074,25 +2074,6 @@ function runVoiceWalk(chords){
     const cur=(u)=> pitches[u]!=null ? pitches[u] : held[u];
     const put=(v, r)=>{ pitches[v]=r.pitch; deco[v]=r.cls.phi<3; fb[v]=r.fellBack; cells[v]=r.cls; prev2Pitch[v]=held[v]; prevPhi[v]=r.cls.phi; held[v]=r.pitch; };
 
-    if(STATE.onsets[0][step]){
-      if(STATE.anchors[step]!=null){
-        pitches[0]=STATE.anchors[step]; held[0]=pitches[0];
-      } else if(STATE.arp!=='none'){
-        if(arpSeg!==g){ const t=chordTonesIn(chord.tones,REGISTERS[0].lo,REGISTERS[0].hi);
-          arpGen=arpSequence(t.length?t:[72], STATE.arp, chord.rootPc*17+g); arpSeg=g; arpI=0; }
-        pitches[0]=arpGen[arpI++%arpGen.length]; held[0]=pitches[0];
-      } else {
-        const beneath=[held[1],held[2]].filter(x=>x!=null);
-        const lo = beneath.length ? Math.max.apply(null, beneath)+1 : 0;
-        const ear=hears(0);
-        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), lo, 127), held[0], ear);
-        const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
-        const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
-        const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
-        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs, tbl, motionMode:mMode0, figMode:figMode0,
-          structural:isMetricAccented0}));
-      }
-    }
     if (STATE.onsets[2][step]) {
       const first = firstOnsetOfSeg(2, step, g);
       const last = lastOnsetOfSeg(2, step, g);
@@ -2143,6 +2124,25 @@ function runVoiceWalk(chords){
         rootPc: chord.rootPc,
         stepInSeg: step - (g * segLen())
       }));
+    }
+    if(STATE.onsets[0][step]){
+      if(STATE.anchors[step]!=null){
+        pitches[0]=STATE.anchors[step]; held[0]=pitches[0];
+      } else if(STATE.arp!=='none'){
+        if(arpSeg!==g){ const t=chordTonesIn(chord.tones,REGISTERS[0].lo,REGISTERS[0].hi);
+          arpGen=arpSequence(t.length?t:[72], STATE.arp, chord.rootPc*17+g); arpSeg=g; arpI=0; }
+        pitches[0]=arpGen[arpI++%arpGen.length]; held[0]=pitches[0];
+      } else {
+        const beneath=[held[1],cur(2)].filter(x=>x!=null);
+        const lo = beneath.length ? Math.max.apply(null, beneath)+1 : 0;
+        const ear=hears(0);
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), lo, 127), held[0], ear);
+        const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
+        const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
+        const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
+        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs, tbl, motionMode:mMode0, figMode:figMode0,
+          structural:isMetricAccented0}));
+      }
     }
     if(STATE.onsets[1][step]){
       const lo = cur(2)!=null ? cur(2)+1 : 0, hi = cur(0)!=null ? cur(0)-1 : 127;
