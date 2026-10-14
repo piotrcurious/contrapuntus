@@ -1772,11 +1772,11 @@ function forkFrom(walk, segIdx, alt, horizon){
 /* ---- voices ---- */
 function motionClass(delta){ return delta<=-5?0 : delta<=-1?1 : delta===0?2 : delta<=4?3 : 4; }
 function fitClass(pc, chordPCs, scalePCs, rootPc){
-  if (rootPc != null && (pc === rootPc || pc === (rootPc + 7) % 12)) return 4;  // 4: Root & 5th (fundamental structural chord tones)
-  if (chordPCs && chordPCs.includes(pc)) return 3;                             // 3: 3rd & diatonic chord extensions
-  if (scalePCs && scalePCs.includes(pc)) return 2;                             // 2: Diatonic scale tones (diatonic passing/neighbor)
-  if (rootPc != null && [(rootPc+11)%12, (rootPc+1)%12, (rootPc+6)%12, (rootPc+8)%12].includes(pc)) return 1; // 1: Chromatic approach/leading tones
-  return 0;                                                                     // 0: Foreign ungrounded chromatic tone
+  if (rootPc != null && (pc === rootPc || pc === (rootPc + 7) % 12)) return 4;  // 4: Essential Root & 5th
+  if (chordPCs && chordPCs.includes(pc)) return 3;                             // 3: Consonant 3rd & Diatonic Extensions
+  if (scalePCs && scalePCs.includes(pc)) return 2;                             // 2: Diatonic Scale Passing/Neighbor
+  if (rootPc != null && [(rootPc+11)%12, (rootPc+1)%12, (rootPc+6)%12, (rootPc+8)%12].includes(pc)) return 1; // 1: Chromatic Approach
+  return 0;                                                                     // 0: Foreign Ungrounded
 }
 function consonanceCount(m, others){
   let n=0;
@@ -1854,13 +1854,13 @@ function applyMotionConstraint(cands, prevPitch, motionMode, ear) {
 
 function pickNote(cands, ctx){
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
-  const {prevPitch, prev2Pitch, prevPhi, others, chordTones, scalePCs, tbl, preferRoot, structural, approachPc, figMode} = ctx;
+  const {prevPitch, prev2Pitch, prevPhi, others, chordTones, rootPc, scalePCs, tbl, preferRoot, structural, approachPc, figMode} = ctx;
   const chordPCs = chordTones.map(pcOf);
   const sigma = structural?0:1;
   const cls = (m)=>{
     const dv = prevPitch==null?0:(m-prevPitch);
     return { kappa:Math.min(2,consonanceCount(m,others)), mu:prevPitch==null?2:motionClass(dv),
-             phi:fitClass(pcOf(m),chordPCs,scalePCs,chordTones.length?pcOf(chordTones[0]):null), sigma, gamma:relativeMotion(dv,others) };
+             phi:fitClass(pcOf(m),chordPCs,scalePCs,rootPc!=null?rootPc:(chordTones.length?pcOf(chordTones[0]):null)), sigma, gamma:relativeMotion(dv,others) };
   };
   const memo = new Map();
   const cl = (m)=>{ let v=memo.get(m); if(!v){ v=cls(m); memo.set(m,v); } return v; };
@@ -1891,6 +1891,7 @@ function pickNote(cands, ctx){
   const approachScore = (m)=>{ const d=pcDist(pcOf(m), approachPc); return d===1?0 : d===2?1 : 2; };
   const mode = STATE.take;
   legal.sort((a,b)=>{
+    // 1. Structural / Preference Targets
     if(preferRoot!=null){
       const ra=pcOf(a)===preferRoot?0:1, rb=pcOf(b)===preferRoot?0:1;
       if(ra!==rb) return ra-rb;
@@ -1899,110 +1900,13 @@ function pickNote(cands, ctx){
       const sa=approachScore(a), sb=approachScore(b);
       if(sa!==sb) return sa-sb;
     }
-    // Prefer half-step chromatic motion over larger steps if phi=0
-    const ca_phi = cl(a).phi, cb_phi = cl(b).phi;
-    if (ca_phi === 0 || cb_phi === 0) {
-      const stepA = prevPitch != null ? Math.abs(a - prevPitch) : 0;
-      const stepB = prevPitch != null ? Math.abs(b - prevPitch) : 0;
-      if (ca_phi === 0 && cb_phi === 0 && stepA !== stepB) return stepA - stepB;
-    }
 
-    // Classical Melodic Contrapuntal Scoring
-    const scoreMelody = (m) => {
-      let penalty = 0;
-      if (prevPitch != null) {
-        const dv = m - prevPitch;
-        const absDv = Math.abs(dv);
-
-        // 1. Penalize octave leap oscillations (e.g., C4 -> C5 -> C4)
-        if (prev2Pitch != null && m === prev2Pitch && absDv >= 7) penalty += 80;
-
-        // 2. Leap Recovery Rule: Large leap (> 4 semitones) MUST be followed by step motion in opposite direction
-        if (prev2Pitch != null) {
-          const prevDv = prevPitch - prev2Pitch;
-          if (Math.abs(prevDv) > 4) {
-            const sameDir = (dv * prevDv) > 0;
-            if (sameDir) penalty += 50; // Penalize leaping or stepping further in same direction
-            if (absDv <= 2 && (dv * prevDv) < 0) penalty -= 30; // Reward stepwise recovery
-          }
-        }
-
-        // 3. Leading Tone Tendency: Leading tone (scale degree 7) should resolve upward to tonic (scale degree 0)
-        const prevPc = pcOf(prevPitch);
-        const rootPc = STATE.root;
-        const leadingTonePc = (rootPc + 11) % 12;
-        if (prevPc === leadingTonePc) {
-          if (pcOf(m) === rootPc) penalty -= 40;
-          else penalty += 30;
-        }
-
-        // 4. Stagnation Penalty: Avoid repeating the exact same pitch 3 times in a row
-        if (prev2Pitch != null && m === prevPitch && prevPitch === prev2Pitch) penalty += 60;
-
-        // 5. Penalize excessive wide leaps (> 7 semitones) unless structural
-        if (absDv > 7 && figMode !== 'arp_up' && figMode !== 'arp_dn') penalty += 40;
-      }
-
-      // --- Non-Chord Tone (NCT) Mandatory Resolution Engine ---
-      // If previous note was a non-chord tone (phi < 3), this step MUST resolve stepwise (1-2 semitones) to a chord tone (phi >= 3)
-      if (prevPhi != null && prevPhi < 3 && prevPitch != null) {
-        const stepDist = Math.abs(m - prevPitch);
-        const isChordTone = cl(m).phi >= 3;
-        if (isChordTone && stepDist >= 1 && stepDist <= 2) {
-          penalty -= 60; // Strong reward for resolving non-chord tone to chord tone stepwise
-        } else {
-          penalty += 75; // Heavy penalty for failing to resolve non-chord tone stepwise to chord tone
-        }
-      }
-
-      // --- Metric Accent Guard for Non-Chord Tones ---
-      // Metric accented beats (structural = true) MUST favor chord tones (phi >= 3)
-      if (structural && cl(m).phi < 3) {
-        penalty += 45;
-      }
-
-      // --- Melody Figure Guidance Attractors ---
-      if (figMode && figMode !== 'auto') {
-        const dv = prevPitch != null ? (m - prevPitch) : 0;
-        const absDv = Math.abs(dv);
-        const pc = pcOf(m);
-        const isChordTone = chordPCs.includes(pc);
-
-        if (figMode === 'cpt') {
-          // Strict stepwise cantus firmus counterpoint (1-2 semitones)
-          if (absDv >= 1 && absDv <= 2) penalty -= 45;
-          else if (absDv > 2) penalty += 40;
-        } else if (figMode === 'arp_up') {
-          // Arpeggiated ascending figure (favor upward leaps on chord tones)
-          if (dv > 0 && isChordTone) penalty -= 50;
-          if (dv < 0) penalty += 30;
-        } else if (figMode === 'arp_dn') {
-          // Arpeggiated descending figure (favor downward leaps on chord tones)
-          if (dv < 0 && isChordTone) penalty -= 50;
-          if (dv > 0) penalty += 30;
-        } else if (figMode === 'susp') {
-          // Suspension figure (favor holding common-tone from previous step, or stepwise resolution)
-          if (dv === 0) penalty -= 40;
-          else if (absDv <= 2) penalty -= 20;
-        } else if (figMode === 'chrom') {
-          // Chromatic run (favor half-step motion)
-          if (absDv === 1) penalty -= 50;
-          else if (absDv > 2) penalty += 35;
-        } else if (figMode === 'pedal') {
-          // Pedal point (attract to tonic/root or dominant pitch)
-          if (pc === STATE.root || pc === (STATE.root + 7) % 12) penalty -= 45;
-        }
-      }
-
-      return penalty;
-    };
-
-    const sa = scoreMelody(a), sb = scoreMelody(b);
-    if (sa !== sb) return sa - sb;
-
+    // 2. Rule Domain Evaluation (Costs directly derived from the 5D Voice Tensor)
     const ca=costOf(a), cb=costOf(b);
     if(mode==='strong' && ca!==cb) return ca-cb;
     if(mode==='bold'   && ca!==cb) return cb-ca;
+
+    // 3. Distance & Step tie-breakers
     const da=prevPitch==null?0:Math.abs(a-prevPitch), db=prevPitch==null?0:Math.abs(b-prevPitch);
     const ra=prevPitch!=null&&da===0, rb=prevPitch!=null&&db===0;
     if(ra!==rb) return ra?1:-1;
@@ -2014,119 +1918,6 @@ function pickNote(cands, ctx){
   return {pitch:chosen, cls:cl(chosen), fellBack};
 }
 
-/* =====================================================================
-   BEAM SEARCH BASS PLANNER
-   Evaluates N-beat trajectories holistically to construct smooth,
-   contrapuntally rich basslines.
-   ===================================================================== */
-
-const BEAM_WIDTH = 12; // Number of top trajectories retained per step
-
-/**
- * Calculates a candidate note's step score given history and contrapuntal context.
- */
-function scoreBassTransition(prevNode, candidatePitch, step, segInfo, walkData) {
-  const { chord, nextChord, targetTension, scalePCs, earAtStep, isLastBeatOfSeg } = walkData;
-  const chordPCs = chord.tones.map(pcOf);
-  const pc = pcOf(candidatePitch);
-
-  let deltaScore = 0;
-  const prevPitch = prevNode ? prevNode.pitch : null;
-  const dv = prevPitch != null ? (candidatePitch - prevPitch) : 0;
-  const stepDist = Math.abs(dv);
-  const dir = Math.sign(dv);
-
-  // --- 1. Dissonance & Resolution Check ---
-  let nextPendingDissonance = null;
-  if (prevNode && prevNode.pendingDissonance) {
-    const dis = prevNode.pendingDissonance;
-    if (dis.type === 'passing') {
-      // Passing tone MUST continue stepwise in the same direction
-      if (dir === dis.dir && (stepDist === 1 || stepDist === 2)) {
-        deltaScore += 45;
-      } else {
-        deltaScore -= 60; // Penalty for unresolved passing tone
-      }
-    } else if (dis.type === 'neighbor') {
-      // Neighbor tone MUST return to original pitch
-      if (candidatePitch === dis.originPitch) {
-        deltaScore += 50;
-      } else {
-        deltaScore -= 60;
-      }
-    }
-  }
-
-  // --- 2. Harmonic Alignment & Inversions ---
-  const isRoot = (pc === chord.rootPc);
-  const isChordTone = chordPCs.includes(pc);
-  const isScaleTone = scalePCs.includes(pc);
-
-  if (segInfo.first && isRoot) deltaScore += 35;          // Downbeat root preference
-  else if (segInfo.first && isChordTone) deltaScore += 25; // Inversion on downbeat
-  else if (isChordTone) deltaScore += 20;
-  else if (isScaleTone) deltaScore += 10;
-  else deltaScore -= 15;                                 // Chromatic tone penalty
-
-  // --- 3. Stepwise Motion & Interval Quality ---
-  if (prevPitch != null) {
-    if (stepDist === 1 || stepDist === 2) deltaScore += 30;       // Stepwise
-    else if (stepDist === 3 || stepDist === 4) deltaScore += 15;  // Small leap (3rd)
-    else if (stepDist === 7 || stepDist === 5) deltaScore += 10;  // Perfect 4th/5th
-    else if (stepDist === 0) deltaScore -= 5;                     // Static repeated note
-    else if (stepDist > 7) deltaScore -= 40;                      // Awkward leap
-  }
-
-  // --- 4. Directional Balance (Contour Management) ---
-  let newDirCount = 1;
-  let newLastDir = dir;
-  if (prevNode && dir !== 0) {
-    if (dir === prevNode.lastDir) {
-      newDirCount = prevNode.dirCount + 1;
-      if (newDirCount >= 3) {
-        deltaScore -= (newDirCount * 12); // Exponential penalty for 3+ steps in one direction
-      }
-    } else {
-      newLastDir = dir;
-      newDirCount = 1;
-      if (prevNode.dirCount >= 2 && Math.abs(prevNode.lastDv) >= 3) {
-        // Bonus for reversing direction after a leap
-        if (dir === -prevNode.lastDir) deltaScore += 20;
-      }
-    }
-  }
-
-  // --- 5. Cadential Approach (Last Beat of Segment) ---
-  if (isLastBeatOfSeg) {
-    const nextRoot = nextChord.rootPc;
-    const distToNextRoot = pcDist(pc, nextRoot);
-    if (distToNextRoot === 1) deltaScore += 40;       // Chromatic/diatonic leading tone
-    else if (distToNextRoot === 2) deltaScore += 25;  // Whole-step approach
-    else if (distToNextRoot === 5 || distToNextRoot === 7) deltaScore += 20; // 5th/4th move
-  }
-
-  // Set pending dissonance flag if taking a non-chord tone by step
-  if (!isChordTone && isScaleTone && stepDist <= 2 && prevPitch != null) {
-    nextPendingDissonance = {
-      type: 'passing',
-      dir: dir,
-      originPitch: prevPitch
-    };
-  }
-
-  return {
-    scoreDelta: deltaScore,
-    nodeData: {
-      pitch: candidatePitch,
-      dv: dv,
-      lastDv: dv,
-      lastDir: newLastDir,
-      dirCount: newDirCount,
-      pendingDissonance: nextPendingDissonance,
-      isChordTone: isChordTone
-    }
-  };
-}
 
 /**
  * Runs Beam Search over a multi-step horizon (e.g., one or two chord segments).
@@ -2146,7 +1937,7 @@ const BASS_STATE = {
 
 function pickEnhancedBassNote(cands, ctx) {
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
-  const { prevPitch, others, chordTones, scalePCs, tbl, preferredPcs, structural, approachPc, isEnclosure } = ctx;
+  const { prevPitch, others, chordTones, rootPc, scalePCs, tbl, preferredPcs, structural, approachPc, isEnclosure } = ctx;
   const chordPCs = chordTones.map(pcOf);
   const sigma = structural ? 0 : 1;
 
@@ -2155,7 +1946,7 @@ function pickEnhancedBassNote(cands, ctx) {
     return {
       kappa: Math.min(2, consonanceCount(m, others)),
       mu: prevPitch == null ? 2 : motionClass(dv),
-      phi: fitClass(pcOf(m), chordPCs, scalePCs, chordTones.length?pcOf(chordTones[0]):null),
+      phi: fitClass(pcOf(m), chordPCs, scalePCs, rootPc!=null?rootPc:(chordTones.length?pcOf(chordTones[0]):null)),
       sigma,
       gamma: relativeMotion(dv, others)
     };
@@ -2298,7 +2089,7 @@ function runVoiceWalk(chords){
         const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
         const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
         const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
-        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode0, figMode:figMode0,
+        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs, tbl, motionMode:mMode0, figMode:figMode0,
           structural:isMetricAccented0}));
       }
     }
@@ -2349,6 +2140,7 @@ function runVoiceWalk(chords){
         approachPc: approachTargetPc,
         isEnclosure,
         motionMode: mMode2,
+        rootPc: chord.rootPc,
         stepInSeg: step - (g * segLen())
       }));
     }
@@ -2358,7 +2150,7 @@ function runVoiceWalk(chords){
       const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), lo, hi), held[1], ear);
       const mMode1 = (STATE.motionConstraints && STATE.motionConstraints[1] && STATE.motionConstraints[1][step]) || 'auto';
       const isMetricAccented1 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
-      put(1, pickNote(cands, {prevPitch:held[1], prev2Pitch:prev2Pitch[1], prevPhi:prevPhi[1], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode1,
+      put(1, pickNote(cands, {prevPitch:held[1], prev2Pitch:prev2Pitch[1], prevPhi:prevPhi[1], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs, tbl, motionMode:mMode1,
         structural:isMetricAccented1}));
     }
     res.push({step, pitches, deco, fellBack:fb, cells, g});
