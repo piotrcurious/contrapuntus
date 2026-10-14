@@ -1855,7 +1855,7 @@ function applyMotionConstraint(cands, prevPitch, motionMode, ear) {
 
 function pickNote(cands, ctx){
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
-  const {prevPitch, prev2Pitch, others, chordTones, scalePCs, tbl, preferRoot, structural, approachPc, figMode} = ctx;
+  const {prevPitch, prev2Pitch, prevPhi, others, chordTones, scalePCs, tbl, preferRoot, structural, approachPc, figMode} = ctx;
   const chordPCs = chordTones.map(pcOf);
   const sigma = structural?0:1;
   const cls = (m)=>{
@@ -1942,6 +1942,24 @@ function pickNote(cands, ctx){
 
         // 5. Penalize excessive wide leaps (> 7 semitones) unless structural
         if (absDv > 7 && figMode !== 'arp_up' && figMode !== 'arp_dn') penalty += 40;
+      }
+
+      // --- Non-Chord Tone (NCT) Mandatory Resolution Engine ---
+      // If previous note was a non-chord tone (phi < 3), this step MUST resolve stepwise (1-2 semitones) to a chord tone (phi >= 3)
+      if (prevPhi != null && prevPhi < 3 && prevPitch != null) {
+        const stepDist = Math.abs(m - prevPitch);
+        const isChordTone = cl(m).phi >= 3;
+        if (isChordTone && stepDist >= 1 && stepDist <= 2) {
+          penalty -= 60; // Strong reward for resolving non-chord tone to chord tone stepwise
+        } else {
+          penalty += 75; // Heavy penalty for failing to resolve non-chord tone stepwise to chord tone
+        }
+      }
+
+      // --- Metric Accent Guard for Non-Chord Tones ---
+      // Metric accented beats (structural = true) MUST favor chord tones (phi >= 3)
+      if (structural && cl(m).phi < 3) {
+        penalty += 45;
       }
 
       // --- Melody Figure Guidance Attractors ---
@@ -2243,7 +2261,7 @@ function runVoiceWalk(chords){
   const tbl = voiceTable();
   const total = STATE.onsets[0].length;
   const held=[null,null,null];
-  const prev2Pitch=[null,null,null];
+  const prev2Pitch=[null,null,null], prevPhi=[null,null,null];
   for(let v=0;v<3;v++) if(STATE.seed.voice[v]!=null) held[v]=STATE.seed.voice[v];
   let arpGen=null, arpSeg=-1, arpI=0;
   const res=[];
@@ -2264,7 +2282,7 @@ function runVoiceWalk(chords){
       return o;
     };
     const cur=(u)=> pitches[u]!=null ? pitches[u] : held[u];
-    const put=(v, r)=>{ pitches[v]=r.pitch; deco[v]=r.cls.phi<2; fb[v]=r.fellBack; cells[v]=r.cls; prev2Pitch[v]=held[v]; held[v]=r.pitch; };
+    const put=(v, r)=>{ pitches[v]=r.pitch; deco[v]=r.cls.phi<3; fb[v]=r.fellBack; cells[v]=r.cls; prev2Pitch[v]=held[v]; prevPhi[v]=r.cls.phi; held[v]=r.pitch; };
 
     if(STATE.onsets[0][step]){
       if(STATE.anchors[step]!=null){
@@ -2280,8 +2298,9 @@ function runVoiceWalk(chords){
         const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), lo, 127), held[0], ear);
         const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
         const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
-        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode0, figMode:figMode0,
-          structural:firstOnsetOfSeg(0,step,g)}));
+        const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
+        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode0, figMode:figMode0,
+          structural:isMetricAccented0}));
       }
     }
     if (STATE.onsets[2][step]) {
@@ -2339,8 +2358,9 @@ function runVoiceWalk(chords){
       const ear=hears(1);
       const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), lo, hi), held[1], ear);
       const mMode1 = (STATE.motionConstraints && STATE.motionConstraints[1] && STATE.motionConstraints[1][step]) || 'auto';
-      put(1, pickNote(cands, {prevPitch:held[1], prev2Pitch:prev2Pitch[1], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode1,
-        structural:firstOnsetOfSeg(1,step,g)}));
+      const isMetricAccented1 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
+      put(1, pickNote(cands, {prevPitch:held[1], prev2Pitch:prev2Pitch[1], prevPhi:prevPhi[1], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode1,
+        structural:isMetricAccented1}));
     }
     res.push({step, pitches, deco, fellBack:fb, cells, g});
   }
