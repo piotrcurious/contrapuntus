@@ -1005,8 +1005,8 @@ function defaultProfiles(){
     },
     voice:{
       kappa:{w:0.45, aff:[0,0.5,1]},
-      mu:   {w:0.35, aff:[0,0.5,1,0.5,0]},
-      phi:  {w:1.00, aff:[0, 0.35, 0.65, 0.85, 1.0]},
+      mu:   {w:0.45, aff:[0.10, 0.75, 0.90, 0.75, 0.10]},
+      phi:  {w:1.00, aff:[0.0, 0.30, 0.70, 0.90, 1.0]},
       sigma:{w:0.20, aff:[1,0.55]},
       gamma:{w:0.30, aff:[0,0.5,1]},
     },
@@ -1770,14 +1770,13 @@ function forkFrom(walk, segIdx, alt, horizon){
 }
 
 /* ---- voices ---- */
-function motionClass(delta){ return delta<=-3?0 : delta<=-1?1 : delta===0?2 : delta<=2?3 : 4; }
+function motionClass(delta){ return delta<=-5?0 : delta<=-1?1 : delta===0?2 : delta<=4?3 : 4; }
 function fitClass(pc, chordPCs, scalePCs, rootPc){
-  if (rootPc != null && pc === rootPc) return 4;                     // 4: Essential chord root
-  if (chordPCs && chordPCs.includes(pc)) return 3;                  // 3: Diatonic chord tone
-  // Extended/borrowed harmonic tension (e.g. 7th, 9th, 11th, or common borrowed tone)
-  if (rootPc != null && [ (rootPc+10)%12, (rootPc+2)%12, (rootPc+5)%12 ].includes(pc)) return 2;
-  if (scalePCs && scalePCs.includes(pc)) return 1;                  // 1: Non-chord diatonic step
-  return 0;                                                          // 0: Foreign chromatic tone
+  if (rootPc != null && (pc === rootPc || pc === (rootPc + 7) % 12)) return 4;  // 4: Root & 5th (fundamental structural chord tones)
+  if (chordPCs && chordPCs.includes(pc)) return 3;                             // 3: 3rd & diatonic chord extensions
+  if (scalePCs && scalePCs.includes(pc)) return 2;                             // 2: Diatonic scale tones (diatonic passing/neighbor)
+  if (rootPc != null && [(rootPc+11)%12, (rootPc+1)%12, (rootPc+6)%12, (rootPc+8)%12].includes(pc)) return 1; // 1: Chromatic approach/leading tones
+  return 0;                                                                     // 0: Foreign ungrounded chromatic tone
 }
 function consonanceCount(m, others){
   let n=0;
