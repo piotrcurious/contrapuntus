@@ -1866,14 +1866,20 @@ function pickNote(cands, ctx){
   const cl = (m)=>{ let v=memo.get(m); if(!v){ v=cls(m); memo.set(m,v); } return v; };
   const costOf = (m)=>{ const c=cl(m); return tbl.costs[vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma)]; };
 
-  // Disallow raw chromatic leaps (> 2 semitones) or harsh minor-second / tritone clashes against active sounding voices
+  // Species Counterpoint Motion Filter:
+  // 1. Non-chord tones (phi < 3) MUST NOT be entered by leap (|delta m| > 2).
+  // 2. Chromatic approach tones (phi = 1) MUST enter by half-step (|delta m| = 1).
+  // 3. Forbid minor 2nd (IC 1) clashes against active voices, and tritone (IC 6) clashes on structural beats.
   const isSmoothChromatic = (m) => {
     const c = cl(m);
-    if (c.phi === 0 && prevPitch != null && Math.abs(m - prevPitch) > 2) return false;
+    if (prevPitch != null) {
+      const stepDist = Math.abs(m - prevPitch);
+      if (c.phi < 3 && stepDist > 2) return false;                     // Ban leaping into ANY non-chord tone
+      if (c.phi === 1 && stepDist !== 1) return false;                  // Chromatic approach must be a half-step
+    }
     for (const o of others) {
       if (o.pitch == null) continue;
       const intervalClass = ic(m - o.pitch);
-      // Forbid minor 2nd (IC 1) clashes against any active voice; forbid tritone (IC 6) on structural beats
       if (intervalClass === 1 || (structural && intervalClass === 6)) return false;
     }
     return true;
@@ -1976,13 +1982,21 @@ function pickEnhancedBassNote(cands, ctx) {
     };
   };
 
-  // Disallow raw chromatic leaps (> 2 semitones) or harsh minor-second collisions in bass
+  // Species Counterpoint Bass Motion Filter:
+  // 1. Non-chord tones (phi < 3) in bass MUST NOT be entered by leap (|delta m| > 2).
+  // 2. Chromatic approach tones (phi = 1) MUST enter by half-step.
+  // 3. Vertical clash suppression.
   const isSmoothBassChromatic = (m) => {
     const c = cls(m);
-    if (c.phi !== 0) return true;
-    if (prevPitch != null && Math.abs(m - prevPitch) > 2) return false;
+    if (prevPitch != null) {
+      const stepDist = Math.abs(m - prevPitch);
+      if (c.phi < 3 && stepDist > 2) return false;                     // Ban leaping into bass non-chord tones
+      if (c.phi === 1 && stepDist !== 1) return false;
+    }
     for (const o of others) {
-      if (o.pitch != null && ic(m - o.pitch) === 1) return false;
+      if (o.pitch == null) continue;
+      const intervalClass = ic(m - o.pitch);
+      if (intervalClass === 1 || (structural && intervalClass === 6)) return false;
     }
     return true;
   };
