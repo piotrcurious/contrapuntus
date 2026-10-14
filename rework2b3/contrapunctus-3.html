@@ -982,7 +982,7 @@ const CHORD_AXES = [
 const VOICE_AXES = [
   {key:'kappa',n:3, label:'\u03ba', what:'voices it agrees with', tick:i=>String(i)},
   {key:'mu',   n:5, label:'\u03bc', what:'its own leap or step',  tick:i=>['\u2193\u2193','\u2193','=','\u2191','\u2191\u2191'][i]},
-  {key:'phi',  n:3, label:'\u03c6', what:'chromatic / scale / chord tone', tick:i=>['chr','scl','chd'][i]},
+  {key:'phi',  n:5, label:'\u03c6', what:'fit taxonomy (chromatic-foreign -> root)', tick:i=>['chr-f','nct','ext','chd','root'][i]},
   {key:'sigma',n:2, label:'\u03c3', what:'structural or passing', tick:i=>['struct','pass'][i]},
   {key:'gamma',n:3, label:'\u03b3', what:'against the other voices', tick:i=>['sim','obl','con'][i]},
 ];
@@ -1006,7 +1006,7 @@ function defaultProfiles(){
     voice:{
       kappa:{w:0.45, aff:[0,0.5,1]},
       mu:   {w:0.35, aff:[0,0.5,1,0.5,0]},
-      phi:  {w:1.00, aff:[0,0.5,1]},
+      phi:  {w:1.00, aff:[0, 0.35, 0.65, 0.85, 1.0]},
       sigma:{w:0.20, aff:[1,0.55]},
       gamma:{w:0.30, aff:[0,0.5,1]},
     },
@@ -1771,7 +1771,14 @@ function forkFrom(walk, segIdx, alt, horizon){
 
 /* ---- voices ---- */
 function motionClass(delta){ return delta<=-3?0 : delta<=-1?1 : delta===0?2 : delta<=2?3 : 4; }
-function fitClass(pc, chordPCs, scalePCs){ return chordPCs.includes(pc)?2 : scalePCs.includes(pc)?1 : 0; }
+function fitClass(pc, chordPCs, scalePCs, rootPc){
+  if (rootPc != null && pc === rootPc) return 4;                     // 4: Essential chord root
+  if (chordPCs && chordPCs.includes(pc)) return 3;                  // 3: Diatonic chord tone
+  // Extended/borrowed harmonic tension (e.g. 7th, 9th, 11th, or common borrowed tone)
+  if (rootPc != null && [ (rootPc+10)%12, (rootPc+2)%12, (rootPc+5)%12 ].includes(pc)) return 2;
+  if (scalePCs && scalePCs.includes(pc)) return 1;                  // 1: Non-chord diatonic step
+  return 0;                                                          // 0: Foreign chromatic tone
+}
 function consonanceCount(m, others){
   let n=0;
   for(const o of others){ if(o.pitch==null) continue; if(CONSONANT_ICS.has(ic(m-o.pitch))) n++; }
@@ -1854,7 +1861,7 @@ function pickNote(cands, ctx){
   const cls = (m)=>{
     const dv = prevPitch==null?0:(m-prevPitch);
     return { kappa:Math.min(2,consonanceCount(m,others)), mu:prevPitch==null?2:motionClass(dv),
-             phi:fitClass(pcOf(m),chordPCs,scalePCs), sigma, gamma:relativeMotion(dv,others) };
+             phi:fitClass(pcOf(m),chordPCs,scalePCs,chordTones.length?pcOf(chordTones[0]):null), sigma, gamma:relativeMotion(dv,others) };
   };
   const memo = new Map();
   const cl = (m)=>{ let v=memo.get(m); if(!v){ v=cls(m); memo.set(m,v); } return v; };
@@ -2131,7 +2138,7 @@ function pickEnhancedBassNote(cands, ctx) {
     return {
       kappa: Math.min(2, consonanceCount(m, others)),
       mu: prevPitch == null ? 2 : motionClass(dv),
-      phi: fitClass(pcOf(m), chordPCs, scalePCs),
+      phi: fitClass(pcOf(m), chordPCs, scalePCs, chordTones.length?pcOf(chordTones[0]):null),
       sigma,
       gamma: relativeMotion(dv, others)
     };
@@ -3681,7 +3688,7 @@ function rollNoteAt(mx,my){
 const VOICE_WORDS = {
   kappa:['agrees with neither of the others','agrees with one','agrees with both'],
   mu:['a leap down','a step down','repeats','a step up','a leap up'],
-  phi:['chromatic','in the scale','a chord tone'],
+  phi:['foreign chromatic','non-chord diatonic','extended/borrowed tone','diatonic chord tone','essential chord root'],
   sigma:['structural','passing'],
   gamma:['moves with the others','others hold','moves against the others'],
 };
