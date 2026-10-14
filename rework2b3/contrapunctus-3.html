@@ -1847,7 +1847,7 @@ function applyMotionConstraint(cands, prevPitch, motionMode, ear) {
 
 function pickNote(cands, ctx){
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
-  const {prevPitch, others, chordTones, scalePCs, tbl, preferRoot, structural, approachPc} = ctx;
+  const {prevPitch, prev2Pitch, others, chordTones, scalePCs, tbl, preferRoot, structural, approachPc} = ctx;
   const chordPCs = chordTones.map(pcOf);
   const sigma = structural?0:1;
   const cls = (m)=>{
@@ -1899,6 +1899,47 @@ function pickNote(cands, ctx){
       const stepB = prevPitch != null ? Math.abs(b - prevPitch) : 0;
       if (ca_phi === 0 && cb_phi === 0 && stepA !== stepB) return stepA - stepB;
     }
+
+    // Classical Melodic Contrapuntal Scoring
+    const scoreMelody = (m) => {
+      let penalty = 0;
+      if (prevPitch != null) {
+        const dv = m - prevPitch;
+        const absDv = Math.abs(dv);
+
+        // 1. Penalize octave leap oscillations (e.g., C4 -> C5 -> C4)
+        if (prev2Pitch != null && m === prev2Pitch && absDv >= 7) penalty += 80;
+
+        // 2. Leap Recovery Rule: Large leap (> 4 semitones) MUST be followed by step motion in opposite direction
+        if (prev2Pitch != null) {
+          const prevDv = prevPitch - prev2Pitch;
+          if (Math.abs(prevDv) > 4) {
+            const sameDir = (dv * prevDv) > 0;
+            if (sameDir) penalty += 50; // Penalize leaping or stepping further in same direction
+            if (absDv <= 2 && (dv * prevDv) < 0) penalty -= 30; // Reward stepwise recovery
+          }
+        }
+
+        // 3. Leading Tone Tendency: Leading tone (scale degree 7) should resolve upward to tonic (scale degree 0)
+        const prevPc = pcOf(prevPitch);
+        const rootPc = STATE.root;
+        const leadingTonePc = (rootPc + 11) % 12;
+        if (prevPc === leadingTonePc) {
+          if (pcOf(m) === rootPc) penalty -= 40;
+          else penalty += 30;
+        }
+
+        // 4. Stagnation Penalty: Avoid repeating the exact same pitch 3 times in a row
+        if (prev2Pitch != null && m === prevPitch && prevPitch === prev2Pitch) penalty += 60;
+
+        // 5. Penalize excessive wide leaps (> 7 semitones) unless structural
+        if (absDv > 7) penalty += 40;
+      }
+      return penalty;
+    };
+
+    const sa = scoreMelody(a), sb = scoreMelody(b);
+    if (sa !== sb) return sa - sb;
 
     const ca=costOf(a), cb=costOf(b);
     if(mode==='strong' && ca!==cb) return ca-cb;
@@ -2160,6 +2201,7 @@ function runVoiceWalk(chords){
   const tbl = voiceTable();
   const total = STATE.onsets[0].length;
   const held=[null,null,null];
+  const prev2Pitch=[null,null,null];
   for(let v=0;v<3;v++) if(STATE.seed.voice[v]!=null) held[v]=STATE.seed.voice[v];
   let arpGen=null, arpSeg=-1, arpI=0;
   const res=[];
@@ -2180,7 +2222,7 @@ function runVoiceWalk(chords){
       return o;
     };
     const cur=(u)=> pitches[u]!=null ? pitches[u] : held[u];
-    const put=(v, r)=>{ pitches[v]=r.pitch; deco[v]=r.cls.phi<2; fb[v]=r.fellBack; cells[v]=r.cls; held[v]=r.pitch; };
+    const put=(v, r)=>{ pitches[v]=r.pitch; deco[v]=r.cls.phi<2; fb[v]=r.fellBack; cells[v]=r.cls; prev2Pitch[v]=held[v]; held[v]=r.pitch; };
 
     if(STATE.onsets[0][step]){
       if(STATE.anchors[step]!=null){
@@ -2195,7 +2237,7 @@ function runVoiceWalk(chords){
         const ear=hears(0);
         const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), lo, 127), held[0], ear);
         const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
-        put(0, pickNote(cands, {prevPitch:held[0], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode0,
+        put(0, pickNote(cands, {prevPitch:held[0], prev2Pitch:prev2Pitch[0], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode0,
           structural:firstOnsetOfSeg(0,step,g)}));
       }
     }
@@ -2254,7 +2296,7 @@ function runVoiceWalk(chords){
       const ear=hears(1);
       const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), lo, hi), held[1], ear);
       const mMode1 = (STATE.motionConstraints && STATE.motionConstraints[1] && STATE.motionConstraints[1][step]) || 'auto';
-      put(1, pickNote(cands, {prevPitch:held[1], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode1,
+      put(1, pickNote(cands, {prevPitch:held[1], prev2Pitch:prev2Pitch[1], others:ear, chordTones:chord.tones, scalePCs, tbl, motionMode:mMode1,
         structural:firstOnsetOfSeg(1,step,g)}));
     }
     res.push({step, pitches, deco, fellBack:fb, cells, g});
@@ -4665,7 +4707,15 @@ function restoreState(o){
   STATE.harmonic=N.harmonic; STATE.tempo=N.tempo; STATE.tension=N.tension; STATE.lamC=N.lamC; STATE.lamV=N.lamV; STATE.take=N.take;
   STATE.extended=N.extended; STATE.walkingBass=N.walkingBass; STATE.arp=N.arp; STATE.tuning=N.tuning;
   STATE.profiles=N.profiles; STATE.cellFlips=N.cellFlips; STATE.seed=N.seed; STATE.anchors=N.anchors; STATE.pins=N.pins;
-  STATE.barOverrides=N.barOverrides; STATE.touched=N.touched; STATE.onsets=N.onsets; STATE.motionConstraints=N.motionConstraints||[[],[],[]]; STATE.voiceEnv=N.voiceEnv; STATE.noteEnv=N.noteEnv;
+  if(Array.isArray(o.motionConstraints)){
+    N.motionConstraints = o.motionConstraints.map(arr => Array.isArray(arr) ? arr.slice() : []);
+  } else {
+    N.motionConstraints = [[],[],[]];
+  }
+  STATE.barOverrides=N.barOverrides; STATE.touched=N.touched; STATE.onsets=N.onsets; STATE.motionConstraints=N.motionConstraints;
+  if(N.tieRules) STATE.tieRules = N.tieRules;
+  if(N.ruleRing) STATE.ruleRing = N.ruleRing;
+  STATE.voiceEnv=N.voiceEnv; STATE.noteEnv=N.noteEnv;
   STATE.selectedNote=null; STATE.selectedBar=null; STATE.selectedSeg=1; STATE.composed=null;
   if(view){
     STATE.lattice.set=view.set; Object.assign(STATE.show, view.show);
