@@ -906,18 +906,24 @@ function buildExtended(rootPc, steps){
   const dia = buildDiatonic(rootPc, steps);
   const out = dia.slice(), seen = new Set(dia.map(c=>c.key));
   const add = (c)=>{ if(!seen.has(c.key)){ seen.add(c.key); out.push(c); } };
+
   for(const t of dia){
-    if(t.degree!==0){
-      // Secondary Dominant V7/X
+    // Music Theory Rule: Applied chords (V7/X, subV7/X, vii°7/X) only target major or minor triads.
+    // Diminished chords (like vii° in major or ii° in minor) or the tonic I itself (where V7/I = V7) are excluded.
+    const isDiminishedTarget = (t.tones.length >= 3 && ic(t.tones[1] - t.tones[0]) === 3 && ic(t.tones[2] - t.tones[1]) === 3);
+    if(t.degree !== 0 && !isDiminishedTarget){
+      // Secondary Dominant V7/X (root is 5th of target X)
       const r=(t.rootPc+7)%12;
       add(annotate({degree:-1, rootPc:r, tones:[r,(r+4)%12,(r+7)%12,(r+10)%12], applied:'dom', of:t.roman, ring:1}));
-      // Tritone Substitution bII7/X (Jazz Sub-V7)
+
+      // Tritone Substitution bII7/X (Jazz Sub-V7, root is b2 of target X)
       const tri=(t.rootPc+1)%12;
       add(annotate({degree:-1, rootPc:tri, tones:[tri,(tri+4)%12,(tri+7)%12,(tri+10)%12], applied:'subv', of:t.roman, ring:1}));
+
+      // Secondary Leading-Tone vii°7/X (root is leading tone of target X)
+      const l=(t.rootPc+11)%12;
+      add(annotate({degree:-1, rootPc:l, tones:[l,(l+3)%12,(l+6)%12,(l+9)%12], applied:'lt', of:t.roman, ring:2}));
     }
-    // Secondary Leading-Tone vii°7/X
-    const l=(t.rootPc+11)%12;
-    add(annotate({degree:-1, rootPc:l, tones:[l,(l+3)%12,(l+6)%12,(l+9)%12], applied:'lt', of:t.roman, ring:2}));
   }
   out.forEach((c,i)=>{ c.idx=i; if(c.ring==null) c.ring=0; });
   return out;
@@ -2130,8 +2136,19 @@ function evalCandidateMove(m, ctx) {
   const moveLegal = tblMove ? tblMove.t[mCell] === 1 : true;
   const moveCost = tblMove ? tblMove.costs[mCell] : 0;
 
-  // 3. Supervisory Governance & Style Syntax Bonuses
+  // 3. Supervisory Governance, Applied Chord Resolution & Style Syntax
   let styleBonus = 0;
+  let moveAllowedByTheory = true;
+
+  // Strict music theory constraint: Entering non-chord tones (fit < 3) on structural beats or leaping into them is forbidden
+  if (structural && fit < 2) {
+    moveAllowedByTheory = false;
+  }
+  if (prevPhi != null && prevPhi < 3 && absDv > 2 && fit < 3) {
+    // Prohibit entering leap into non-chord tone without stepwise resolution
+    moveAllowedByTheory = false;
+  }
+
   if (supCtx && supCtx.syntaxMode === 'jazz') {
     const pc = pcOf(m);
     const is3rdOr7th = chordTones && chordTones.some(ct => {
@@ -2143,7 +2160,7 @@ function evalCandidateMove(m, ctx) {
   }
 
   const combinedCost = (moveCost * 0.50) + (voiceCost * 0.50) - styleBonus;
-  const isLegal = moveLegal && voiceLegal;
+  const isLegal = moveLegal && voiceLegal && moveAllowedByTheory;
 
   return {
     m,
