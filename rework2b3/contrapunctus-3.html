@@ -873,9 +873,14 @@ function buildExtended(rootPc, steps){
   const add = (c)=>{ if(!seen.has(c.key)){ seen.add(c.key); out.push(c); } };
   for(const t of dia){
     if(t.degree!==0){
+      // Secondary Dominant V7/X
       const r=(t.rootPc+7)%12;
       add(annotate({degree:-1, rootPc:r, tones:[r,(r+4)%12,(r+7)%12,(r+10)%12], applied:'dom', of:t.roman, ring:1}));
+      // Tritone Substitution bII7/X (Jazz Sub-V7)
+      const tri=(t.rootPc+1)%12;
+      add(annotate({degree:-1, rootPc:tri, tones:[tri,(tri+4)%12,(tri+7)%12,(tri+10)%12], applied:'subv', of:t.roman, ring:1}));
     }
+    // Secondary Leading-Tone vii°7/X
     const l=(t.rootPc+11)%12;
     add(annotate({degree:-1, rootPc:l, tones:[l,(l+3)%12,(l+6)%12,(l+9)%12], applied:'lt', of:t.roman, ring:2}));
   }
