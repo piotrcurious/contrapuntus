@@ -748,23 +748,25 @@ details.fold[open] > summary::before{content:"\2013 ";}
       </div>
     </section>
 
-    <!-- Plate: Hierarchical State Space Expansion -->
+    <!-- Plate: Hierarchical State Space Expansion & Supervisory Macro Governance -->
     <section class="plate" aria-labelledby="hExpansion">
       <div class="heading">
-        <h2 id="hExpansion">Hierarchical State Space Expansion &amp; Macro-Phrase Tracker</h2>
+        <h2 id="hExpansion">Supervisory Macro-Governance &amp; State Space Dashboard</h2>
         <div class="tools"><span class="readout" id="expansionRatioRead">Expansion: 16x (10,080 States)</span></div>
       </div>
-      <div class="split">
+      <div class="split" style="margin-bottom:12px;">
         <div style="flex:1">
           <div class="readout" id="expansionStat"></div>
           <p class="aside" style="margin-top:10px">
-            Naive memory Markov chains collapse into 2&ndash;9 step limit cycles due to a small state space (N &le; 1,260).
-            State space expansion factors in structural step position k &in; {0 &hellip; K-1} into the state tuple (c_t, &eta;_t, c_{t-2}, k), expanding the state space by K&times; and driving macro-phrase structural cadences.
+            Structural step position k &in; {0 &hellip; K-1} expands the state tuple (c_t, &eta;_t, c_{t-2}, k) across macro-phrase cadences.
           </p>
         </div>
         <div style="flex:1">
           <div class="readout" id="phraseTrackerRead"></div>
         </div>
+      </div>
+      <div class="figure" id="supVisWrap" style="margin-top:10px">
+        <canvas id="supCanvas" style="height:180px; width:100%; border:1px solid var(--rule-soft); border-radius:4px;" role="img" aria-label="Visual display of supervisory macro governance phrase arc, climax peak, guide tone resolution, and dynamic lambda modulation"></canvas>
       </div>
     </section>
 
@@ -984,6 +986,119 @@ function soundingPitch(m){ return m + tuningCents(pcOf(m))/100; }
 /* =====================================================================
    PHRASE GENERATOR & STRUCTURAL GOALS / SUPERVISORY MACRO-GOVERNANCE
    ===================================================================== */
+
+/* =====================================================================
+   SUPERVISORY GOVERNANCE VISUALIZATION
+   ===================================================================== */
+let GL_SUP = null;
+
+function drawSupervisoryDashboard() {
+  const cv = $('supCanvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+
+  const rect = cv.getBoundingClientRect();
+  const W = cv.width = (rect.width || 600) * (window.devicePixelRatio || 1);
+  const H = cv.height = (rect.height || 180) * (window.devicePixelRatio || 1);
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+  const w = rect.width || 600, h = rect.height || 180;
+
+  const dark = THEME && THEME.dark;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)';
+  ctx.fillRect(0, 0, w, h);
+
+  const totalSteps = (STATE.bars || 8) * (STATE.stepsPerBar || 8);
+  const sup = (STATE && STATE.supervisor) ? STATE.supervisor : {
+    enabled: true, syntaxMode: 'jazz', climaxPos: 0.70, entropyGradient: 0.35, guideToneWeight: 1.0, enclosureWeight: 0.8
+  };
+
+  const padL = 40, padR = 20, padT = 25, padB = 30;
+  const chartW = w - padL - padR, chartH = h - padT - padB;
+
+  // Draw background stage regions
+  const climaxX = padL + sup.climaxPos * chartW;
+  const expoX = padL + Math.max(0, sup.climaxPos - 0.25) * chartW;
+  const resX = padL + Math.min(1, sup.climaxPos + 0.15) * chartW;
+
+  // Stage shading
+  ctx.fillStyle = dark ? 'rgba(70,130,180,0.12)' : 'rgba(70,130,180,0.08)'; // Exposition
+  ctx.fillRect(padL, padT, expoX - padL, chartH);
+
+  ctx.fillStyle = dark ? 'rgba(218,165,32,0.15)' : 'rgba(218,165,32,0.10)'; // Development
+  ctx.fillRect(expoX, padT, climaxX - 0.1 * chartW - expoX, chartH);
+
+  ctx.fillStyle = dark ? 'rgba(220,20,60,0.22)' : 'rgba(220,20,60,0.14)'; // Climax
+  ctx.fillRect(climaxX - 0.1 * chartW, padT, 0.2 * chartW, chartH);
+
+  ctx.fillStyle = dark ? 'rgba(46,139,87,0.15)' : 'rgba(46,139,87,0.10)'; // Resolution
+  ctx.fillRect(climaxX + 0.1 * chartW, padT, padL + chartW - (climaxX + 0.1 * chartW), chartH);
+
+  // Stage Labels
+  ctx.font = '10px monospace';
+  ctx.fillStyle = dark ? '#a0a0a0' : '#606060';
+  ctx.textAlign = 'center';
+  ctx.fillText('EXPOSITION', (padL + expoX) / 2, padT - 8);
+  ctx.fillText('DEV', (expoX + climaxX - 0.1 * chartW) / 2, padT - 8);
+  ctx.fillText('CLIMAX', climaxX, padT - 8);
+  ctx.fillText('RESOLUTION', (climaxX + 0.1 * chartW + padL + chartW) / 2, padT - 8);
+
+  // Draw Dynamic Governance Curves: Energy & Lambda Modulation
+  ctx.beginPath();
+  ctx.strokeStyle = dark ? '#e06c75' : '#d14';
+  ctx.lineWidth = 2;
+  for (let s = 0; s < totalSteps; s++) {
+    const x = padL + (s / (totalSteps - 1)) * chartW;
+    const supCtx = evaluateSupervisorySpace(s, totalSteps);
+    const y = padT + (1 - supCtx.energy) * chartH;
+    if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Draw Lambda_M Curve (Movement legal fraction modulation)
+  ctx.beginPath();
+  ctx.strokeStyle = dark ? '#61afef' : '#1e88e5';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([3, 3]);
+  for (let s = 0; s < totalSteps; s++) {
+    const x = padL + (s / (totalSteps - 1)) * chartW;
+    const supCtx = evaluateSupervisorySpace(s, totalSteps);
+    const y = padT + (1 - supCtx.effLamM) * chartH;
+    if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Draw Active Step Cursor
+  const c = STATE.composed;
+  const activeStep = (typeof STATE.step === 'number' && STATE.step >= 0) ? STATE.step : (STATE.selectedSeg || 0);
+  const curX = padL + (activeStep / Math.max(1, totalSteps - 1)) * chartW;
+
+  ctx.strokeStyle = dark ? '#ffffff' : '#000000';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(curX, padT - 4);
+  ctx.lineTo(curX, padT + chartH + 4);
+  ctx.stroke();
+
+  // Active step info tag
+  const curSup = evaluateSupervisorySpace(activeStep, totalSteps);
+  ctx.fillStyle = dark ? '#ffffff' : '#000000';
+  ctx.textAlign = curX > padL + chartW * 0.7 ? 'right' : 'left';
+  const tagX = curX > padL + chartW * 0.7 ? curX - 6 : curX + 6;
+  ctx.fillText('Step ' + activeStep + ' [' + curSup.phraseStage.toUpperCase() + '] Energy: ' + curSup.energy.toFixed(2) + ' λ_M: ' + curSup.effLamM.toFixed(2), tagX, padT + chartH / 2);
+
+  // Legend
+  ctx.textAlign = 'left';
+  ctx.fillStyle = dark ? '#e06c75' : '#d14';
+  ctx.fillText('― Macro Energy Arc', padL, h - 8);
+  ctx.fillStyle = dark ? '#61afef' : '#1e88e5';
+  ctx.fillText('--- Dynamic λ_M Modulation', padL + 140, h - 8);
+  ctx.fillStyle = dark ? '#a0a0a0' : '#606060';
+  ctx.fillText('Mode: ' + sup.syntaxMode.toUpperCase() + ' | Guide: ' + sup.guideToneWeight.toFixed(1) + ' | Encl: ' + sup.enclosureWeight.toFixed(1), padL + 310, h - 8);
+}
+
 function evaluateSupervisorySpace(step, totalSteps) {
   const stepsPerBar = STATE.stepsPerBar || 8;
   const bar = Math.floor(step / Math.max(1, stepsPerBar));
@@ -1279,6 +1394,7 @@ function renderExpansionUI() {
       `Macro-Phrase Cadence Length: ${STATE.bars || 8} bars (${K} phrase steps)`;
   }
 
+  drawSupervisoryDashboard();
   const trackerEl = document.getElementById('phraseTrackerRead');
   if (trackerEl) {
     const totalSegs = (c && c.segments) ? c.segments : K;
@@ -3149,7 +3265,7 @@ function layoutLattice(){
     }
     if(lay.cutX!=null){
       L.cut={x: lay.cutX, y0:padT-8, y1:H-padB+4,
-             label:'λ '+fmt2(sp.set==='chord'?STATE.lamC:STATE.lamV)};
+             label:'λ '+fmt2(sp.set==='chord'?STATE.lamC:sp.set==='voice'?STATE.lamV:STATE.lamM)};
     }
     L.tags.push({x:padL, y:H-9, text:'cheapest', left:true}, {x:W-padR, y:H-9, text:'dearest', right:true});
     return LAYOUT=L;
@@ -3408,7 +3524,7 @@ function renderLatKey(){
 }
 function renderAxisModes(){
   const el=$('axisModes'); if(!el) return;
-  const set=STATE.lattice.set, P=PROJ[set], axes=set==='chord'?CHORD_AXES:VOICE_AXES;
+  const set=STATE.lattice.set, P=PROJ[set], axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
   el.textContent='';
   const lab=mk('span','aside'); lab.style.marginRight='6px';
   if(P.preset==='cost'){
@@ -4606,20 +4722,21 @@ const NOTE_RE = /^[0-2]:\d{1,4}$/;
 /* ---- state <-> object ---------------------------------------------------------- */
 function serializeState(opts){
   opts = opts||{};
-  const prof={chord:{}, voice:{}};
-  for(const set of ['chord','voice']){
-    const axes = set==='chord'?CHORD_AXES:VOICE_AXES;
+  const prof={chord:{}, voice:{}, move:{}};
+  for(const set of ['chord','voice','move']){
+    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
     for(const a of axes){ const p=STATE.profiles[set][a.key]; prof[set][a.key]={w:r3(p.w), aff:p.aff.map(r3)}; }
   }
   const o = {
     app:'contrapunctus', v:1,
     root:STATE.root, scale:STATE.scaleName, bars:STATE.bars, stepsPerBar:STATE.stepsPerBar, harmonic:STATE.harmonic,
-    tempo:STATE.tempo, tension:r4(STATE.tension), lamC:r4(STATE.lamC), lamV:r4(STATE.lamV), take:STATE.take,
+    tempo:STATE.tempo, tension:r4(STATE.tension), lamC:r4(STATE.lamC), lamV:r4(STATE.lamV), lamM:r4(STATE.lamM), take:STATE.take,
+    supervisor:STATE.supervisor ? Object.assign({}, STATE.supervisor) : undefined,
     extended:!!STATE.extended, walkingBass:!!STATE.walkingBass, arp:STATE.arp, tuning:STATE.tuning,
     tieRules:STATE.tieRules ? { mode:STATE.tieRules.mode, wMotion:r4(STATE.tieRules.wMotion), wVoice:r4(STATE.tieRules.wVoice), wCost:r4(STATE.tieRules.wCost), wFifths:r4(STATE.tieRules.wFifths), wGoal:r4(STATE.tieRules.wGoal) } : undefined,
     ruleRing:STATE.ruleRing ? { enabled:!!STATE.ruleRing.enabled, op:STATE.ruleRing.op, ruleA:STATE.ruleRing.ruleA, ruleB:STATE.ruleRing.ruleB } : undefined,
     profiles:prof,
-    cellFlips:{chord:sortedCopy(STATE.cellFlips.chord), voice:sortedCopy(STATE.cellFlips.voice)},
+    cellFlips:{chord:sortedCopy(STATE.cellFlips.chord), voice:sortedCopy(STATE.cellFlips.voice), move:sortedCopy(STATE.cellFlips.move)},
     seed:{chordIdx:STATE.seed.chordIdx, eta:STATE.seed.eta, prev2Idx:STATE.seed.prev2Idx, voice:STATE.seed.voice.slice()},
     anchors:Object.assign({},STATE.anchors), pins:Object.assign({},STATE.pins),
     barOverrides:canonOverrides(STATE.barOverrides),
@@ -4632,7 +4749,7 @@ function serializeState(opts){
   };
   if(opts.view){
     o.view = { set:STATE.lattice.set, show:Object.assign({},STATE.show),
-      proj:{chord:JSON.parse(JSON.stringify(PROJ.chord)), voice:JSON.parse(JSON.stringify(PROJ.voice))} };
+      proj:{chord:JSON.parse(JSON.stringify(PROJ.chord)), voice:JSON.parse(JSON.stringify(PROJ.voice)), move:JSON.parse(JSON.stringify(PROJ.move))} };
   }
   return o;
 }
