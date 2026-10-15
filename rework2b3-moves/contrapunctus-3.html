@@ -1532,43 +1532,56 @@ function evaluateEndogenousRule(segIdx, totalSegments, recentChords, baseTable) 
    ========================================================================= */
 
 function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
-  const { order, costs } = costOrder(axes, dims, prof);
+  const pMap = prof || (STATE.profiles && STATE.profiles.chord ? STATE.profiles.chord : defaultProfiles().chord);
+  const { order, costs } = costOrder(axes, dims, pMap);
   const vec = new Uint8Array(size);
   const effectiveLambda = lambda == null ? 0.38 : lambda;
   const baseCutoff = Math.max(1, Math.round(clamp01(effectiveLambda) * size));
 
-  // Evaluate musical axis values for each cell in rule space
   const cellCoords = cellList(dims);
+  const isMoveSpace = (dims.length === 5 && axes.some(a => a.key === 'mu_m'));
+  const isVoiceSpace = (dims.length === 5 && axes.some(a => a.key === 'kappa'));
+  const isChordSpace = (dims.length === 4 && axes.some(a => a.key === 'd'));
 
   for (let i = 0; i < size; i++) {
     const f = order[i];
     const coords = cellCoords[f];
-
     let pass = false;
+
     if (ruleKey === 'cpt') {
-      // Classical Counterpoint Ring: Strictly require consonant/stepwise sublevels and chord tones
-      if (coords.length === 5) {
-        // Move space: phi_m >= 1 (diatonic/chord), mu_m != 3 (no unrecovered large leaps)
-        pass = coords[4] >= 1 && coords[1] !== 3;
+      // Classical Counterpoint Generator R_cpt
+      if (isMoveSpace) {
+        // phi_m >= 1 (diatonic/chord), mu_m != 3 (no unrecovered large leaps), sigma_m or struct consonance
+        pass = (coords[4] >= 1 && coords[1] !== 3) && (i < Math.round(baseCutoff * 1.25));
+      } else if (isVoiceSpace) {
+        // kappa >= 1 (consonant), mu != 3 (no large leap), phi >= 2 (scale/chord tone)
+        pass = (coords[0] >= 1 && coords[1] !== 3 && coords[2] >= 2) || (i < baseCutoff);
+      } else if (isChordSpace) {
+        // Functional root falls and low tension (d functional, rho ring <= 1)
+        pass = i < baseCutoff;
       } else {
         pass = i < baseCutoff;
       }
     } else if (ruleKey === 'modal') {
-      // Modal / Guide Tone Ring: Favour essential chord & guide tones (phi >= 2)
-      if (coords.length === 5) {
-        pass = coords[4] >= 1 || coords[0] >= 1;
+      // Modal / Guide Tone Generator R_modal
+      if (isMoveSpace) {
+        pass = (coords[4] >= 1 || coords[0] >= 1) && (i < Math.round(baseCutoff * 1.35));
+      } else if (isVoiceSpace) {
+        pass = (coords[2] >= 2) && (i < Math.round(baseCutoff * 1.30));
       } else {
-        pass = i < Math.round(baseCutoff * 1.2);
+        pass = i < Math.round(baseCutoff * 1.20);
       }
     } else if (ruleKey === 'saddle') {
-      // Chromatic Suspension / Fusion Ring: Support chromatic approach tones (phi = 0/1) with contrary/oblique motion (gamma >= 1)
-      if (coords.length === 5) {
-        pass = coords[2] >= 1 && (coords[4] >= 1 || coords[1] === 4);
+      // Chromatic Suspension / Saddle Generator R_saddle
+      if (isMoveSpace) {
+        pass = (coords[2] >= 1 && (coords[4] >= 1 || coords[1] === 4)) || (i >= Math.round(baseCutoff * 0.1) && i < Math.round(baseCutoff * 1.2));
+      } else if (isVoiceSpace) {
+        pass = (coords[4] >= 1 && coords[2] >= 1) || (i >= Math.round(baseCutoff * 0.1) && i < Math.round(baseCutoff * 1.2));
       } else {
         pass = i >= Math.round(baseCutoff * 0.15) && i < Math.round(baseCutoff * 1.15);
       }
     } else {
-      // Sublevel Set Topology Ring: Cost-bounded sublevel set
+      // Topology Sublevel Generator R_topo
       pass = i < baseCutoff;
     }
 
@@ -1602,22 +1615,25 @@ function drawRingDashboard() {
   const tbl = sp.tbl;
   if (!tbl) return;
 
+  const setProfiles = STATE.profiles ? STATE.profiles[sp.set] : defaultProfiles()[sp.set];
+  const activeLambda = sp.set === 'chord' ? STATE.lamC : sp.set === 'voice' ? STATE.lamV : STATE.lamM;
+  const ruleRing = STATE.ruleRing || { enabled: true, op: 'circ', ruleA: 'cpt', ruleB: 'topo' };
+
   const ringInfo = evaluateAlgebraicRuleRing(
     sp.axes, sp.dims, sp.strides,
-    STATE.profiles[sp.set][sp.axes[0].key],
-    sp.set === 'chord' ? STATE.lamC : sp.set === 'voice' ? STATE.lamV : STATE.lamM,
-    sp.flips, STATE.ruleRing
+    setProfiles, activeLambda,
+    sp.flips, ruleRing
   );
 
-  const padL = 40, padR = 20, padT = 20, padB = 25;
+  const padL = 50, padR = 20, padT = 20, padB = 25;
   const chartW = w - padL - padR, chartH = h - padT - padB;
 
   // Render cell state bars across rule space order
   const size = tbl.size;
   const barW = chartW / size;
 
-  const vecA = getBaseRuleVector(STATE.ruleRing.ruleA, sp.axes, sp.dims, sp.strides, null, null, size);
-  const vecB = getBaseRuleVector(STATE.ruleRing.ruleB, sp.axes, sp.dims, sp.strides, null, null, size);
+  const vecA = getBaseRuleVector(ruleRing.ruleA, sp.axes, sp.dims, sp.strides, setProfiles, activeLambda, size);
+  const vecB = getBaseRuleVector(ruleRing.ruleB, sp.axes, sp.dims, sp.strides, setProfiles, activeLambda, size);
 
   for (let f = 0; f < size; f++) {
     const x = padL + f * barW;
@@ -1625,19 +1641,19 @@ function drawRingDashboard() {
     // Rule A indicator (top bar)
     if (vecA[f]) {
       ctx.fillStyle = dark ? 'rgba(97,175,239,0.5)' : 'rgba(30,136,229,0.5)';
-      ctx.fillRect(x, padT, barW, chartH * 0.28);
+      ctx.fillRect(x, padT, Math.max(1, barW), chartH * 0.28);
     }
 
     // Rule B indicator (middle bar)
     if (vecB[f]) {
       ctx.fillStyle = dark ? 'rgba(224,108,117,0.5)' : 'rgba(221,24,24,0.5)';
-      ctx.fillRect(x, padT + chartH * 0.33, barW, chartH * 0.28);
+      ctx.fillRect(x, padT + chartH * 0.33, Math.max(1, barW), chartH * 0.28);
     }
 
     // Effective Composite Ring Result (bottom bar)
     if (tbl.t[f]) {
       ctx.fillStyle = dark ? 'rgba(152,195,121,0.85)' : 'rgba(46,139,87,0.85)';
-      ctx.fillRect(x, padT + chartH * 0.66, barW, chartH * 0.34);
+      ctx.fillRect(x, padT + chartH * 0.66, Math.max(1, barW), chartH * 0.34);
     }
   }
 
@@ -1645,13 +1661,13 @@ function drawRingDashboard() {
   ctx.font = '10px monospace';
   ctx.fillStyle = dark ? '#a0a0a0' : '#606060';
   ctx.textAlign = 'right';
-  ctx.fillText('R_' + STATE.ruleRing.ruleA, padL - 6, padT + chartH * 0.20);
-  ctx.fillText('R_' + STATE.ruleRing.ruleB, padL - 6, padT + chartH * 0.53);
+  ctx.fillText('R_' + ruleRing.ruleA, padL - 6, padT + chartH * 0.20);
+  ctx.fillText('R_' + ruleRing.ruleB, padL - 6, padT + chartH * 0.53);
   ctx.fillText('R_eff', padL - 6, padT + chartH * 0.88);
 
   // Status footer
   ctx.textAlign = 'left';
-  ctx.fillText('Algebraic Closure: ' + ringInfo.expr + ' | Deg(A): ' + ringInfo.degA + ' | Deg(B): ' + ringInfo.degB + ' | Effective Ring Deg: ' + ringInfo.idealDeg, padL, h - 6);
+  ctx.fillText('Algebraic Closure: ' + ringInfo.expr + ' | Deg(A): ' + ringInfo.degA + ' | Deg(B): ' + ringInfo.degB + ' | Effective Ring Deg: ' + ringInfo.idealDeg + ' (' + sp.set.toUpperCase() + ' Table)', padL, h - 6);
 }
 
 function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, ringOpts) {
