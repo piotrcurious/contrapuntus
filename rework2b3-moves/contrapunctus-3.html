@@ -1181,11 +1181,11 @@ const VOICE_AXES = [
   {key:'gamma',n:3, label:'\u03b3', what:'against the other voices', tick:i=>['sim','obl','con'][i]},
 ];
 const MOVE_AXES = [
-  {key:'psi',     n:3, label:'\u03c8',   what:'recent board state (nct/app -> extension -> guide tone)', tick:i=>['nct/app','ext','gt/chd'][i]},
-  {key:'mu_m',   n:5, label:'\u03bc_m', what:'movement step class (hold, step, sm-leap, lg-leap, res/rec)', tick:i=>['hold','step','sm-leap','lg-leap','res/rec'][i]},
+  {key:'psi',     n:3, label:'\u03c8',   what:'departure tone context (nct/chromatic -> diatonic scale -> chord/guide tone)', tick:i=>['nct/chrom','diat/ext','chord/gt'][i]},
+  {key:'mu_m',   n:5, label:'\u03bc_m', what:'movement step class (hold, step, sm-leap, lg-leap, resolution/recovery)', tick:i=>['hold','step','sm-leap','lg-leap','res/rec'][i]},
   {key:'gamma_m',n:3, label:'\u03b3_m', what:'relative voice motion (similar, oblique, contrary)', tick:i=>['sim','obl','con'][i]},
   {key:'sigma_m',n:2, label:'\u03c3_m', what:'metric accent (structural vs passing)', tick:i=>['struct','pass'][i]},
-  {key:'phi_m',  n:3, label:'\u03c6_m', what:'target note fit (nct/app -> extension -> guide tone)', tick:i=>['nct/app','ext','gt/res'][i]},
+  {key:'phi_m',  n:3, label:'\u03c6_m', what:'target tone fit (nct/chromatic -> diatonic scale -> chord/guide tone)', tick:i=>['nct/chrom','diat/ext','chord/gt'][i]},
 ];
 function axisDims(axes){ return axes.map(a=>a.n); }
 function axisStrides(dims){
@@ -1213,11 +1213,11 @@ function defaultProfiles(){
       gamma:{w:0.30, aff:[0,0.5,1]},
     },
     move:{
-      psi:    {w:0.80, aff:[0.25, 0.70, 1.00]},
-      mu_m:   {w:1.00, aff:[0.50, 1.00, 0.60, 0.30, 0.95]},
-      gamma_m:{w:0.75, aff:[0.20, 0.70, 1.00]},
-      sigma_m:{w:0.50, aff:[1.00, 0.60]},
-      phi_m:  {w:0.90, aff:[0.20, 0.75, 1.00]},
+      psi:    {w:0.85, aff:[0.30, 0.70, 1.00]},
+      mu_m:   {w:1.00, aff:[0.40, 1.00, 0.50, 0.20, 0.98]},
+      gamma_m:{w:0.80, aff:[0.15, 0.75, 1.00]},
+      sigma_m:{w:0.50, aff:[1.00, 0.55]},
+      phi_m:  {w:1.00, aff:[0.15, 0.70, 1.00]},
     },
   };
 }
@@ -2102,20 +2102,35 @@ function evalCandidateMove(m, ctx) {
   const voiceCost = tblVoice ? tblVoice.costs[vCell] : 0;
 
   // 2. Intermediate Movement Tensor Classification
-  // psi: recent board state (0: nct/app, 1: extension, 2: guide tone / chord tone)
-  let psi = 2;
+  // psi: departure tone context (0: nct/chromatic, 1: diatonic scale/extension, 2: chord/guide tone)
+  let psi = 2; // Default to chord tone if no previous state
   if (prevPhi != null) {
-    if (prevPhi < 3) psi = 0;
-    else if (prevPhi === 3) psi = 1;
+    if (prevPhi < 2) psi = 0;       // NCT or chromatic approach
+    else if (prevPhi === 2) psi = 1; // Diatonic passing / extension
+    else psi = 2;                    // Essential chord tone / guide tone (phi >= 3)
   }
 
-  // mu_m: movement delta step class (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: recovery/resolution)
+  // phi_m: target tone fit category (0: nct/chromatic, 1: diatonic scale/extension, 2: chord/guide tone)
+  let phi_m = 2;
+  if (fit < 2) phi_m = 0;       // NCT / chromatic
+  else if (fit === 2) phi_m = 1; // Diatonic scale / extension
+  else phi_m = 2;                // Chord / guide tone (fit >= 3)
+
+  // mu_m: movement step class (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: resolution/recovery)
+  // Music theory definition of res/rec (index 4):
+  // Stepwise motion (1 or 2 semitones) landing on a chord/guide tone (phi_m === 2) that EITHER:
+  // (a) Resolves an unstable departure (psi < 2)
+  // (b) Recovers a previous leap (prevPitch - prev2Pitch was a leap > 2 semitones in opposite direction)
   let mu_m = 1;
+  const prevLeap = (prevPitch != null && prev2Pitch != null) ? (prevPitch - prev2Pitch) : 0;
+  const isOppositeRecovery = Math.abs(prevLeap) > 2 && (dv * prevLeap < 0);
+  const isUnstableDeparture = (psi < 2);
+
   if (absDv === 0) {
     mu_m = 0; // hold
   } else if (absDv <= 2) {
-    if ((prevPhi != null && prevPhi < 3) || (prev2Pitch != null && prevPitch != null && Math.abs(prevPitch - prev2Pitch) > 2)) {
-      mu_m = 4; // recovery/resolution
+    if (phi_m === 2 && (isUnstableDeparture || isOppositeRecovery)) {
+      mu_m = 4; // resolution / recovery
     } else {
       mu_m = 1; // step
     }
@@ -2128,24 +2143,26 @@ function evalCandidateMove(m, ctx) {
   const gamma_m = gamma; // 0: sim, 1: obl, 2: con
   const sigma_m = sigma; // 0: struct, 1: pass
 
-  let phi_m = 2;
-  if (fit < 2) phi_m = 0;
-  else if (fit < 4) phi_m = 1;
-
   const mCell = mIdx(psi, mu_m, gamma_m, sigma_m, phi_m);
   const moveLegal = tblMove ? tblMove.t[mCell] === 1 : true;
   const moveCost = tblMove ? tblMove.costs[mCell] : 0;
 
-  // 3. Supervisory Governance, Applied Chord Resolution & Style Syntax
+  // 3. Strict Music Theory Hard Constraints on Movement & Style Syntax
   let styleBonus = 0;
   let moveAllowedByTheory = true;
 
-  // Strict music theory constraint: Entering non-chord tones (fit < 3) on structural beats or leaping into them is forbidden
-  if (structural && fit < 2) {
+  // (1) Prohibit leaping from a non-chord tone / chromatic tone (psi === 0 && absDv > 2)
+  if (psi === 0 && absDv > 2) {
     moveAllowedByTheory = false;
   }
-  if (prevPhi != null && prevPhi < 3 && absDv > 2 && fit < 3) {
-    // Prohibit entering leap into non-chord tone without stepwise resolution
+
+  // (2) Prohibit leaping into non-chord tones on structural beats
+  if (structural && phi_m === 0) {
+    moveAllowedByTheory = false;
+  }
+
+  // (3) Prohibit unresolved non-chord tones on structural beats unless stepwise resolved
+  if (structural && fit < 2 && mu_m !== 4) {
     moveAllowedByTheory = false;
   }
 
