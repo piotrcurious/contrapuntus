@@ -1830,26 +1830,42 @@ function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, rin
 
   const t = new Uint8Array(size);
   const syntaxMode = (STATE.supervisor && STATE.supervisor.syntaxMode) ? STATE.supervisor.syntaxMode : 'jazz';
+  const cellCoordsList = cellList(dims);
 
   if (op === 'and') {
-    // Style-Aware Cadential Intersection
+    // Style-Aware Cadential Intersection R_A ∧ R_B
     for (let f = 0; f < size; f++) t[f] = vecA[f] & vecB[f];
   } else if (op === 'or') {
-    // Harmonic Symmetry Union
+    // Harmonic Symmetry Union R_A ∨ R_B
     for (let f = 0; f < size; f++) t[f] = vecA[f] | vecB[f];
   } else if (op === 'circ') {
-    // Non-Commutative Style Ring Product R_A ∘ R_B
-    const styleShift = syntaxMode === 'jazz' ? 7 : syntaxMode === 'classical' ? 5 : 3;
-    const shift = (degA * styleShift + 1) % size;
+    // Non-Commutative Product R_A ∘ R_B via Axis Coordinate Group Translation T_k(c)
+    const k0 = (degA + (syntaxMode === 'jazz' ? 2 : 1)) % dims[0];
+    const k1 = (degB + (syntaxMode === 'classical' ? 1 : 2)) % dims[1];
+
     for (let f = 0; f < size; f++) {
-      const mappedIdx = (f + shift) % size;
-      t[f] = vecA[f] & vecB[mappedIdx];
+      const c = cellCoordsList[f];
+      const c_shifted = c.slice();
+      c_shifted[0] = (c[0] + k0) % dims[0];
+      c_shifted[1] = (c[1] + k1) % dims[1];
+
+      let mappedF = 0;
+      for (let i = 0; i < c_shifted.length; i++) mappedF += c_shifted[i] * strides[i];
+
+      t[f] = vecA[f] & vecB[mappedF % size];
     }
   } else if (op === 'fusion') {
-    // Fusion Modal Synthesis Ring Product (R_A ⊙ R_B)
+    // Fusion Modal Synthesis (R_A ⊙ R_B) via Coordinate Axis Inversion I(c)
     for (let f = 0; f < size; f++) {
-      const isGuideTone = (f % 3) === 2;
-      t[f] = isGuideTone ? (vecA[f] | vecB[f]) : (vecA[f] & vecB[f]);
+      const c = cellCoordsList[f];
+      const c_inv = c.slice();
+      c_inv[1] = dims[1] - 1 - c[1];
+
+      let mappedF = 0;
+      for (let i = 0; i < c_inv.length; i++) mappedF += c_inv[i] * strides[i];
+
+      const isGuideToneCell = c[c.length - 1] >= 1; // Fit class is diatonic/chord tone
+      t[f] = isGuideToneCell ? (vecA[f] | vecB[mappedF % size]) : (vecA[f] & vecB[f]);
     }
   }
 
@@ -1859,7 +1875,7 @@ function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, rin
     if (v == null) continue;
     const c = k.split(',').map(Number);
     let f = 0; for (let i = 0; i < c.length; i++) f += c[i] * strides[i];
-    t[f] = v;
+    if (f < size) t[f] = v;
   }
 
   let legal = 0;
@@ -1871,7 +1887,7 @@ function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, rin
   // Non-collapsing algebraic sub-automaton projection
   if (legal === 0) {
     collapsed = true;
-    const minCells = Math.max(1, Math.round(0.08 * size));
+    const minCells = Math.max(1, Math.round(0.12 * size));
     for (let i = 0; i < minCells; i++) {
       t[order[i]] = 1;
     }
@@ -2768,7 +2784,8 @@ function runVoiceWalk(chords){
         const beneath=[held[1],cur(2)].filter(x=>x!=null);
         const lo = beneath.length ? Math.max.apply(null, beneath)+1 : 0;
         const ear=hears(0);
-        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), lo, 127), held[0], ear);
+        const prev0 = (held[0] != null) ? held[0] : 72;
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), Math.max(REGISTERS[0].lo, prev0 - 7), Math.min(REGISTERS[0].hi, prev0 + 7)), prev0, ear);
         const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
         const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
         const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
@@ -2783,7 +2800,8 @@ function runVoiceWalk(chords){
     if(STATE.onsets[1][step]){
       const lo = cur(2)!=null ? cur(2)+1 : 0, hi = cur(0)!=null ? cur(0)-1 : 127;
       const ear=hears(1);
-      const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), lo, hi), held[1], ear);
+      const prev1 = (held[1] != null) ? held[1] : 60;
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), Math.max(REGISTERS[1].lo, prev1 - 7), Math.min(REGISTERS[1].hi, prev1 + 7)), prev1, ear);
       const mMode1 = (STATE.motionConstraints && STATE.motionConstraints[1] && STATE.motionConstraints[1][step]) || 'auto';
       const isMetricAccented1 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
       put(1, pickNote(cands, { v: 1,
