@@ -1261,7 +1261,7 @@ const STATE = {
   profiles: defaultProfiles(),
   cellFlips:{ chord:{}, voice:{}, move:{} },   // "i0,i1,.." -> 0|1
   extended:false, walkingBass:false, arp:'none',
-  take:'bold',   // which legal move to take: smooth | strong | bold
+  take:'smooth',   // which legal move to take: smooth | strong | bold
   tuning:'equal',// how the twelve pitch classes are tuned: see TUNINGS
   seed:{ chordIdx:0, eta:1, prev2Idx:-1, voice:[null,null,null] },
   anchors:{},                          // step -> midi (melody)
@@ -1559,7 +1559,7 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
   const pMap = prof || (STATE.profiles && STATE.profiles.chord ? STATE.profiles.chord : defaultProfiles().chord);
   const { order, costs } = costOrder(axes, dims, pMap);
   const vec = new Uint8Array(size);
-  const effectiveLambda = lambda == null ? 0.38 : lambda;
+  const effectiveLambda = lambda == null ? 0.50 : lambda;
   const baseCutoff = Math.max(1, Math.round(clamp01(effectiveLambda) * size));
 
   const cellCoords = cellList(dims);
@@ -1575,34 +1575,29 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
     if (ruleKey === 'cpt') {
       // Classical Counterpoint Generator R_cpt
       if (isMoveSpace) {
-        // phi_m >= 1 (diatonic/chord), mu_m != 3 (no unrecovered large leaps), sigma_m or struct consonance
-        pass = (coords[4] >= 1 && coords[1] !== 3) && (i < Math.round(baseCutoff * 1.25));
+        // coords: [psi, mu_m, gamma_m, sigma_m, phi_m]
+        // Allow stepwise motion (mu_m = 1), resolution (mu_m = 4), small leap (mu_m = 2), hold (mu_m = 0) with phi_m >= 1
+        pass = (coords[4] >= 1) && (coords[1] !== 3 || i < baseCutoff);
       } else if (isVoiceSpace) {
-        // kappa >= 1 (consonant), mu != 3 (no large leap), phi >= 2 (scale/chord tone)
         pass = (coords[0] >= 1 && coords[1] !== 3 && coords[2] >= 2) || (i < baseCutoff);
-      } else if (isChordSpace) {
-        // Functional root falls and low tension (d functional, rho ring <= 1)
-        pass = i < baseCutoff;
       } else {
         pass = i < baseCutoff;
       }
     } else if (ruleKey === 'modal') {
-      // Modal / Guide Tone Generator R_modal
       if (isMoveSpace) {
-        pass = (coords[4] >= 1 || coords[0] >= 1) && (i < Math.round(baseCutoff * 1.35));
+        pass = (coords[4] >= 1 || coords[0] >= 1) && (coords[1] !== 3 || i < Math.round(baseCutoff * 1.2));
       } else if (isVoiceSpace) {
         pass = (coords[2] >= 2) && (i < Math.round(baseCutoff * 1.30));
       } else {
         pass = i < Math.round(baseCutoff * 1.20);
       }
     } else if (ruleKey === 'saddle') {
-      // Chromatic Suspension / Saddle Generator R_saddle
       if (isMoveSpace) {
-        pass = (coords[2] >= 1 && (coords[4] >= 1 || coords[1] === 4)) || (i >= Math.round(baseCutoff * 0.1) && i < Math.round(baseCutoff * 1.2));
+        pass = (coords[2] >= 1 && (coords[4] >= 1 || coords[1] === 4)) || (i < baseCutoff);
       } else if (isVoiceSpace) {
-        pass = (coords[4] >= 1 && coords[2] >= 1) || (i >= Math.round(baseCutoff * 0.1) && i < Math.round(baseCutoff * 1.2));
+        pass = (coords[4] >= 1 && coords[2] >= 1) || (i < Math.round(baseCutoff * 1.2));
       } else {
-        pass = i >= Math.round(baseCutoff * 0.15) && i < Math.round(baseCutoff * 1.15);
+        pass = i < Math.round(baseCutoff * 1.15);
       }
     } else {
       // Topology Sublevel Generator R_topo
@@ -2413,62 +2408,57 @@ function computeBoardState(voicesPitches, stepIndex) {
 
 // 2. Evaluates Movement Vector m in Tangent Space T_s S against the Local Constraint Manifold M_valid(s, lambda)
 function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch) {
-  // Tangent Bundle Phase State z_t = (p_t, v_t) in T_s S
-  // p_t: current pitch position
-  // v_t = p_t - p_{t-1}: current velocity vector in tangent space T_s S
-  const dp = moveVector; // proposed new velocity vector v_{t+1}
+  const dp = moveVector;
   const absDp = Math.abs(dp);
   const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
 
-  // Tangent Space Velocity Dynamics
-  const v_t = prevPitch != null && prev2Pitch != null ? (prevPitch - prev2Pitch) : 0;
-  const v_next = dp;
+  const psi = boardState.isDissonant ? 0 : 1;
 
-  // Departure Context psi derived from Board State consonance V(s)
-  const psi = boardState.isDissonant ? 0 : 1; // 0 = departing from dissonance/suspension, 1 = consonant
-
-  // Movement Step Class mu_m (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: res/rec)
   let mu_m = 0;
   if (dp === 0) mu_m = 0;
   else if (absDp <= 2) {
-    if (v_t * dp < 0) mu_m = 4; // Stepwise directional recovery in T_s S
-    else if (boardState.isDissonant) mu_m = 4; // Stepwise resolution
-    else mu_m = 1; // Normal step
-  } else if (absDp <= 4) mu_m = 2; // Small leap
-  else mu_m = 3; // Large leap
+    if (prevLeapMomentum != null && prevLeapMomentum * dp < 0) mu_m = 4;
+    else if (boardState.isDissonant) mu_m = 4;
+    else mu_m = 1;
+  } else if (absDp <= 4) mu_m = 2;
+  else mu_m = 3;
 
-  // Relative Motion gamma_m
-  const gamma_m = 1; // Oblique default for single voice
+  const gamma_m = 1;
   const sigma_m = boardState.metricPhase;
 
-  // Target Fit Class phi_m computed dynamically from target pitch consonance
   const activeScalePcs = (typeof scalePCsNow === 'function') ? scalePCsNow() : [0,2,4,5,7,9,11];
   const targetPc = ((targetPitch % 12) + 12) % 12;
   const isScale = activeScalePcs.includes(targetPc);
 
   let phi_m = isScale ? 2 : 0;
 
-  // Tangent Bundle Constraint Manifold & Singularities
   if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
   if (boardState.isDissonant && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Leap from Dissonance' };
-  if (absDp >= 5 && v_t * dp > 0) return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
-
-  // Tangent Vector Field Action Kinetic Energy H(z_t, v_next)
-  // Kinetic Inertia: T = 0.5 * v_{next}^2
-  let kineticInertia = absDp === 0 ? 0.6 : absDp * 0.12;
-
-  // Potential Energy Field V(s) & Dissonance Resolution Gradient
-  if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8; // Resolution energy release
-  if (v_t * dp < 0 && absDp <= 2) kineticInertia -= 0.6; // Velocity inversion recovery bonus
-
-  // Phase Space Conservation: In T_s S, (p, +v) and (p, -v) are distinct manifold points.
-  // 2-step oscillation (p_t = p_{t-2} with v_{t+1} = -v_t) is a closed 2-cycle in phase space.
-  // We naturally penalize kinetic inversion loops without ad-hoc magic heuristics:
-  if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) {
-    kineticInertia += 2.2; // Kinetic inversion loop potential barrier
+  if (absDp >= 5 && prevLeapMomentum != null && prevLeapMomentum * dp > 0) {
+    return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
   }
+
+  let kineticInertia = 0;
+  if (dp === 0) {
+    kineticInertia += 1.5; // Strong static hold penalty
+  } else if (absDp <= 2) {
+    kineticInertia += 0.05 * absDp; // Prefer stepwise motion
+  } else {
+    kineticInertia += absDp * 0.15; // Moderate leap inertia
+  }
+
+  if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8;
+  if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) kineticInertia -= 0.6;
+
+  // Tangent Space Anti-Oscillation & Loop Penalties
   if (prevPitch != null && targetPitch === prevPitch) {
-    kineticInertia += 1.8; // Zero velocity stagnation barrier
+    kineticInertia += 2.5;
+  }
+  if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) {
+    kineticInertia += 2.0;
+  }
+  if (prev3Pitch != null && targetPitch === prev3Pitch && targetPitch !== prevPitch) {
+    kineticInertia += 1.2;
   }
 
   return {
@@ -2476,27 +2466,25 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
     cost: Math.max(0, kineticInertia),
     coords: [psi, mu_m, gamma_m, sigma_m, phi_m],
     dp,
-    absDp,
-    v_t,
-    v_next
+    absDp
   };
 }
 
 
 function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitches, prev2Pitch, prev3Pitch) {
   const currentPitches = otherPitches ? otherPitches.slice() : [60, 64, 48];
-  currentPitches[voiceIdx] = prevPitch;
+  currentPitches[voiceIdx] = prevPitch != null ? prevPitch : candPitch;
 
   const boardState = computeBoardState(currentPitches, stepIndex);
-  const dp = candPitch - prevPitch;
-  const prevLeapMomentum = prev2Pitch != null ? (prevPitch - prev2Pitch) : 0;
+  const dp = prevPitch != null ? candPitch - prevPitch : 0;
+  const prevLeapMomentum = (prevPitch != null && prev2Pitch != null) ? (prevPitch - prev2Pitch) : 0;
 
   const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch);
 
   const [psi, mu_m, gamma_m, sigma_m, phi_m] = flowEval.coords;
   const mF = psi*MS[0] + mu_m*MS[1] + gamma_m*MS[2] + sigma_m*MS[3] + phi_m*MS[4];
   const mTbl = moveTable();
-  const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1);
+  const isMoveLegal = flowEval.valid && (phi_m >= 1 || mTbl.t[mF % mTbl.size] === 1);
 
   // Map to Voice Class for backward compatibility
   const phi_v = phi_m === 2 ? 4 : (phi_m === 1 ? 2 : 0);
@@ -2531,7 +2519,6 @@ function pickNote(cands, ctx){
   const prev2P = ctx.prev2Pitch;
   const prev3P = ctx.prev3Pitch;
 
-  // When prevP is null (first note), evaluate candidate pitch directly relative to candidate
   const evaluated = cands.map(m => evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P));
 
   let legal = evaluated.filter(e => e.isLegal);
@@ -2551,14 +2538,7 @@ function pickNote(cands, ctx){
       if (ra !== rb) return ra - rb;
     }
 
-    // Prefer chord tone targets
-    if (ctx.chordTones && ctx.chordTones.length) {
-      const isCtA = ctx.chordTones.map(pcOf).includes(pcOf(a.m)) ? 0 : 1;
-      const isCtB = ctx.chordTones.map(pcOf).includes(pcOf(b.m)) ? 0 : 1;
-      if (isCtA !== isCtB) return isCtA - isCtB;
-    }
-
-    // Combined Cost from Vector Field Energy (includes Anti-Oscillation & Path Guidance)
+    // Vector Field Flow Combined Cost (integrates Tangent Space Inertia, Dissonance Potential, and Phase Space Conservation)
     if (Math.abs(a.combinedCost - b.combinedCost) > 0.01) {
       return mode === 'bold' ? (b.combinedCost - a.combinedCost) : (a.combinedCost - b.combinedCost);
     }
