@@ -2476,7 +2476,7 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
 
   // 1. Departure Context psi (0: NCT/chromatic, 1: Diatonic extension, 2: Essential chord/guide tone)
   const prevPc = prevPitch != null ? ((prevPitch % 12) + 12) % 12 : null;
-  let psi = 1; // Default diatonic scale
+  let psi = 1;
   if (boardState.isDissonant) {
     psi = 0; // Departing from dissonance/NCT
   } else if (prevPc != null && boardState.intervals.some(i => i === prevPc)) {
@@ -2494,12 +2494,12 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   else mu_m = 3; // Large leap
 
   // 3. Relative Voice Motion gamma_m (0: similar/parallel, 1: oblique, 2: contrary)
-  let gamma_m = 1; // Oblique default
+  let gamma_m = 1;
   if (otherPitches && otherPitches.length) {
     const otherMove = (otherPitches[0] && typeof otherPitches[0].pitch === 'number' && typeof otherPitches[0].prevPitch === 'number') ? (otherPitches[0].pitch - otherPitches[0].prevPitch) : 0;
     if (otherMove !== 0 && dp !== 0) {
-      if (dp * otherMove > 0) gamma_m = 0; // Similar motion
-      else if (dp * otherMove < 0) gamma_m = 2; // Contrary motion
+      if (dp * otherMove > 0) gamma_m = 0; // Similar
+      else if (dp * otherMove < 0) gamma_m = 2; // Contrary
     }
   }
 
@@ -2518,25 +2518,37 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   else if (isScale) phi_m = 1;
   else phi_m = 0;
 
-  // Vector Field Singularities on T_s S
+  // SPECIES COUNTERPOINT VECTOR FIELD SINGULARITIES (Hard Constraints)
   if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
   if (boardState.isDissonant && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Leap from Dissonance' };
   if (absDp >= 5 && prevLeapMomentum != null && prevLeapMomentum * dp > 0) {
     return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
   }
 
+  // CONTRAPUNTAL VECTOR FIELD POTENTIAL V_cpt
   let kineticInertia = 0;
-  if (dp === 0) kineticInertia += 1.5;
-  else if (absDp <= 2) kineticInertia += 0.05 * absDp;
-  else kineticInertia += absDp * 0.15;
+  if (dp === 0) {
+    kineticInertia += 1.2; // Hold penalty
+  } else if (absDp <= 2) {
+    kineticInertia += 0.05 * absDp; // Prefer stepwise motion
+  } else {
+    kineticInertia += absDp * 0.15; // Moderate leap inertia
+  }
 
-  if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8;
-  if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) kineticInertia -= 0.6;
+  // Energy Release & Recovery Gradient
+  if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8; // Resolution energy release
+  if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) kineticInertia -= 0.6; // Stepwise leap recovery bonus
 
-  // Tangent Space Anti-Oscillation & Loop Penalties
-  if (prevPitch != null && targetPitch === prevPitch) kineticInertia += 2.5;
-  if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) kineticInertia += 2.0;
-  if (prev3Pitch != null && targetPitch === prev3Pitch && targetPitch !== prevPitch) kineticInertia += 1.2;
+  // Leading-Tone Resolution Vector: 7th scale degree resolves upwards to 1st degree
+  const scaleRootPc = (STATE && STATE.root != null) ? STATE.root : 0;
+  if (prevPc != null && ((prevPc - scaleRootPc + 12) % 12) === 11) {
+    if (targetPc === scaleRootPc) kineticInertia -= 0.7; // Leading-tone resolution bonus
+  }
+
+  // Anti-Stagnation & Oscillation Potential Barriers
+  if (prevPitch != null && targetPitch === prevPitch) kineticInertia += 2.0;
+  if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) kineticInertia += 1.8;
+  if (prev3Pitch != null && targetPitch === prev3Pitch && targetPitch !== prevPitch) kineticInertia += 1.0;
 
   return {
     valid: true,
@@ -2639,9 +2651,17 @@ function pickNote(cands, ctx){
       if (ra !== rb) return ra - rb;
     }
 
+    // Filter out heavy flow penalties (like dp === 0 static stagnation) when ranking in bold/strong modes
+    if (mode === 'bold') {
+      // Bold mode prefers larger interval leaps among valid flow candidates
+      const leapA = Math.abs(a.m - (prevP != null ? prevP : a.m));
+      const leapB = Math.abs(b.m - (prevP != null ? prevP : b.m));
+      if (leapA !== leapB) return leapB - leapA;
+    }
+
     // Vector Field Flow Combined Cost (integrates Tangent Space Inertia, Dissonance Potential, and Phase Space Conservation)
     if (Math.abs(a.combinedCost - b.combinedCost) > 0.01) {
-      return mode === 'bold' ? (b.combinedCost - a.combinedCost) : (a.combinedCost - b.combinedCost);
+      return a.combinedCost - b.combinedCost;
     }
 
     if (prevP != null) {
@@ -2871,7 +2891,7 @@ function runVoiceWalk(chords){
         const lo = beneath.length ? Math.max.apply(null, beneath)+1 : 0;
         const ear=hears(0);
         const prev0 = (held[0] != null) ? held[0] : 72;
-        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), Math.max(lo, prev0 - 7), Math.min(REGISTERS[0].hi, prev0 + 7)), prev0, ear);
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), Math.max(lo, prev0 - 12), Math.min(REGISTERS[0].hi, prev0 + 12)), prev0, ear);
         const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
         const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
         const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
@@ -2887,7 +2907,7 @@ function runVoiceWalk(chords){
       const lo = cur(2)!=null ? cur(2)+1 : 0, hi = cur(0)!=null ? cur(0)-1 : 127;
       const ear=hears(1);
       const prev1 = (held[1] != null) ? held[1] : 60;
-        const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), Math.max(lo, prev1 - 7), Math.min(hi, prev1 + 7)), prev1, ear);
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), Math.max(lo, prev1 - 10), Math.min(hi, prev1 + 10)), prev1, ear);
       const mMode1 = (STATE.motionConstraints && STATE.motionConstraints[1] && STATE.motionConstraints[1][step]) || 'auto';
       const isMetricAccented1 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
       put(1, pickNote(cands, { v: 1,
