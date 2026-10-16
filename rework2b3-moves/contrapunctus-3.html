@@ -2423,31 +2423,55 @@ function computeBoardState(voicesPitches, stepIndex) {
 }
 
 // 2. Evaluates Movement Vector m in Tangent Space T_s S against the Local Constraint Manifold M_valid(s, lambda)
-function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch) {
+function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches) {
   const dp = moveVector;
   const absDp = Math.abs(dp);
   const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
 
-  const psi = boardState.isDissonant ? 0 : 1;
+  // 1. Departure Context psi (0: NCT/chromatic, 1: Diatonic extension, 2: Essential chord/guide tone)
+  const prevPc = prevPitch != null ? ((prevPitch % 12) + 12) % 12 : null;
+  let psi = 1; // Default diatonic scale
+  if (boardState.isDissonant) {
+    psi = 0; // Departing from dissonance/NCT
+  } else if (prevPc != null && boardState.intervals.some(i => i === prevPc)) {
+    psi = 2; // Departing from essential chord/guide tone
+  }
 
+  // 2. Movement Step Class mu_m (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: res/rec)
   let mu_m = 0;
   if (dp === 0) mu_m = 0;
   else if (absDp <= 2) {
-    if (prevLeapMomentum != null && prevLeapMomentum * dp < 0) mu_m = 4;
-    else if (boardState.isDissonant) mu_m = 4;
-    else mu_m = 1;
-  } else if (absDp <= 4) mu_m = 2;
-  else mu_m = 3;
+    if (prevLeapMomentum != null && prevLeapMomentum * dp < 0) mu_m = 4; // Stepwise leap recovery
+    else if (boardState.isDissonant) mu_m = 4; // Stepwise resolution
+    else mu_m = 1; // Normal step
+  } else if (absDp <= 4) mu_m = 2; // Small leap
+  else mu_m = 3; // Large leap
 
-  const gamma_m = 1;
+  // 3. Relative Voice Motion gamma_m (0: similar/parallel, 1: oblique, 2: contrary)
+  let gamma_m = 1; // Oblique default
+  if (otherPitches && otherPitches.length) {
+    const otherMove = (otherPitches[0] && typeof otherPitches[0].pitch === 'number' && typeof otherPitches[0].prevPitch === 'number') ? (otherPitches[0].pitch - otherPitches[0].prevPitch) : 0;
+    if (otherMove !== 0 && dp !== 0) {
+      if (dp * otherMove > 0) gamma_m = 0; // Similar motion
+      else if (dp * otherMove < 0) gamma_m = 2; // Contrary motion
+    }
+  }
+
+  // 4. Metric Accent sigma_m (0: structural beat, 1: passing beat)
   const sigma_m = boardState.metricPhase;
 
+  // 5. Target Fit Class phi_m (0: NCT/chromatic, 1: Diatonic extension, 2: Essential chord/guide tone)
   const activeScalePcs = (typeof scalePCsNow === 'function') ? scalePCsNow() : [0,2,4,5,7,9,11];
   const targetPc = ((targetPitch % 12) + 12) % 12;
   const isScale = activeScalePcs.includes(targetPc);
+  const isChordTone = boardState.intervals.includes(targetPc);
 
-  let phi_m = isScale ? 2 : 0;
+  let phi_m = 0;
+  if (isChordTone) phi_m = 2;
+  else if (isScale) phi_m = 1;
+  else phi_m = 0;
 
+  // Vector Field Singularities on T_s S
   if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
   if (boardState.isDissonant && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Leap from Dissonance' };
   if (absDp >= 5 && prevLeapMomentum != null && prevLeapMomentum * dp > 0) {
@@ -2455,27 +2479,17 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   }
 
   let kineticInertia = 0;
-  if (dp === 0) {
-    kineticInertia += 1.5; // Strong static hold penalty
-  } else if (absDp <= 2) {
-    kineticInertia += 0.05 * absDp; // Prefer stepwise motion
-  } else {
-    kineticInertia += absDp * 0.15; // Moderate leap inertia
-  }
+  if (dp === 0) kineticInertia += 1.5;
+  else if (absDp <= 2) kineticInertia += 0.05 * absDp;
+  else kineticInertia += absDp * 0.15;
 
   if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8;
   if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) kineticInertia -= 0.6;
 
   // Tangent Space Anti-Oscillation & Loop Penalties
-  if (prevPitch != null && targetPitch === prevPitch) {
-    kineticInertia += 2.5;
-  }
-  if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) {
-    kineticInertia += 2.0;
-  }
-  if (prev3Pitch != null && targetPitch === prev3Pitch && targetPitch !== prevPitch) {
-    kineticInertia += 1.2;
-  }
+  if (prevPitch != null && targetPitch === prevPitch) kineticInertia += 2.5;
+  if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) kineticInertia += 2.0;
+  if (prev3Pitch != null && targetPitch === prev3Pitch && targetPitch !== prevPitch) kineticInertia += 1.2;
 
   return {
     valid: true,
@@ -2488,19 +2502,31 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
 
 
 function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitches, prev2Pitch, prev3Pitch) {
-  const currentPitches = otherPitches ? otherPitches.slice() : [60, 64, 48];
-  currentPitches[voiceIdx] = prevPitch != null ? prevPitch : candPitch;
+  // Construct complete 3-part voice pitch vector [soprano, alto, bass]
+  const fullPitches = [60, 60, 36];
+  if (otherPitches && Array.isArray(otherPitches)) {
+    for (const item of otherPitches) {
+      if (item && typeof item === 'object') {
+        if (item.v === 0) fullPitches[0] = item.pitch;
+        else if (item.v === 1) fullPitches[1] = item.pitch;
+        else if (item.v === 2) fullPitches[2] = item.pitch;
+      }
+    }
+  }
+  fullPitches[voiceIdx] = prevPitch != null ? prevPitch : candPitch;
 
-  const boardState = computeBoardState(currentPitches, stepIndex);
+  const boardState = computeBoardState(fullPitches, stepIndex);
   const dp = prevPitch != null ? candPitch - prevPitch : 0;
   const prevLeapMomentum = (prevPitch != null && prev2Pitch != null) ? (prevPitch - prev2Pitch) : 0;
 
-  const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch);
+  const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches);
 
   const [psi, mu_m, gamma_m, sigma_m, phi_m] = flowEval.coords;
   const mF = psi*MS[0] + mu_m*MS[1] + gamma_m*MS[2] + sigma_m*MS[3] + phi_m*MS[4];
   const mTbl = moveTable();
-  const isMoveLegal = flowEval.valid && (phi_m >= 1 || mTbl.t[mF % mTbl.size] === 1);
+
+  // STRICT 5D MOVEMENT RULE TABLE CHECK (governed by moveTable legal fraction lambda_M and cell flips)
+  const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1);
 
   // Map to Voice Class for backward compatibility
   const phi_v = phi_m === 2 ? 4 : (phi_m === 1 ? 2 : 0);
@@ -2702,7 +2728,7 @@ function runVoiceWalk(chords){
         if(u===v) continue;
         const now=pitches[u], p = now!=null ? now : held[u];
         if(p==null) continue;
-        o.push({pitch:p, prevPitch: now!=null ? before[u] : p});
+        o.push({v:u, pitch:p, prevPitch: now!=null ? before[u] : p});
       }
       return o;
     };
@@ -3159,6 +3185,21 @@ function compose(){
   out.dep = cellDependence(STATE.lamC, segments);
   out.reach = cellReach(segments);
   out.cls = out.dyn.orbit.cls;
+  // Build note event objects for score/audio
+  out.notes = [0,1,2].map(v => {
+    const arr = [];
+    for (let s = 0; s < total; s++) {
+      if (pitches[v][s] != null && STATE.onsets[v][s]) {
+        let span = 1;
+        while (s + span < total && !STATE.onsets[v][s + span]) span++;
+        const pitch = pitches[v][s];
+        const baseEnv = (STATE.env && STATE.env[v]) ? STATE.env[v] : {a:0.01, d:0.1, s:0.6, r:0.3};
+        const e = Object.assign({}, baseEnv, { gate: span * 0.92, gateSec: span * 0.92 * (secondsPerStep ? secondsPerStep() : 0.15) });
+        arr.push({ v, step: s, pitch, cents: 0, fpitch: pitch, e, span, tailSteps: 0.6, deco: deco[v][s], fell: fell[v][s], anchored: false });
+      }
+    }
+    return arr;
+  });
 
   if(STATE.selectedSeg >= segments) STATE.selectedSeg = Math.max(0, segments-1);
   STATE.composed = out;
@@ -3780,15 +3821,19 @@ function drawLattice(){
     }
   }
 
-  // Draw Geodesic Tangent Vector Field Trajectories
+  // Draw Tangent Vector Field Trajectory Connections in Move & Voice Spaces
   if (sp.set === 'move' || sp.set === 'voice') {
-    for (let f = 0; f < cells.length; f += 2) {
+    const strides = sp.strides;
+    for (let f = 0; f < cells.length; f++) {
       const w = getCellFiberWeight(f);
-      if (w > 0.8) {
-        const nextF = (f + 7) % cells.length;
-        const alpha = Math.min(0.6, w * 0.3);
-        const colLine = rgba(dark ? [0.38,0.69,0.94] : [0.12,0.53,0.90], alpha);
-        P.line(pts[f*2], pts[f*2+1], pts[nextF*2], pts[nextF*2+1], 1.5, colLine);
+      if (w > 0.8 && sp.tbl.legal[f]) {
+        // Connect along valid step class vector (stride[1])
+        const targetStepF = (f + strides[1]) % cells.length;
+        if (sp.tbl.legal[targetStepF]) {
+          const alpha = Math.min(0.7, w * 0.4);
+          const colLine = rgba(dark ? [0.38,0.69,0.94] : [0.12,0.53,0.90], alpha);
+          P.line(pts[f*2], pts[f*2+1], pts[targetStepF*2], pts[targetStepF*2+1], 1.5, colLine);
+        }
       }
     }
   }
