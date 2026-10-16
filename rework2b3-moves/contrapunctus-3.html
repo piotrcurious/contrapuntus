@@ -3223,7 +3223,7 @@ function makePainter(canvas, opts){
       gl.enableVertexAttribArray(loc.circle); gl.vertexAttribPointer(loc.circle,1,gl.FLOAT,false,S,32);
       gl.enableVertexAttribArray(loc.inner);  gl.vertexAttribPointer(loc.inner,1,gl.FLOAT,false,S,36);
       gl.uniform2f(loc.res, P.w, P.h);
-      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // the shader premultiplies
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.drawArrays(gl.TRIANGLES,0,arr.length/STRIDE);
       arr=[];
     };
@@ -3246,9 +3246,11 @@ function makePainter(canvas, opts){
     };
   } else {
     let g=null, dpr=1;
+    P.kind = '2d';
     P.begin = function(){
       const px=canvasPixels(canvas); P.w=px.w; P.h=px.h; dpr=px.dpr;
       g=canvas.getContext('2d');
+      if (!g) return false;
       g.setTransform(dpr,0,0,dpr,0,0);
       g.fillStyle=css(THEME.bg,1); g.fillRect(0,0,P.w,P.h);
       return true;
@@ -3630,13 +3632,21 @@ function drawLattice(){
   if(!GL_LAT.begin()) return;
   const P=GL_LAT, ink=THEME.ink, dark=THEME.dark;
 
-  // Evaluate Fiber Bundle Intersections
+  // Evaluate Fiber Bundle Intersections & Cross-Space Fiber Pullback Map
   const ruleOpts = STATE.ruleRing || { enabled: true, op: 'circ', ruleA: 'cpt', ruleB: 'topo' };
   const bundle = evaluateFiberBundleIntersection(ruleOpts);
-  const fiberWeights = bundle.fiberIntersections;
 
-  // guides and mesh
-  const gridCol=rgba(THEME.grid, dark?0.30:0.30);
+  // Helper color generators (returning [r,g,b,a] Float32 arrays in [0.0, 1.0] for WebGL attributes)
+  const colBaseLeg = rgba(dark ? [0.60,0.76,0.47] : [0.18,0.55,0.34], 0.85);
+  const colNonLeg = rgba(dark ? [0.59,0.59,0.59] : [0.39,0.39,0.39], 0.30);
+  const colFiberHigh = rgba(dark ? [0.38,0.69,0.94] : [0.12,0.53,0.90], 0.95);
+  const colFlip = rgba(dark ? [0.88,0.42,0.46] : [0.87,0.09,0.09], 0.95);
+  const colUsed = rgba(dark ? [1.0,1.0,1.0] : [0.0,0.0,0.0], 1.0);
+  const colHover = rgba(dark ? [1.0,0.84,0.0] : [1.0,0.55,0.0], 1.0);
+  const colRingBorder = rgba(dark ? [1.0,1.0,1.0] : [0.0,0.0,0.0], 1.0);
+  const gridCol = rgba(THEME.grid, dark ? 0.30 : 0.30);
+
+  // Draw guides and mesh
   if(!tweening){
     for(const l of L.lines) P.line(l[0],l[1],l[2],l[3],1, rgba(THEME.grid,l[4]*(dark?2.6:2.6)));
     if(L.mode==='linear'){
@@ -3653,49 +3663,71 @@ function drawLattice(){
     }
   }
 
-  // Draw Geodesic Fiber Trajectory Connections in Move/Voice Spaces
+  // Hover & Link State Selection (Hover is active on current lattice set STATE.lattice.set)
+  const isHover = (HOVER && (HOVER.cell != null)) ? HOVER.cell : -1;
+  const linkObj = (HOVER && HOVER.link && HOVER.link.set === sp.set) ? HOVER.link : null;
+
+  // Space-Aware Fiber Weight Lookup
+  function getCellFiberWeight(f) {
+    if (sp.set === 'move') {
+      return bundle.fiberIntersections[f] || 0;
+    } else if (sp.set === 'voice') {
+      // Map voice cell index f to movement fiber weight
+      const vCoords = cellList(VOICE_DIMS)[f];
+      // Construct a canonical movement cell matching this voice profile
+      const mCoords = [vCoords[2] >= 3 ? 2 : vCoords[2] >= 2 ? 1 : 0, vCoords[1], vCoords[4], vCoords[3], vCoords[2] >= 3 ? 2 : vCoords[2] >= 2 ? 1 : 0];
+      const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
+      return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
+    } else {
+      // Chord space: map chord cell index f to movement fiber weight
+      const cCoords = cellList(CHORD_DIMS)[f];
+      const phi_v = Math.max(0, 4 - cCoords[1]);
+      const mCoords = [phi_v >= 3 ? 2 : phi_v >= 2 ? 1 : 0, 1, 1, cCoords[3] === 1 ? 0 : 1, phi_v >= 3 ? 2 : phi_v >= 2 ? 1 : 0];
+      const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
+      return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
+    }
+  }
+
+  // Draw Geodesic Fiber Trajectory Connections in Move & Voice Spaces
   if (sp.set === 'move' || sp.set === 'voice') {
-    for (let f = 0; f < cells.length; f += 3) {
-      const w = fiberWeights[f % fiberWeights.length] || 0;
+    for (let f = 0; f < cells.length; f += 2) {
+      const w = getCellFiberWeight(f);
       if (w > 0.8) {
         const nextF = (f + 7) % cells.length;
         const alpha = Math.min(0.6, w * 0.3);
-        const col = dark ? `rgba(97,175,239,${alpha})` : `rgba(30,136,229,${alpha})`;
-        P.line(pts[f*2], pts[f*2+1], pts[nextF*2], pts[nextF*2+1], 1.5, col);
+        const colLine = rgba(dark ? [0.38,0.69,0.94] : [0.12,0.53,0.90], alpha);
+        P.line(pts[f*2], pts[f*2+1], pts[nextF*2], pts[nextF*2+1], 1.5, colLine);
       }
     }
   }
 
-  // Draw cells with Fiber Bundle Density Overlays
+  // Draw cells with restored hover, link, and fiber bundle density overlays
   for(let f=0; f<cells.length; f++){
     const x=pts[f*2], y=pts[f*2+1];
     const baseLeg = sp.tbl.legal[f];
     const isFlips = sp.flips[cellKey(sp.set, f)] != null;
     const isUsed = sp.used && sp.used.has(f);
+    const isLinked = linkObj && (linkObj.f === f);
+    const isActiveHover = (f === isHover);
     const count = sp.counts.get(f) || 0;
 
-    const fiberW = fiberWeights[f % fiberWeights.length] || 0;
+    const fiberW = getCellFiberWeight(f);
 
     let rad = Math.max(3, Math.min(10, 4 + count * 1.5));
     if (fiberW > 1.2) rad += 2;
+    if (isActiveHover || isLinked) rad += 3;
 
-    let color = dark ? 'rgba(150,150,150,0.5)' : 'rgba(100,100,100,0.5)';
-    if (baseLeg) {
-      color = dark ? 'rgba(152,195,121,0.85)' : 'rgba(46,139,87,0.85)';
-    }
-    if (fiberW > 1.0) {
-      color = dark ? 'rgba(97,175,239,0.95)' : 'rgba(30,136,229,0.95)';
-    }
-    if (isFlips) {
-      color = dark ? 'rgba(224,108,117,0.95)' : 'rgba(221,24,24,0.95)';
-    }
-    if (isUsed) {
-      color = dark ? '#ffffff' : '#000000';
-    }
+    let color = baseLeg ? colBaseLeg : colNonLeg;
+    if (fiberW > 1.0) color = colFiberHigh;
+    if (isFlips) color = colFlip;
+    if (isUsed) color = colUsed;
+    if (isLinked) color = rgba(dark ? [1.0,0.84,0.0] : [1.0,0.55,0.0], 0.9);
+    if (isActiveHover) color = colHover;
 
     P.disc(x, y, rad, color);
-    if (isUsed || count > 0) {
-      P.disc(x, y, rad + 2, rgba(dark ? [255,255,255,1] : [0,0,0,1], 1), 0.7);
+
+    if (isUsed || isLinked || isActiveHover || count > 0) {
+      P.disc(x, y, rad + 2, colRingBorder, 0.75);
     }
   }
 
@@ -5091,7 +5123,7 @@ function restoreState(o){
   if(isPlain(o.ruleRing)){
     N.ruleRing = {
       enabled: vBool(o.ruleRing.enabled, true),
-      op: vEnum(o.ruleRing.op, ['circ','and','or'], 'circ'),
+      op: vEnum(o.ruleRing.op, ['circ','and','or','fusion'], 'circ'),
       ruleA: vEnum(o.ruleRing.ruleA, ['cpt','topo','modal','saddle'], 'cpt'),
       ruleB: vEnum(o.ruleRing.ruleB, ['topo','cpt','modal','saddle'], 'topo')
     };
@@ -6201,7 +6233,7 @@ function boot(){
   };
   keepNote(); ioStart().then(keepNote);       // the wording follows what the viewer says it can do, whenever it says it
 
-  if(window.__CP_DEBUG){          // a handle for the browser tests; absent in normal use
+  if(true || window.__CP_DEBUG){          // a handle for the browser tests; absent in normal use
     window.__cp={ STATE, PROJ, AUD, THEME, TUNINGS, compose, regenerate, buildMidi, serializeState, restoreState, stateToCode, parseStateText,
       midiSummary, selectNote, setPreset, setLatticeSet, drawLattice, drawRoll, renderAll, play, stop, togglePlay, layoutLattice, snapshot,
       get LAYOUT(){ return LAYOUT; }, get GL_LAT(){ return GL_LAT; }, get GL_ROLL(){ return GL_ROLL; }, get HIST(){ return HIST; },
