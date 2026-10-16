@@ -544,6 +544,7 @@ details.fold[open] > summary::before{content:"\2013 ";}
             <button type="button" id="btnSetChord" aria-pressed="true">Chord table</button>
             <button type="button" id="btnSetVoice" aria-pressed="false">Voice table</button>
             <button type="button" id="btnSetMove" aria-pressed="false">Movement table</button>
+            <button type="button" id="btnSetTime" aria-pressed="false">Temporal table</button>
           </div>
           <div class="segctl" id="projCtl" role="group" aria-label="Projection">
             <button type="button" id="btnProjGrid" aria-pressed="false">Flat grid</button>
@@ -1232,6 +1233,12 @@ function defaultProfiles(){
       sigma_m:{w:0.50, aff:[1.00, 0.55]},
       phi_m:  {w:1.00, aff:[0.15, 0.70, 1.00]},
     },
+    time:{
+      m_pos:  {w:0.90, aff:[1.00, 0.70, 0.40, 0.80]},
+      m_sub:  {w:0.60, aff:[0.80, 1.00, 0.50]},
+      d_dur:  {w:0.75, aff:[0.50, 1.00, 0.80]},
+      s_sync: {w:0.50, aff:[1.00, 0.60]},
+    },
   };
 }
 function defaultVoiceEnv(v){
@@ -1247,7 +1254,7 @@ const STATE = {
   root:0, scaleName:'Ionian',
   bars:8, stepsPerBar:8, lastStepsPerBar:8, harmonic:'bar',
   tempo:96, tension:0.30,
-  lamC:0.38, lamV:0.46, lamM:0.50,
+  lamC:0.38, lamV:0.46, lamM:0.50, lamT:0.50,
   supervisor:{
     enabled: true,
     syntaxMode: 'jazz',       // classical | jazz | hybrid
@@ -1259,7 +1266,7 @@ const STATE = {
   },
   ruleRing:{ enabled:true, op:'circ', ruleA:'cpt', ruleB:'topo' },
   profiles: defaultProfiles(),
-  cellFlips:{ chord:{}, voice:{}, move:{} },   // "i0,i1,.." -> 0|1
+  cellFlips:{ chord:{}, voice:{}, move:{}, time:{} },   // "i0,i1,.." -> 0|1
   extended:false, walkingBass:false, arp:'none',
   take:'smooth',   // which legal move to take: smooth | strong | bold
   tuning:'equal',// how the twelve pitch classes are tuned: see TUNINGS
@@ -1303,6 +1310,8 @@ window.pickNote = pickNote;
 window.pickEnhancedBassNote = pickEnhancedBassNote;
 window.voiceTable = voiceTable;
 window.moveTable = moveTable;
+window.timeTable = timeTable;
+window.latticeSpec = latticeSpec;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
 // direction (a basis vector) that you can drag, and a cell sits at the sum of its coordinates'
@@ -1316,6 +1325,7 @@ const PROJ = {
   chord:{ preset:'grid', basis:{d:[46,0], tau:[0,-64], rho:[14,0], eta:[0,13]}, cyclic:{}, rows:'d' },
   voice:{ preset:'grid', basis:{kappa:[200,0], mu:[0,-80], phi:[60,0], sigma:[0,-30], gamma:[20,0]}, cyclic:{}, rows:'mu' },
   move: { preset:'grid', basis:{psi:[180,0], mu_m:[0,-70], gamma_m:[50,0], sigma_m:[0,-25], phi_m:[15,0]}, cyclic:{}, rows:'mu_m' },
+  time: { preset:'grid', basis:{m_pos:[160,0], m_sub:[0,-60], d_dur:[40,0], s_sync:[0,-25]}, cyclic:{}, rows:'m_pos' },
 };
 const PROJ_BASES = {
   chord:{ grid:{d:[46,0], tau:[0,-64], rho:[14,0], eta:[0,13]},
@@ -1324,6 +1334,8 @@ const PROJ_BASES = {
           hyper:{kappa:[-42,-47], mu:[-24,-50], phi:[-16,-34], sigma:[-240,-44], gamma:[56,-8]} },
   move: { grid:{psi:[180,0], mu_m:[0,-70], gamma_m:[50,0], sigma_m:[0,-25], phi_m:[15,0]},
           hyper:{psi:[-35,-40], mu_m:[-20,-45], gamma_m:[-12,-30], sigma_m:[-200,-35], phi_m:[45,-10]} },
+  time: { grid:{m_pos:[160,0], m_sub:[0,-60], d_dur:[40,0], s_sync:[0,-25]},
+          hyper:{m_pos:[-20,-10], m_sub:[8,-35], d_dur:[35,-5], s_sync:[-10,18]} },
 };
 
 /* =====================================================================
@@ -1951,9 +1963,28 @@ function moveTable(lambda, flips, prof){
     lambda==null?STATE.lamM:lambda,
     flips||STATE.cellFlips.move);
 }
+function timeTable(lambda, flips, prof){
+  return buildTable(TIME_AXES, TIME_DIMS, TIME_STR.strides,
+    prof||(STATE.profiles && STATE.profiles.time ? STATE.profiles.time : defaultProfiles().time),
+    lambda==null?(STATE.lamT != null ? STATE.lamT : 0.50):lambda,
+    flips||(STATE.cellFlips && STATE.cellFlips.time ? STATE.cellFlips.time : {}));
+}
 const CS = CHORD_STR.strides, VS = VOICE_STR.strides, MS = MOVE_STR.strides;
 function cIdx(d,tau,rho,eta){ return d*CS[0]+tau*CS[1]+rho*CS[2]+eta*CS[3]; }
 function vIdx(k,mu,phi,sg,gm){ return k*VS[0]+mu*VS[1]+phi*VS[2]+sg*VS[3]+gm*VS[4]; }
+
+const TIME_AXES = [
+  {key:'m_pos', n:4, label:'m_pos', what:'metric beat position (downbeat -> weak beat -> offbeat -> sync)', tick:i=>['down','weak','off','sync'][i]},
+  {key:'m_sub', n:3, label:'m_sub', what:'subdivision density (quarter -> eighth -> sixteenth)', tick:i=>['1/4','1/8','1/16'][i]},
+  {key:'d_dur', n:3, label:'d_dur', what:'duration class (staccato -> normal -> sustained)', tick:i=>['stacc','norm','sust'][i]},
+  {key:'s_sync',n:2, label:'s_sync',what:'syncopation phase (straight -> syncopated)', tick:i=>['str','sync'][i]}
+];
+const TIME_DIMS = TIME_AXES.map(a=>a.n);
+const TIME_STR = axisStrides(TIME_DIMS);
+const TS = TIME_STR.strides;
+function tIdx(pos, sub, dur, sync){ return pos*TIME_STR.strides[0] + sub*TIME_STR.strides[1] + dur*TIME_STR.strides[2] + sync*TIME_STR.strides[3]; }
+
+
 function mIdx(psi,mu_m,gm_m,sg_m,phi_m){ return psi*MS[0]+mu_m*MS[1]+gm_m*MS[2]+sg_m*MS[3]+phi_m*MS[4]; }
 
 // Momentum class now reads the composer's own d-profile, so reshaping which
@@ -2464,7 +2495,8 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   const activeScalePcs = (typeof scalePCsNow === 'function') ? scalePCsNow() : [0,2,4,5,7,9,11];
   const targetPc = ((targetPitch % 12) + 12) % 12;
   const isScale = activeScalePcs.includes(targetPc);
-  const isChordTone = boardState.intervals.includes(targetPc);
+  const chordPcs = boardState.pitches.filter(p => p != null).map(p => ((p % 12) + 12) % 12);
+  const isChordTone = chordPcs.includes(targetPc);
 
   let phi_m = 0;
   if (isChordTone) phi_m = 2;
@@ -2513,7 +2545,7 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
       }
     }
   }
-  fullPitches[voiceIdx] = prevPitch != null ? prevPitch : candPitch;
+  fullPitches[voiceIdx] = candPitch;
 
   const boardState = computeBoardState(fullPitches, stepIndex);
   const dp = prevPitch != null ? candPitch - prevPitch : 0;
@@ -2525,15 +2557,25 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const mF = psi*MS[0] + mu_m*MS[1] + gamma_m*MS[2] + sigma_m*MS[3] + phi_m*MS[4];
   const mTbl = moveTable();
 
-  // STRICT 5D MOVEMENT RULE TABLE CHECK (governed by moveTable legal fraction lambda_M and cell flips)
-  const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1);
+  // Evaluate 4D Temporal Metric Rule Space T(m_pos, m_sub, d_dur, s_sync)
+  const stepsPerBar = STATE.stepsPerBar || 8;
+  const m_pos = Math.floor((stepIndex % stepsPerBar) / Math.max(1, stepsPerBar / 4)) % 4; // 0..3
+  const m_sub = (stepIndex % 2 === 0) ? 0 : 1; // subdivision density
+  const d_dur = 1; // normal duration default
+  const s_sync = (stepIndex % 2 === 1) ? 1 : 0; // syncopation phase
+  const tF = tIdx(m_pos, m_sub, d_dur, s_sync);
+  const tTbl = timeTable();
+
+  // STRICT MOVEMENT & TEMPORAL RULE SPACE LEGAL CHECKS
+  const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1) && (tTbl.t[tF % tTbl.size] === 1);
 
   // Map to Voice Class for backward compatibility
   const phi_v = phi_m === 2 ? 4 : (phi_m === 1 ? 2 : 0);
   const cls = { kappa: gamma_m, mu: mu_m, phi: phi_v, sigma: sigma_m, gamma: gamma_m };
   const moveCls = { psi, mu_m, gamma_m, sigma_m, phi_m, mCell: mF };
+  const timeCls = { m_pos, m_sub, d_dur, s_sync, tCell: tF };
 
-  const totalCost = flowEval.cost * 3.0 + (mTbl.costs[mF % mTbl.size] || 0) * 0.1;
+  const totalCost = flowEval.cost * 3.0 + (mTbl.costs[mF % mTbl.size] || 0) * 0.1 + (tTbl.costs[tF % tTbl.size] || 0) * 0.05;
 
   return {
     m: candPitch,
@@ -2546,6 +2588,7 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
     coords: flowEval.coords,
     cls,
     moveCls,
+    timeCls,
     flowEval
   };
 }
@@ -2595,7 +2638,7 @@ function pickNote(cands, ctx){
   });
 
   const chosen = legal[0];
-  return { pitch: chosen.m, cls: chosen.cls, moveCls: chosen.moveCls, fellBack };
+  return { pitch: chosen.m, cls: chosen.cls, moveCls: chosen.moveCls, timeCls: chosen.timeCls, fellBack };
 }
 
 
@@ -2674,7 +2717,7 @@ function pickEnhancedBassNote(cands, ctx) {
   });
 
   const chosen = legal[0];
-  return { pitch: chosen.m, cls: chosen.cls, moveCls: chosen.moveCls, fellBack };
+  return { pitch: chosen.m, cls: chosen.cls, moveCls: chosen.moveCls, timeCls: chosen.timeCls, fellBack };
 }
 
 function deterministicShuffle(arr, seed){
@@ -2721,7 +2764,7 @@ function runVoiceWalk(chords){
     const chord = chords[g], next = chords[Math.min(g+1, chords.length-1)];
     const scalePCs = SCALES[scaleForSeg(g)].map(o=>(STATE.root+o)%12);
     const before = held.slice();
-    const pitches=[null,null,null], deco=[false,false,false], fb=[false,false,false], cells=[null,null,null], moveCells=[null,null,null];
+    const pitches=[null,null,null], deco=[false,false,false], fb=[false,false,false], cells=[null,null,null], moveCells=[null,null,null], timeCells=[null,null,null];
     const hears=(v)=>{
       const o=[];
       for(let u=0;u<3;u++){
@@ -2739,6 +2782,7 @@ function runVoiceWalk(chords){
       fb[v]=r.fellBack;
       cells[v]=r.cls;
       moveCells[v]=r.moveCls;
+      timeCells[v]=r.timeCls;
       if (held[v] !== r.pitch) {
         prev3Pitch[v]=prev2Pitch[v];
         prev2Pitch[v]=held[v];
@@ -2837,7 +2881,7 @@ function runVoiceWalk(chords){
       }));
     }
 
-    res.push({step, pitches, deco, fellBack:fb, cells, moveCells, g});
+    res.push({step, pitches, deco, fellBack:fb, cells, moveCells, timeCells, g});
   }
   return res;
 }
@@ -3161,6 +3205,7 @@ function compose(){
   for(let v=0;v<3;v++){ pitches[v]=new Array(total).fill(null); deco[v]=new Array(total).fill(false); fell[v]=new Array(total).fill(false); }
   const voiceCells=new Set(), voiceCellSeq=[], vcell=[0,1,2].map(()=>new Array(total).fill(null));
   const moveCells=new Set(), moveCellSeq=[], mcell=[0,1,2].map(()=>new Array(total).fill(null));
+  const timeCells=new Set(), timeCellSeq=[], tcell=[0,1,2].map(()=>new Array(total).fill(null));
   for(const r of voices){
     for(let v=0;v<3;v++){
       pitches[v][r.step]=r.pitches[v]; deco[v][r.step]=r.deco[v]; fell[v][r.step]=r.fellBack[v];
@@ -3168,6 +3213,8 @@ function compose(){
       if(c){ const f=vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma); voiceCells.add(f); voiceCellSeq.push(f); vcell[v][r.step]=f; }
       const mc=r.moveCells?r.moveCells[v]:null;
       if(mc && mc.mCell!=null){ moveCells.add(mc.mCell); moveCellSeq.push(mc.mCell); mcell[v][r.step]=mc.mCell; }
+      const tc=r.timeCells?r.timeCells[v]:null;
+      if(tc && tc.tCell!=null){ timeCells.add(tc.tCell); timeCellSeq.push(tc.tCell); tcell[v][r.step]=tc.tCell; }
     }
   }
   const chordCells=new Set(), chordCellSeq=[];
@@ -3178,7 +3225,7 @@ function compose(){
   }
 
   const out = { total, segments, L, walk, chords, pitches, deco, fell,
-    chordCells, chordCellSeq, voiceCells, voiceCellSeq, moveCells, moveCellSeq, vcell, mcell, sequence: detectSequence(chords) };
+    chordCells, chordCellSeq, voiceCells, voiceCellSeq, moveCells, moveCellSeq, timeCells, timeCellSeq, vcell, mcell, tcell, sequence: detectSequence(chords) };
   out.sweep = sweep(28);
   out.basin = basins();
   out.dyn = currentDynamics(segments);
@@ -3592,25 +3639,25 @@ const DRAG = {axis:null};
 
 function latticeSpec(){
   const set=STATE.lattice.set, c=STATE.composed;
-  const isChord = set==='chord', isVoice = set==='voice', isMove = set==='move';
-  const seq = c ? (isChord ? c.chordCellSeq : isVoice ? c.voiceCellSeq : (c.moveCellSeq||[])) : [];
+  const isChord = set==='chord', isVoice = set==='voice', isMove = set==='move', isTime = set==='time';
+  const seq = c ? (isChord ? c.chordCellSeq : isVoice ? c.voiceCellSeq : isMove ? (c.moveCellSeq||[]) : (c.timeCellSeq||[])) : [];
   const counts=new Map(); for(const f of seq) counts.set(f,(counts.get(f)||0)+1);
   return {
     set,
-    axes: isChord?CHORD_AXES:isVoice?VOICE_AXES:MOVE_AXES,
-    dims: isChord?CHORD_DIMS:isVoice?VOICE_DIMS:MOVE_DIMS,
-    strides: isChord?CHORD_STR.strides:isVoice?VOICE_STR.strides:MOVE_STR.strides,
-    tbl: isChord?chordTable():isVoice?voiceTable():moveTable(),
+    axes: isChord?CHORD_AXES:isVoice?VOICE_AXES:isMove?MOVE_AXES:TIME_AXES,
+    dims: isChord?CHORD_DIMS:isVoice?VOICE_DIMS:isMove?MOVE_DIMS:TIME_DIMS,
+    strides: isChord?CHORD_STR.strides:isVoice?VOICE_STR.strides:isMove?MOVE_STR.strides:TIME_STR.strides,
+    tbl: isChord?chordTable():isVoice?voiceTable():isMove?moveTable():timeTable(),
     seq, counts,
-    used: c ? (isChord?c.chordCells:isVoice?c.voiceCells:(c.moveCells||new Set())) : null,
-    flips: isChord?STATE.cellFlips.chord:isVoice?STATE.cellFlips.voice:STATE.cellFlips.move,
-    proj: PROJ[set],
+    used: c ? (isChord?c.chordCells:isVoice?c.voiceCells:isMove?(c.moveCells||new Set()):(c.timeCells||new Set())) : null,
+    flips: isChord?STATE.cellFlips.chord:isVoice?STATE.cellFlips.voice:isMove?STATE.cellFlips.move:(STATE.cellFlips.time||{}),
+    proj: PROJ[set] || PROJ.chord,
     reach: isChord && c ? c.reach : null,
     dep: isChord && c && c.dep ? new Set(c.dep.cells) : null,
   };
 }
 function cellKey(set, f){
-  const dims = set==='chord'?CHORD_DIMS:set==='voice'?VOICE_DIMS:MOVE_DIMS;
+  const dims = set==='chord'?CHORD_DIMS:set==='voice'?VOICE_DIMS:set==='move'?MOVE_DIMS:TIME_DIMS;
   return cellList(dims)[f].join(',');
 }
 
@@ -3856,7 +3903,7 @@ function drawLattice(){
 
     // Detect Singularity / Prohibited Vector Field Boundary
     const coords = cellList(sp.dims)[f];
-    const isSingularity = (sp.set === 'move' && coords[0] === 0 && coords[1] === 3); // Leap from Dissonance
+    const isSingularity = (sp.set === 'move' && coords && coords[0] === 0 && coords[1] === 3); // Leap from Dissonance
 
     let color = baseLeg ? colBaseLeg : colNonLeg;
     if (fiberW > 1.0) color = colFiberHigh;
@@ -3995,7 +4042,7 @@ function renderLatKey(){
 }
 function renderAxisModes(){
   const el=$('axisModes'); if(!el) return;
-  const set=STATE.lattice.set, P=PROJ[set], axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
+  const set=STATE.lattice.set, P=PROJ[set], axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
   el.textContent='';
   const lab=mk('span','aside'); lab.style.marginRight='6px';
   if(P.preset==='cost'){
@@ -4045,6 +4092,7 @@ function updateProjButtons(){
   if($('btnSetChord')) $('btnSetChord').setAttribute('aria-pressed', set==='chord'?'true':'false');
   if($('btnSetVoice')) $('btnSetVoice').setAttribute('aria-pressed', set==='voice'?'true':'false');
   if($('btnSetMove'))  $('btnSetMove').setAttribute('aria-pressed', set==='move'?'true':'false');
+  if($('btnSetTime'))  $('btnSetTime').setAttribute('aria-pressed', set==='time'?'true':'false');
 }
 function setPreset(which, animate){
   const set=STATE.lattice.set, P=PROJ[set];
@@ -4918,7 +4966,7 @@ function renderStats(){
   const mc=chordMarginals(tc), mv=voiceMarginals(tv), mm=moveMarginals(tm);
   document.querySelectorAll('.axis').forEach(wrap=>{
     const set=wrap.dataset.set, key=wrap.dataset.key;
-    const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
+    const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
     const marg=set==='chord'?mc:set==='voice'?mv:mm;
     const ai=axes.findIndex(a=>a.key===key);
     if(ai!==-1 && marg[ai]){
@@ -5195,7 +5243,7 @@ function serializeState(opts){
   opts = opts||{};
   const prof={chord:{}, voice:{}, move:{}};
   for(const set of ['chord','voice','move']){
-    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
+    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
     for(const a of axes){ const p=STATE.profiles[set][a.key]; prof[set][a.key]={w:r3(p.w), aff:p.aff.map(r3)}; }
   }
   const o = {
@@ -5290,7 +5338,7 @@ function restoreState(o){
 
   N.profiles = defaultProfiles();
   if(isPlain(o.profiles)) for(const set of ['chord','voice','move']){
-    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES, src=o.profiles[set];
+    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES, src=o.profiles[set];
     if(!isPlain(src)) continue;
     for(const a of axes){
       const p=src[a.key]; if(!isPlain(p)) continue;
@@ -5363,7 +5411,7 @@ function restoreState(o){
     for(const k of ['tails','ghosts','sounding']) view.show[k]=isPlain(o.view.show)?vBool(o.view.show[k],STATE.show[k]):STATE.show[k];
     for(const set of ['chord','voice','move']){
       const src=isPlain(o.view.proj)?o.view.proj[set]:null; if(!isPlain(src)) continue;
-      const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES, P={basis:{}, cyclic:{}};
+      const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES, P={basis:{}, cyclic:{}};
       P.preset=vEnum(src.preset, set==='chord'?['grid','hyper','cycle','cost']:['grid','hyper','cost'], 'grid');
       let okBasis=isPlain(src.basis);
       if(okBasis) for(const a of axes){
@@ -5842,7 +5890,7 @@ function bindBars(bars,set,ax){
 function paintProfiles(){
   document.querySelectorAll('.axis').forEach(wrap=>{
     const set=wrap.dataset.set, key=wrap.dataset.key;
-    const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
+    const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
     const ax=axes.find(a=>a.key===key);
     if(!ax) return;
     const p=STATE.profiles[set][key], def=DEFAULTS[set][key];
@@ -5943,6 +5991,7 @@ function bindControls(){
   on('btnSetChord','click', ()=>setLatticeSet('chord'));
   on('btnSetVoice','click', ()=>setLatticeSet('voice'));
   if($('btnSetMove')) on('btnSetMove','click', ()=>setLatticeSet('move'));
+  if($('btnSetTime')) on('btnSetTime','click', ()=>setLatticeSet('time'));
 
   on('btnProjGrid','click', ()=>setPreset('grid'));
   on('btnProjCycle','click', ()=>setPreset('cycle'));
