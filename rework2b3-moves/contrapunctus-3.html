@@ -1292,6 +1292,17 @@ window.evaluateFiberBundleIntersection = evaluateFiberBundleIntersection;
 window.bundleProjection_M_to_V = bundleProjection_M_to_V;
 window.bundleProjection_V_to_C = bundleProjection_V_to_C;
 window.orbifoldDistance = orbifoldDistance;
+window.computeBoardState = computeBoardState;
+window.evaluateTangentMovementVector = evaluateTangentMovementVector;
+window.evalCandidateMove = evalCandidateMove;
+window.filterParallels = filterParallels;
+window.bounded = bounded;
+window.rangeAll = rangeAll;
+window.REGISTERS = REGISTERS;
+window.pickNote = pickNote;
+window.pickEnhancedBassNote = pickEnhancedBassNote;
+window.voiceTable = voiceTable;
+window.moveTable = moveTable;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
 // direction (a basis vector) that you can drag, and a cell sits at the sum of its coordinates'
@@ -2401,10 +2412,11 @@ function computeBoardState(voicesPitches, stepIndex) {
 }
 
 // 2. Evaluates Movement Vector m in Tangent Space T_s S against the Local Constraint Manifold M_valid(s, lambda)
-function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum) {
+function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch) {
   // moveVector m = delta_p (semitone displacement for this voice)
   const dp = moveVector;
   const absDp = Math.abs(dp);
+  const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
 
   // Departure Context psi derived from Board State consonance V(s)
   const psi = boardState.isDissonant ? 0 : 1; // 0 = departing from dissonance/suspension, 1 = consonant
@@ -2420,42 +2432,72 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   } else if (absDp <= 4) mu_m = 2; // Small leap
   else mu_m = 3; // Large leap
 
-  // Relative Motion gamma_m (placeholder for simultaneity evaluation)
+  // Relative Motion gamma_m
   const gamma_m = 1; // Oblique default for single voice
 
   // Metric Accent sigma_m
   const sigma_m = boardState.metricPhase;
 
   // Target Fit Class phi_m computed dynamically from target pitch consonance
-  const targetPitch = (boardState.pitches[voiceIdx] || 60) + dp;
   const activeScalePcs = (typeof scalePCsNow === 'function') ? scalePCsNow() : [0,2,4,5,7,9,11];
   const targetPc = ((targetPitch % 12) + 12) % 12;
   const isScale = activeScalePcs.includes(targetPc);
 
   let phi_m = 0;
   if (isScale) {
-    // Check if target pitch is a chord tone of current local chord
     phi_m = 2; // Chord/guide tone fit
   } else {
     phi_m = 0; // NCT/Chromatic
   }
 
-  // 3. Vector Field Hard Constraints & Singularities on T_s S
-  // Constraint A: Prohibit entering leaps into non-chord tones (phi_m = 0 && absDp > 2)
+  // Vector Field Singularities on T_s S
   if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
-
-  // Constraint B: Prohibit departing leaps from active dissonances V(s) > 0 (Dissonance Resolution Gradient Constraint)
   if (boardState.isDissonant && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Leap from Dissonance' };
-
-  // Constraint C: Prohibit unrecovered large leaps (absDp >= 5 && no subsequent stepwise recovery)
   if (absDp >= 5 && prevLeapMomentum != null && prevLeapMomentum * dp > 0) {
     return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
   }
 
   // Compute Vector Field Flow Potential Energy / Cost
-  let flowCost = absDp * 0.2; // Stepwise inertia energy
-  if (boardState.isDissonant && mu_m === 4) flowCost -= 1.0; // Energy release bonus for stepwise resolution
+  let flowCost = 0;
+
+  // Static hold penalty (dp = 0) to encourage active contrapuntal voice walking
+  if (dp === 0) {
+    flowCost += 0.8;
+  } else if (absDp <= 2) {
+    flowCost += 0.1; // Reward stepwise movement
+  } else {
+    flowCost += absDp * 0.15; // Moderate leap inertia
+  }
+
+  if (boardState.isDissonant && mu_m === 4) flowCost -= 1.0; // Resolution bonus
   if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) flowCost -= 0.8; // Leap recovery bonus
+
+  // 4. BALANCED ANTI-OSCILLATION & ALTERNATIVE PATH GUIDANCE ENGINES
+  // Immediate Pitch Repetition Penalty (A -> A -> A)
+  if (prevPitch != null && targetPitch === prevPitch) {
+    flowCost += 3.5; // Strong pitch repetition penalty to prevent static hold
+  }
+
+  // 2-Step Ping-Pong Oscillation Penalty (A -> B -> A -> B)
+  if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) {
+    flowCost += 2.5; // Strong 2-step oscillation penalty
+  }
+
+  // 3-Step Loop Cycle Penalty (A -> B -> C -> A)
+  if (prev3Pitch != null && targetPitch === prev3Pitch && targetPitch !== prevPitch) {
+    flowCost += 1.5; // 3-step loop penalty
+  }
+
+  // Alternative Path Guidance Attractor: reward melodic stepwise exploration
+  const pathGuidanceWeight = (STATE.tieRules && STATE.tieRules.wPathGuidance != null) ? STATE.tieRules.wPathGuidance : 1.0;
+  if (absDp >= 1 && absDp <= 2) {
+    flowCost -= 0.8 * pathGuidanceWeight; // Strong stepwise melodic flow bonus
+  }
+  if (prevPitch != null && prev2Pitch != null) {
+    if (targetPitch !== prevPitch && targetPitch !== prev2Pitch && targetPitch !== prev3Pitch) {
+      flowCost -= 0.6 * pathGuidanceWeight; // Novel path exploration bonus
+    }
+  }
 
   return {
     valid: true,
@@ -2467,7 +2509,7 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
 }
 
 
-function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitches, prev2Pitch) {
+function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitches, prev2Pitch, prev3Pitch) {
   const currentPitches = otherPitches ? otherPitches.slice() : [60, 64, 48];
   currentPitches[voiceIdx] = prevPitch;
 
@@ -2475,7 +2517,7 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const dp = candPitch - prevPitch;
   const prevLeapMomentum = prev2Pitch != null ? (prevPitch - prev2Pitch) : 0;
 
-  const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum);
+  const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch);
 
   const [psi, mu_m, gamma_m, sigma_m, phi_m] = flowEval.coords;
   const mF = psi*MS[0] + mu_m*MS[1] + gamma_m*MS[2] + sigma_m*MS[3] + phi_m*MS[4];
@@ -2487,14 +2529,16 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const cls = { kappa: gamma_m, mu: mu_m, phi: phi_v, sigma: sigma_m, gamma: gamma_m };
   const moveCls = { psi, mu_m, gamma_m, sigma_m, phi_m, mCell: mF };
 
+  const totalCost = flowEval.cost * 3.0 + (mTbl.costs[mF % mTbl.size] || 0) * 0.1;
+
   return {
     m: candPitch,
     isLegal: isMoveLegal,
     legal: isMoveLegal,
     moveLegal: isMoveLegal,
     voiceLegal: flowEval.valid,
-    combinedCost: flowEval.cost + (mTbl.costs[mF % mTbl.size] || 0) * 0.1,
-    cost: flowEval.cost,
+    combinedCost: totalCost,
+    cost: totalCost,
     coords: flowEval.coords,
     cls,
     moveCls,
@@ -2506,13 +2550,15 @@ function pickNote(cands, ctx){
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
   if(!cands || !cands.length) return { pitch: ctx.prevPitch || 60, cls: {kappa:1,mu:2,phi:4,sigma:0,gamma:1}, moveCls:{psi:2,mu_m:0,gamma_m:1,sigma_m:0,phi_m:2,mCell:0}, fellBack: true };
 
-  const prevP = ctx.prevPitch || 60;
+  const prevP = ctx.prevPitch;
   const vIdx = ctx.v != null ? ctx.v : 0;
   const stepIdx = ctx.step || 0;
   const otherP = ctx.others || [60, 64, 48];
   const prev2P = ctx.prev2Pitch;
+  const prev3P = ctx.prev3Pitch;
 
-  const evaluated = cands.map(m => evalCandidateMove(prevP, m, vIdx, stepIdx, otherP, prev2P));
+  // When prevP is null (first note), evaluate candidate pitch directly relative to candidate
+  const evaluated = cands.map(m => evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P));
 
   let legal = evaluated.filter(e => e.isLegal);
   let fellBack = false;
@@ -2531,14 +2577,24 @@ function pickNote(cands, ctx){
       if (ra !== rb) return ra - rb;
     }
 
-    if (mode === 'strong' && a.combinedCost !== b.combinedCost) return a.combinedCost - b.combinedCost;
-    if (mode === 'bold'   && a.combinedCost !== b.combinedCost) return b.combinedCost - a.combinedCost;
+    // Prefer chord tone targets
+    if (ctx.chordTones && ctx.chordTones.length) {
+      const isCtA = ctx.chordTones.map(pcOf).includes(pcOf(a.m)) ? 0 : 1;
+      const isCtB = ctx.chordTones.map(pcOf).includes(pcOf(b.m)) ? 0 : 1;
+      if (isCtA !== isCtB) return isCtA - isCtB;
+    }
 
-    const da = Math.abs(a.m - prevP);
-    const db = Math.abs(b.m - prevP);
-    if (da !== db) return da - db;
+    // Combined Cost from Vector Field Energy (includes Anti-Oscillation & Path Guidance)
+    if (Math.abs(a.combinedCost - b.combinedCost) > 0.01) {
+      return mode === 'bold' ? (b.combinedCost - a.combinedCost) : (a.combinedCost - b.combinedCost);
+    }
 
-    if (a.combinedCost !== b.combinedCost) return a.combinedCost - b.combinedCost;
+    if (prevP != null) {
+      const da = Math.abs(a.m - prevP);
+      const db = Math.abs(b.m - prevP);
+      if (da !== db) return da - db;
+    }
+
     return a.m - b.m;
   });
 
@@ -2567,14 +2623,15 @@ function pickEnhancedBassNote(cands, ctx) {
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
   if(!cands || !cands.length) return { pitch: ctx.prevPitch || 36, cls: {kappa:1,mu:2,phi:4,sigma:0,gamma:1}, moveCls:{psi:2,mu_m:0,gamma_m:1,sigma_m:0,phi_m:2,mCell:0}, fellBack: true };
 
-  const prevP = ctx.prevPitch || 36;
+  const prevP = ctx.prevPitch;
   const vIdx = 2;
   const stepIdx = ctx.step || 0;
   const otherP = ctx.others || [60, 64, 36];
   const prev2P = ctx.prev2Pitch;
+  const prev3P = ctx.prev3Pitch;
   const { preferredPcs, approachPc, isEnclosure } = ctx;
 
-  const evaluated = cands.map(m => evalCandidateMove(prevP, m, vIdx, stepIdx, otherP, prev2P));
+  const evaluated = cands.map(m => evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P));
 
   let legal = evaluated.filter(e => e.isLegal);
   let fellBack = false;
@@ -2586,6 +2643,11 @@ function pickEnhancedBassNote(cands, ctx) {
   }
 
   legal.sort((a, b) => {
+    // 1. Anti-oscillation penalty check for bass (A -> B -> A)
+    const isOscA = (prev2P != null && a.m === prev2P && a.m !== prevP) ? 1 : 0;
+    const isOscB = (prev2P != null && b.m === prev2P && b.m !== prevP) ? 1 : 0;
+    if (isOscA !== isOscB) return isOscA - isOscB;
+
     if (preferredPcs && preferredPcs.length) {
       const rankA = preferredPcs.indexOf(pcOf(a.m));
       const rankB = preferredPcs.indexOf(pcOf(b.m));
@@ -2608,7 +2670,10 @@ function pickEnhancedBassNote(cands, ctx) {
       }
     }
 
-    if (a.combinedCost !== b.combinedCost) return a.combinedCost - b.combinedCost;
+    if (Math.abs(a.combinedCost - b.combinedCost) > 0.01) {
+      return a.combinedCost - b.combinedCost;
+    }
+
     return a.m - b.m;
   });
 
@@ -2650,8 +2715,8 @@ function runVoiceWalk(chords){
   const tM = moveTable();
   const total = STATE.onsets[0].length;
   const held=[null,null,null];
-  const prev2Pitch=[null,null,null], prevPhi=[null,null,null];
-  for(let v=0;v<3;v++) if(STATE.seed.voice[v]!=null) held[v]=STATE.seed.voice[v];
+  const prev2Pitch=[null,null,null], prev3Pitch=[null,null,null], prevPhi=[null,null,null];
+  for(let v=0;v<3;v++) held[v] = STATE.seed.voice[v] != null ? STATE.seed.voice[v] : null;
   let arpGen=null, arpSeg=-1, arpI=0;
   const res=[];
   for(let step=0; step<total; step++){
@@ -2678,7 +2743,10 @@ function runVoiceWalk(chords){
       fb[v]=r.fellBack;
       cells[v]=r.cls;
       moveCells[v]=r.moveCls;
-      prev2Pitch[v]=held[v];
+      if (held[v] !== r.pitch) {
+        prev3Pitch[v]=prev2Pitch[v];
+        prev2Pitch[v]=held[v];
+      }
       prevPhi[v]=r.cls.phi;
       held[v]=r.pitch;
     };
@@ -2716,7 +2784,7 @@ function runVoiceWalk(chords){
       const mMode2 = (STATE.motionConstraints && STATE.motionConstraints[2] && STATE.motionConstraints[2][step]) || 'auto';
       put(2, pickEnhancedBassNote(cands, {
         prevPitch: held[2],
-        prev2Pitch: prev2Pitch[2],
+        prev2Pitch: prev2Pitch[2], prev3Pitch: prev3Pitch[2],
         prevPhi: prevPhi[2],
         others: ear,
         chordTones: chord.tones,
@@ -2751,7 +2819,7 @@ function runVoiceWalk(chords){
         const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
         const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
         put(0, pickNote(cands, { v: 0,
-          prevPitch:held[0], prev2Pitch:prev2Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
+          prevPitch:held[0], prev2Pitch:prev2Pitch[0], prev3Pitch:prev3Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
           tblVoice:tV, tblMove:tM, supCtx, motionMode:mMode0, figMode:figMode0,
           structural:isMetricAccented0, step, totalSteps:total
         }));
@@ -2765,7 +2833,7 @@ function runVoiceWalk(chords){
       const mMode1 = (STATE.motionConstraints && STATE.motionConstraints[1] && STATE.motionConstraints[1][step]) || 'auto';
       const isMetricAccented1 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
       put(1, pickNote(cands, { v: 1,
-        prevPitch:held[1], prev2Pitch:prev2Pitch[1], prevPhi:prevPhi[1], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
+        prevPitch:held[1], prev2Pitch:prev2Pitch[1], prev3Pitch:prev3Pitch[1], prevPhi:prevPhi[1], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
         tblVoice:tV, tblMove:tM, supCtx, motionMode:mMode1,
         structural:isMetricAccented1, step, totalSteps:total
       }));
