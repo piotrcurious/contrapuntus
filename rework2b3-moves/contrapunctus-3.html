@@ -1321,6 +1321,7 @@ window.voiceTable = voiceTable;
 window.moveTable = moveTable;
 window.timeTable = timeTable;
 window.latticeSpec = latticeSpec;
+window.tIdx = tIdx;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
 // direction (a basis vector) that you can drag, and a cell sits at the sum of its coordinates'
@@ -1597,7 +1598,8 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
     if (ruleKey === 'cpt') {
       if (isTimeSpace) {
         // coords: [m_pos, m_sub, d_dur, s_sync]
-        pass = (coords[0] <= 1 && coords[3] === 0) || (i < baseCutoff);
+        // Allow downbeats (m_pos === 0), weak beats (m_pos === 1), normal duration (d_dur === 1)
+        pass = (coords[0] <= 1 && coords[2] >= 1) || (i < baseCutoff);
       } else if (isMoveSpace) {
         pass = (coords[4] >= 1) && (coords[1] !== 3 || i < baseCutoff);
       } else if (isVoiceSpace) {
@@ -1607,7 +1609,7 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
       }
     } else if (ruleKey === 'modal') {
       if (isTimeSpace) {
-        pass = (coords[0] >= 2 || coords[3] === 1) || (i < Math.round(baseCutoff * 1.25));
+        pass = (coords[0] >= 1 || coords[3] === 1) || (i < Math.round(baseCutoff * 1.25));
       } else if (isMoveSpace) {
         pass = (coords[4] >= 1 || coords[0] >= 1) && (coords[1] !== 3 || i < Math.round(baseCutoff * 1.2));
       } else if (isVoiceSpace) {
@@ -1617,7 +1619,7 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
       }
     } else if (ruleKey === 'saddle') {
       if (isTimeSpace) {
-        pass = (coords[2] === 2 && coords[3] === 1) || (i < Math.round(baseCutoff * 1.15));
+        pass = (coords[2] >= 1) || (i < Math.round(baseCutoff * 1.15));
       } else if (isMoveSpace) {
         pass = (coords[2] >= 1 && (coords[4] >= 1 || coords[1] === 4)) || (i < baseCutoff);
       } else if (isVoiceSpace) {
@@ -2579,8 +2581,9 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const tF = tIdx(m_pos, m_sub, d_dur, s_sync);
   const tTbl = timeTable();
 
-  // STRICT MOVEMENT & TEMPORAL RULE SPACE LEGAL CHECKS
-  const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1) && (tTbl.t[tF % tTbl.size] === 1);
+  // STRICT MOVEMENT RULE TABLE CHECK & TEMPORAL METRIC WEIGHTING
+  const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1);
+  const timePenalty = (tTbl.t[tF % tTbl.size] === 1) ? 0.0 : 0.5;
 
   // Map to Voice Class for backward compatibility
   const phi_v = phi_m === 2 ? 4 : (phi_m === 1 ? 2 : 0);
@@ -2588,7 +2591,7 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const moveCls = { psi, mu_m, gamma_m, sigma_m, phi_m, mCell: mF };
   const timeCls = { m_pos, m_sub, d_dur, s_sync, tCell: tF };
 
-  const totalCost = flowEval.cost * 3.0 + (mTbl.costs[mF % mTbl.size] || 0) * 0.1 + (tTbl.costs[tF % tTbl.size] || 0) * 0.05;
+  const totalCost = flowEval.cost * 3.0 + (mTbl.costs[mF % mTbl.size] || 0) * 0.1 + (tTbl.costs[tF % tTbl.size] || 0) * 0.05 + timePenalty;
 
   return {
     m: candPitch,
