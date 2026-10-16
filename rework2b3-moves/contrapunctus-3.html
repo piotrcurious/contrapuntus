@@ -1028,22 +1028,22 @@ function drawSupervisoryDashboard() {
   const chartW = w - padL - padR, chartH = h - padT - padB;
 
   // Draw background stage regions
-  const climaxX = padL + sup.climaxPos * chartW;
-  const expoX = padL + Math.max(0, sup.climaxPos - 0.25) * chartW;
-  const resX = padL + Math.min(1, sup.climaxPos + 0.15) * chartW;
+  const climaxPos = (typeof sup.climaxPos === 'number') ? sup.climaxPos : 0.70;
+  const climaxX = padL + climaxPos * chartW;
+  const expoX = padL + Math.max(0, climaxPos - 0.25) * chartW;
 
   // Stage shading
   ctx.fillStyle = dark ? 'rgba(70,130,180,0.12)' : 'rgba(70,130,180,0.08)'; // Exposition
   ctx.fillRect(padL, padT, expoX - padL, chartH);
 
   ctx.fillStyle = dark ? 'rgba(218,165,32,0.15)' : 'rgba(218,165,32,0.10)'; // Development
-  ctx.fillRect(expoX, padT, climaxX - 0.1 * chartW - expoX, chartH);
+  ctx.fillRect(expoX, padT, Math.max(0, climaxX - 0.1 * chartW - expoX), chartH);
 
   ctx.fillStyle = dark ? 'rgba(220,20,60,0.22)' : 'rgba(220,20,60,0.14)'; // Climax
   ctx.fillRect(climaxX - 0.1 * chartW, padT, 0.2 * chartW, chartH);
 
   ctx.fillStyle = dark ? 'rgba(46,139,87,0.15)' : 'rgba(46,139,87,0.10)'; // Resolution
-  ctx.fillRect(climaxX + 0.1 * chartW, padT, padL + chartW - (climaxX + 0.1 * chartW), chartH);
+  ctx.fillRect(climaxX + 0.1 * chartW, padT, Math.max(0, padL + chartW - (climaxX + 0.1 * chartW)), chartH);
 
   // Stage Labels
   ctx.font = '10px monospace';
@@ -1059,9 +1059,9 @@ function drawSupervisoryDashboard() {
   ctx.strokeStyle = dark ? '#e06c75' : '#d14';
   ctx.lineWidth = 2;
   for (let s = 0; s < totalSteps; s++) {
-    const x = padL + (s / (totalSteps - 1)) * chartW;
+    const x = padL + (s / Math.max(1, totalSteps - 1)) * chartW;
     const supCtx = evaluateSupervisorySpace(s, totalSteps);
-    const y = padT + (1 - supCtx.energy) * chartH;
+    const y = padT + (1 - (supCtx.energy || 0)) * chartH;
     if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.stroke();
@@ -1072,16 +1072,16 @@ function drawSupervisoryDashboard() {
   ctx.lineWidth = 1.5;
   ctx.setLineDash([3, 3]);
   for (let s = 0; s < totalSteps; s++) {
-    const x = padL + (s / (totalSteps - 1)) * chartW;
+    const x = padL + (s / Math.max(1, totalSteps - 1)) * chartW;
     const supCtx = evaluateSupervisorySpace(s, totalSteps);
-    const y = padT + (1 - supCtx.effLamM) * chartH;
+    const effLamM = (typeof supCtx.modLamM === 'number') ? supCtx.modLamM : (supCtx.effLamM || STATE.lamM || 0.5);
+    const y = padT + (1 - effLamM) * chartH;
     if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.stroke();
   ctx.setLineDash([]);
 
   // Draw Active Step Cursor
-  const c = STATE.composed;
   const activeStep = (typeof STATE.step === 'number' && STATE.step >= 0) ? STATE.step : (STATE.selectedSeg || 0);
   const curX = padL + (activeStep / Math.max(1, totalSteps - 1)) * chartW;
 
@@ -1093,20 +1093,28 @@ function drawSupervisoryDashboard() {
   ctx.stroke();
 
   // Active step info tag
-  const curSup = evaluateSupervisorySpace(activeStep, totalSteps);
   ctx.fillStyle = dark ? '#ffffff' : '#000000';
   ctx.textAlign = curX > padL + chartW * 0.7 ? 'right' : 'left';
   const tagX = curX > padL + chartW * 0.7 ? curX - 6 : curX + 6;
-  ctx.fillText('Step ' + activeStep + ' [' + curSup.phraseStage.toUpperCase() + '] Energy: ' + curSup.energy.toFixed(2) + ' λ_M: ' + curSup.effLamM.toFixed(2), tagX, padT + chartH / 2);
+  const curSup = evaluateSupervisorySpace(activeStep, totalSteps);
+  const stageStr = curSup.phraseStage ? curSup.phraseStage.toUpperCase() : 'EXPOSITION';
+  const energyVal = (typeof curSup.energy === 'number') ? curSup.energy : 0;
+  const lamMVal = (typeof curSup.modLamM === 'number') ? curSup.modLamM : (typeof curSup.effLamM === 'number' ? curSup.effLamM : 0.5);
+
+  ctx.fillText('Step ' + activeStep + ' [' + stageStr + '] Energy: ' + energyVal.toFixed(2) + ' λ_M: ' + lamMVal.toFixed(2), tagX, padT + chartH / 2);
 
   // Legend
+  const syntaxModeStr = sup.syntaxMode ? sup.syntaxMode.toUpperCase() : 'JAZZ';
+  const gtVal = (typeof sup.guideToneWeight === 'number') ? sup.guideToneWeight : 1.0;
+  const encVal = (typeof sup.enclosureWeight === 'number') ? sup.enclosureWeight : 0.8;
+
   ctx.textAlign = 'left';
   ctx.fillStyle = dark ? '#e06c75' : '#d14';
   ctx.fillText('― Macro Energy Arc', padL, h - 8);
   ctx.fillStyle = dark ? '#61afef' : '#1e88e5';
   ctx.fillText('--- Dynamic λ_M Modulation', padL + 140, h - 8);
   ctx.fillStyle = dark ? '#a0a0a0' : '#606060';
-  ctx.fillText('Mode: ' + sup.syntaxMode.toUpperCase() + ' | Guide: ' + sup.guideToneWeight.toFixed(1) + ' | Encl: ' + sup.enclosureWeight.toFixed(1), padL + 310, h - 8);
+  ctx.fillText('Mode: ' + syntaxModeStr + ' | Guide: ' + gtVal.toFixed(1) + ' | Encl: ' + encVal.toFixed(1), padL + 310, h - 8);
 }
 
 function evaluateSupervisorySpace(step, totalSteps) {
