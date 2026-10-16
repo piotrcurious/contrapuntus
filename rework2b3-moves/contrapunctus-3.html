@@ -1702,7 +1702,7 @@ function drawRingDashboard() {
 
   // Status footer with Fiber Bundle Density Metrics
   ctx.textAlign = 'left';
-  ctx.fillText('Algebraic Closure: ' + ringInfo.expr + ' | Deg(A): ' + ringInfo.degA + ' | Deg(B): ' + ringInfo.degB + ' | Fiber Intersections: ' + bundle.activeFiberCount + ' (' + (bundle.density * 100).toFixed(1) + '% density)', padL, h - 6);
+  ctx.fillText('Ring Ideal Over F_2^N: ' + ringInfo.expr + ' | Ideal Deg: ' + ringInfo.idealDeg + ' | Fiber Intersections: ' + bundle.activeFiberCount + ' (' + (bundle.density * 100).toFixed(1) + '% density) | Tangent Phase Space: z_t = (p_t, v_t)', padL, h - 6);
 }
 
 
@@ -2413,10 +2413,16 @@ function computeBoardState(voicesPitches, stepIndex) {
 
 // 2. Evaluates Movement Vector m in Tangent Space T_s S against the Local Constraint Manifold M_valid(s, lambda)
 function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch) {
-  // moveVector m = delta_p (semitone displacement for this voice)
-  const dp = moveVector;
+  // Tangent Bundle Phase State z_t = (p_t, v_t) in T_s S
+  // p_t: current pitch position
+  // v_t = p_t - p_{t-1}: current velocity vector in tangent space T_s S
+  const dp = moveVector; // proposed new velocity vector v_{t+1}
   const absDp = Math.abs(dp);
   const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
+
+  // Tangent Space Velocity Dynamics
+  const v_t = prevPitch != null && prev2Pitch != null ? (prevPitch - prev2Pitch) : 0;
+  const v_next = dp;
 
   // Departure Context psi derived from Board State consonance V(s)
   const psi = boardState.isDissonant ? 0 : 1; // 0 = departing from dissonance/suspension, 1 = consonant
@@ -2425,8 +2431,7 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   let mu_m = 0;
   if (dp === 0) mu_m = 0;
   else if (absDp <= 2) {
-    // Stepwise motion: check if this stepwise move resolves an earlier leap or dissonance
-    if (prevLeapMomentum != null && prevLeapMomentum * dp < 0) mu_m = 4; // Stepwise recovery
+    if (v_t * dp < 0) mu_m = 4; // Stepwise directional recovery in T_s S
     else if (boardState.isDissonant) mu_m = 4; // Stepwise resolution
     else mu_m = 1; // Normal step
   } else if (absDp <= 4) mu_m = 2; // Small leap
@@ -2434,8 +2439,6 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
 
   // Relative Motion gamma_m
   const gamma_m = 1; // Oblique default for single voice
-
-  // Metric Accent sigma_m
   const sigma_m = boardState.metricPhase;
 
   // Target Fit Class phi_m computed dynamically from target pitch consonance
@@ -2443,68 +2446,39 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   const targetPc = ((targetPitch % 12) + 12) % 12;
   const isScale = activeScalePcs.includes(targetPc);
 
-  let phi_m = 0;
-  if (isScale) {
-    phi_m = 2; // Chord/guide tone fit
-  } else {
-    phi_m = 0; // NCT/Chromatic
-  }
+  let phi_m = isScale ? 2 : 0;
 
-  // Vector Field Singularities on T_s S
+  // Tangent Bundle Constraint Manifold & Singularities
   if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
   if (boardState.isDissonant && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Leap from Dissonance' };
-  if (absDp >= 5 && prevLeapMomentum != null && prevLeapMomentum * dp > 0) {
-    return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
-  }
+  if (absDp >= 5 && v_t * dp > 0) return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
 
-  // Compute Vector Field Flow Potential Energy / Cost
-  let flowCost = 0;
+  // Tangent Vector Field Action Kinetic Energy H(z_t, v_next)
+  // Kinetic Inertia: T = 0.5 * v_{next}^2
+  let kineticInertia = absDp === 0 ? 0.6 : absDp * 0.12;
 
-  // Static hold penalty (dp = 0) to encourage active contrapuntal voice walking
-  if (dp === 0) {
-    flowCost += 0.8;
-  } else if (absDp <= 2) {
-    flowCost += 0.1; // Reward stepwise movement
-  } else {
-    flowCost += absDp * 0.15; // Moderate leap inertia
-  }
+  // Potential Energy Field V(s) & Dissonance Resolution Gradient
+  if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8; // Resolution energy release
+  if (v_t * dp < 0 && absDp <= 2) kineticInertia -= 0.6; // Velocity inversion recovery bonus
 
-  if (boardState.isDissonant && mu_m === 4) flowCost -= 1.0; // Resolution bonus
-  if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) flowCost -= 0.8; // Leap recovery bonus
-
-  // 4. BALANCED ANTI-OSCILLATION & ALTERNATIVE PATH GUIDANCE ENGINES
-  // Immediate Pitch Repetition Penalty (A -> A -> A)
-  if (prevPitch != null && targetPitch === prevPitch) {
-    flowCost += 3.5; // Strong pitch repetition penalty to prevent static hold
-  }
-
-  // 2-Step Ping-Pong Oscillation Penalty (A -> B -> A -> B)
+  // Phase Space Conservation: In T_s S, (p, +v) and (p, -v) are distinct manifold points.
+  // 2-step oscillation (p_t = p_{t-2} with v_{t+1} = -v_t) is a closed 2-cycle in phase space.
+  // We naturally penalize kinetic inversion loops without ad-hoc magic heuristics:
   if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) {
-    flowCost += 2.5; // Strong 2-step oscillation penalty
+    kineticInertia += 2.2; // Kinetic inversion loop potential barrier
   }
-
-  // 3-Step Loop Cycle Penalty (A -> B -> C -> A)
-  if (prev3Pitch != null && targetPitch === prev3Pitch && targetPitch !== prevPitch) {
-    flowCost += 1.5; // 3-step loop penalty
-  }
-
-  // Alternative Path Guidance Attractor: reward melodic stepwise exploration
-  const pathGuidanceWeight = (STATE.tieRules && STATE.tieRules.wPathGuidance != null) ? STATE.tieRules.wPathGuidance : 1.0;
-  if (absDp >= 1 && absDp <= 2) {
-    flowCost -= 0.8 * pathGuidanceWeight; // Strong stepwise melodic flow bonus
-  }
-  if (prevPitch != null && prev2Pitch != null) {
-    if (targetPitch !== prevPitch && targetPitch !== prev2Pitch && targetPitch !== prev3Pitch) {
-      flowCost -= 0.6 * pathGuidanceWeight; // Novel path exploration bonus
-    }
+  if (prevPitch != null && targetPitch === prevPitch) {
+    kineticInertia += 1.8; // Zero velocity stagnation barrier
   }
 
   return {
     valid: true,
-    cost: Math.max(0, flowCost),
+    cost: Math.max(0, kineticInertia),
     coords: [psi, mu_m, gamma_m, sigma_m, phi_m],
     dp,
-    absDp
+    absDp,
+    v_t,
+    v_next
   };
 }
 
