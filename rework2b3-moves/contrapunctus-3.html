@@ -478,6 +478,15 @@ details.fold[open] > summary::before{content:"\2013 ";}
     </section>
 
     <section class="group">
+      <h2>Temporal metric rule</h2>
+      <div class="row"><label for="sLamT">Legal fraction &lambda;</label>
+        <div class="slide"><input type="range" id="sLamT" min="0" max="100" value="50"><span class="num" id="nLamT">.50</span></div></div>
+      <div class="readout" id="statT"></div>
+      <div id="profT" style="margin-top:10px"></div>
+      <div class="btnrow"><button class="tiny" id="btnResetProfT">Reset temporal profiles</button></div>
+    </section>
+
+    <section class="group">
       <h2>Supervisory Governance <span class="note">macro arc & style</span></h2>
       <div class="row"><label for="selSyntaxMode">Style Paradigm</label>
         <select id="selSyntaxMode">
@@ -1578,6 +1587,7 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
   const isMoveSpace = (dims.length === 5 && axes.some(a => a.key === 'mu_m'));
   const isVoiceSpace = (dims.length === 5 && axes.some(a => a.key === 'kappa'));
   const isChordSpace = (dims.length === 4 && axes.some(a => a.key === 'd'));
+  const isTimeSpace  = (dims.length === 4 && axes.some(a => a.key === 'm_pos'));
 
   for (let i = 0; i < size; i++) {
     const f = order[i];
@@ -1585,10 +1595,10 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
     let pass = false;
 
     if (ruleKey === 'cpt') {
-      // Classical Counterpoint Generator R_cpt
-      if (isMoveSpace) {
-        // coords: [psi, mu_m, gamma_m, sigma_m, phi_m]
-        // Allow stepwise motion (mu_m = 1), resolution (mu_m = 4), small leap (mu_m = 2), hold (mu_m = 0) with phi_m >= 1
+      if (isTimeSpace) {
+        // coords: [m_pos, m_sub, d_dur, s_sync]
+        pass = (coords[0] <= 1 && coords[3] === 0) || (i < baseCutoff);
+      } else if (isMoveSpace) {
         pass = (coords[4] >= 1) && (coords[1] !== 3 || i < baseCutoff);
       } else if (isVoiceSpace) {
         pass = (coords[0] >= 1 && coords[1] !== 3 && coords[2] >= 2) || (i < baseCutoff);
@@ -1596,7 +1606,9 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
         pass = i < baseCutoff;
       }
     } else if (ruleKey === 'modal') {
-      if (isMoveSpace) {
+      if (isTimeSpace) {
+        pass = (coords[0] >= 2 || coords[3] === 1) || (i < Math.round(baseCutoff * 1.25));
+      } else if (isMoveSpace) {
         pass = (coords[4] >= 1 || coords[0] >= 1) && (coords[1] !== 3 || i < Math.round(baseCutoff * 1.2));
       } else if (isVoiceSpace) {
         pass = (coords[2] >= 2) && (i < Math.round(baseCutoff * 1.30));
@@ -1604,7 +1616,9 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
         pass = i < Math.round(baseCutoff * 1.20);
       }
     } else if (ruleKey === 'saddle') {
-      if (isMoveSpace) {
+      if (isTimeSpace) {
+        pass = (coords[2] === 2 && coords[3] === 1) || (i < Math.round(baseCutoff * 1.15));
+      } else if (isMoveSpace) {
         pass = (coords[2] >= 1 && (coords[4] >= 1 || coords[1] === 4)) || (i < baseCutoff);
       } else if (isVoiceSpace) {
         pass = (coords[4] >= 1 && coords[2] >= 1) || (i < Math.round(baseCutoff * 1.2));
@@ -1612,7 +1626,6 @@ function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
         pass = i < Math.round(baseCutoff * 1.15);
       }
     } else {
-      // Topology Sublevel Generator R_topo
       pass = i < baseCutoff;
     }
 
@@ -2855,7 +2868,7 @@ function runVoiceWalk(chords){
         const lo = beneath.length ? Math.max.apply(null, beneath)+1 : 0;
         const ear=hears(0);
         const prev0 = (held[0] != null) ? held[0] : 72;
-        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), Math.max(REGISTERS[0].lo, prev0 - 7), Math.min(REGISTERS[0].hi, prev0 + 7)), prev0, ear);
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), Math.max(lo, prev0 - 7), Math.min(REGISTERS[0].hi, prev0 + 7)), prev0, ear);
         const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
         const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
         const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
@@ -2871,7 +2884,7 @@ function runVoiceWalk(chords){
       const lo = cur(2)!=null ? cur(2)+1 : 0, hi = cur(0)!=null ? cur(0)-1 : 127;
       const ear=hears(1);
       const prev1 = (held[1] != null) ? held[1] : 60;
-        const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), Math.max(REGISTERS[1].lo, prev1 - 7), Math.min(REGISTERS[1].hi, prev1 + 7)), prev1, ear);
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), Math.max(lo, prev1 - 7), Math.min(hi, prev1 + 7)), prev1, ear);
       const mMode1 = (STATE.motionConstraints && STATE.motionConstraints[1] && STATE.motionConstraints[1][step]) || 'auto';
       const isMetricAccented1 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
       put(1, pickNote(cands, { v: 1,
@@ -5249,13 +5262,13 @@ function serializeState(opts){
   const o = {
     app:'contrapunctus', v:1,
     root:STATE.root, scale:STATE.scaleName, bars:STATE.bars, stepsPerBar:STATE.stepsPerBar, harmonic:STATE.harmonic,
-    tempo:STATE.tempo, tension:r4(STATE.tension), lamC:r4(STATE.lamC), lamV:r4(STATE.lamV), lamM:r4(STATE.lamM), take:STATE.take,
+    tempo:STATE.tempo, tension:r4(STATE.tension), lamC:r4(STATE.lamC), lamV:r4(STATE.lamV), lamM:r4(STATE.lamM), lamT:r4(STATE.lamT!=null?STATE.lamT:0.50), take:STATE.take,
     supervisor:STATE.supervisor ? Object.assign({}, STATE.supervisor) : undefined,
     extended:!!STATE.extended, walkingBass:!!STATE.walkingBass, arp:STATE.arp, tuning:STATE.tuning,
     tieRules:STATE.tieRules ? { mode:STATE.tieRules.mode, wMotion:r4(STATE.tieRules.wMotion), wVoice:r4(STATE.tieRules.wVoice), wCost:r4(STATE.tieRules.wCost), wFifths:r4(STATE.tieRules.wFifths), wGoal:r4(STATE.tieRules.wGoal) } : undefined,
     ruleRing:STATE.ruleRing ? { enabled:!!STATE.ruleRing.enabled, op:STATE.ruleRing.op, ruleA:STATE.ruleRing.ruleA, ruleB:STATE.ruleRing.ruleB } : undefined,
     profiles:prof,
-    cellFlips:{chord:sortedCopy(STATE.cellFlips.chord), voice:sortedCopy(STATE.cellFlips.voice), move:sortedCopy(STATE.cellFlips.move)},
+    cellFlips:{chord:sortedCopy(STATE.cellFlips.chord), voice:sortedCopy(STATE.cellFlips.voice), move:sortedCopy(STATE.cellFlips.move), time:sortedCopy(STATE.cellFlips.time||{})},
     seed:{chordIdx:STATE.seed.chordIdx, eta:STATE.seed.eta, prev2Idx:STATE.seed.prev2Idx, voice:STATE.seed.voice.slice()},
     anchors:Object.assign({},STATE.anchors), pins:Object.assign({},STATE.pins),
     barOverrides:canonOverrides(STATE.barOverrides),
@@ -5427,7 +5440,7 @@ function restoreState(o){
   }
   // all checks passed: apply in one go
   STATE.root=N.root; STATE.scaleName=N.scaleName; STATE.bars=N.bars; STATE.stepsPerBar=N.stepsPerBar; STATE.lastStepsPerBar=N.stepsPerBar;
-  STATE.harmonic=N.harmonic; STATE.tempo=N.tempo; STATE.tension=N.tension; STATE.lamC=N.lamC; STATE.lamV=N.lamV; STATE.lamM=N.lamM; STATE.take=N.take;
+  STATE.harmonic=N.harmonic; STATE.tempo=N.tempo; STATE.tension=N.tension; STATE.lamC=N.lamC; STATE.lamV=N.lamV; STATE.lamM=N.lamM; STATE.lamT=N.lamT!=null?N.lamT:0.50; STATE.take=N.take;
   if(N.supervisor) STATE.supervisor = N.supervisor;
   STATE.extended=N.extended; STATE.walkingBass=N.walkingBass; STATE.arp=N.arp; STATE.tuning=N.tuning;
   STATE.profiles=N.profiles; STATE.cellFlips=N.cellFlips; STATE.seed=N.seed; STATE.anchors=N.anchors; STATE.pins=N.pins;
@@ -5787,6 +5800,7 @@ function syncControls(){
   set('sLamC',Math.round(STATE.lamC*100)); $('nLamC').textContent=fmt2(STATE.lamC);
   set('sLamV',Math.round(STATE.lamV*100)); $('nLamV').textContent=fmt2(STATE.lamV);
   set('sLamM',Math.round(STATE.lamM*100)); if($('nLamM')) $('nLamM').textContent=fmt2(STATE.lamM);
+  set('sLamT',Math.round((STATE.lamT!=null?STATE.lamT:0.50)*100)); if($('nLamT')) $('nLamT').textContent=fmt2(STATE.lamT!=null?STATE.lamT:0.50);
   if(STATE.supervisor){
     set('selSyntaxMode', STATE.supervisor.syntaxMode);
     set('sClimaxPos', Math.round(STATE.supervisor.climaxPos*100)); if($('nClimaxPos')) $('nClimaxPos').textContent=fmt2(STATE.supervisor.climaxPos);
@@ -5836,7 +5850,7 @@ function setLambdaC(lam){
 /* ---- the cost-surface editors ----------------------------------------------------------- */
 const DEFAULTS=defaultProfiles();
 function buildProfiles(){
-  for(const [host,axes,set] of [[$('profC'),CHORD_AXES,'chord'],[$('profV'),VOICE_AXES,'voice'],[$('profM'),MOVE_AXES,'move']]){
+  for(const [host,axes,set] of [[$('profC'),CHORD_AXES,'chord'],[$('profV'),VOICE_AXES,'voice'],[$('profM'),MOVE_AXES,'move'],[$('profT'),TIME_AXES,'time']]){
     if(!host) continue;
     host.textContent='';
     for(const ax of axes){
@@ -5979,6 +5993,7 @@ function bindControls(){
   slider('sLamC','nLamC', v=>{ STATE.lamC=v; });
   slider('sLamV','nLamV', v=>{ STATE.lamV=v; });
   slider('sLamM','nLamM', v=>{ STATE.lamM=v; });
+  if($('sLamT')) slider('sLamT','nLamT', v=>{ STATE.lamT=v; });
 
   if($('selSyntaxMode')) on('selSyntaxMode','change', act(e=>{ STATE.supervisor.syntaxMode=e.target.value; }));
   slider('sClimaxPos','nClimaxPos', v=>{ STATE.supervisor.climaxPos=v; });
@@ -6003,6 +6018,7 @@ function bindControls(){
   on('btnResetProfC','click', act(()=>{ STATE.profiles.chord=defaultProfiles().chord; paintProfiles(); }));
   on('btnResetProfV','click', act(()=>{ STATE.profiles.voice=defaultProfiles().voice; paintProfiles(); }));
   if($('btnResetProfM')) on('btnResetProfM','click', act(()=>{ STATE.profiles.move=defaultProfiles().move; paintProfiles(); }));
+  if($('btnResetProfT')) on('btnResetProfT','click', act(()=>{ STATE.profiles.time=defaultProfiles().time; paintProfiles(); }));
   on('btnClearCells','click', act(()=>{ STATE.cellFlips={chord:{},voice:{},move:{}}; }));
   on('btnClearPins','click', act(()=>{ STATE.pins={}; }));
   on('btnClearAnch','click', act(()=>{ STATE.anchors={}; }));
