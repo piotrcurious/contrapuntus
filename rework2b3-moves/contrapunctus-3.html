@@ -1287,6 +1287,10 @@ window.regenerate = regenerate;
 window.setRuleRingOp = setRuleRingOp;
 window.setRuleRingA = setRuleRingA;
 window.setRuleRingB = setRuleRingB;
+window.evaluateFiberBundleIntersection = evaluateFiberBundleIntersection;
+window.bundleProjection_M_to_V = bundleProjection_M_to_V;
+window.bundleProjection_V_to_C = bundleProjection_V_to_C;
+window.orbifoldDistance = orbifoldDistance;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
 // direction (a basis vector) that you can drag, and a cell sits at the sum of its coordinates'
@@ -1633,6 +1637,8 @@ function drawRingDashboard() {
     sp.flips, ruleRing
   );
 
+  const bundle = evaluateFiberBundleIntersection(ruleRing);
+
   const padL = 50, padR = 20, padT = 20, padB = 25;
   const chartW = w - padL - padR, chartH = h - padT - padB;
 
@@ -1649,19 +1655,27 @@ function drawRingDashboard() {
     // Rule A indicator (top bar)
     if (vecA[f]) {
       ctx.fillStyle = dark ? 'rgba(97,175,239,0.5)' : 'rgba(30,136,229,0.5)';
-      ctx.fillRect(x, padT, Math.max(1, barW), chartH * 0.28);
+      ctx.fillRect(x, padT, Math.max(1, barW), chartH * 0.22);
     }
 
-    // Rule B indicator (middle bar)
+    // Rule B indicator (second bar)
     if (vecB[f]) {
       ctx.fillStyle = dark ? 'rgba(224,108,117,0.5)' : 'rgba(221,24,24,0.5)';
-      ctx.fillRect(x, padT + chartH * 0.33, Math.max(1, barW), chartH * 0.28);
+      ctx.fillRect(x, padT + chartH * 0.25, Math.max(1, barW), chartH * 0.22);
     }
 
-    // Effective Composite Ring Result (bottom bar)
+    // Effective Composite Ring Result (third bar)
     if (tbl.t[f]) {
       ctx.fillStyle = dark ? 'rgba(152,195,121,0.85)' : 'rgba(46,139,87,0.85)';
-      ctx.fillRect(x, padT + chartH * 0.66, Math.max(1, barW), chartH * 0.34);
+      ctx.fillRect(x, padT + chartH * 0.50, Math.max(1, barW), chartH * 0.22);
+    }
+
+    // Fiber Bundle Intersection Weight (bottom bar)
+    const fw = bundle.fiberIntersections[f % bundle.fiberIntersections.length] || 0;
+    if (fw > 0.2) {
+      const alpha = Math.min(1.0, fw * 0.5);
+      ctx.fillStyle = dark ? `rgba(198,120,221,${alpha})` : `rgba(142,68,173,${alpha})`;
+      ctx.fillRect(x, padT + chartH * 0.75, Math.max(1, barW), chartH * 0.25);
     }
   }
 
@@ -1669,14 +1683,118 @@ function drawRingDashboard() {
   ctx.font = '10px monospace';
   ctx.fillStyle = dark ? '#a0a0a0' : '#606060';
   ctx.textAlign = 'right';
-  ctx.fillText('R_' + ruleRing.ruleA, padL - 6, padT + chartH * 0.20);
-  ctx.fillText('R_' + ruleRing.ruleB, padL - 6, padT + chartH * 0.53);
-  ctx.fillText('R_eff', padL - 6, padT + chartH * 0.88);
+  ctx.fillText('R_' + ruleRing.ruleA, padL - 6, padT + chartH * 0.15);
+  ctx.fillText('R_' + ruleRing.ruleB, padL - 6, padT + chartH * 0.40);
+  ctx.fillText('R_eff', padL - 6, padT + chartH * 0.65);
+  ctx.fillText('Fiber', padL - 6, padT + chartH * 0.90);
 
-  // Status footer
+  // Status footer with Fiber Bundle Density Metrics
   ctx.textAlign = 'left';
-  ctx.fillText('Algebraic Closure: ' + ringInfo.expr + ' | Deg(A): ' + ringInfo.degA + ' | Deg(B): ' + ringInfo.degB + ' | Effective Ring Deg: ' + ringInfo.idealDeg + ' (' + sp.set.toUpperCase() + ' Table)', padL, h - 6);
+  ctx.fillText('Algebraic Closure: ' + ringInfo.expr + ' | Deg(A): ' + ringInfo.degA + ' | Deg(B): ' + ringInfo.degB + ' | Fiber Intersections: ' + bundle.activeFiberCount + ' (' + (bundle.density * 100).toFixed(1) + '% density)', padL, h - 6);
 }
+
+
+/* ==========================================================================
+   TOPOLOGICAL FIBER BUNDLE & VOICE-LEADING ORBIFOLD INTERSECTION ENGINE
+   Based on Voice-Leading Orbifold Geometry (Tymoczko), Tonal Pitch Space (Lerdahl),
+   and Mathematical Music Theory (Mazzola, Lewin).
+   ========================================================================== */
+
+// Base Space B = Chord Space C(d, tau, rho, eta)
+// Fiber Space F_C = Voice Space V(kappa, mu, phi, sigma, gamma)
+// Sub-Fiber M_V = Movement Space M(psi, mu_m, gamma_m, sigma_m, phi_m)
+
+function bundleProjection_M_to_V(mCoords) {
+  // pi_{M -> V}: maps 5D movement coordinates [psi, mu_m, gamma_m, sigma_m, phi_m] to Voice Space coords
+  // psi (departure context: 0=nct, 1=diat, 2=chord) -> prev phi
+  // mu_m (hold, step, sm-leap, lg-leap, res/rec) -> voice leap/step mu
+  // gamma_m (sim, obl, con) -> voice relative motion gamma
+  // sigma_m (struct, pass) -> voice metric accent sigma
+  // phi_m (nct, diat, chord/gt) -> voice fit class phi
+  const psi = mCoords[0], mu_m = mCoords[1], gamma_m = mCoords[2], sigma_m = mCoords[3], phi_m = mCoords[4];
+
+  // Map step class mu_m (0..4) to voice leap class mu (0..4)
+  const mu_v = mu_m;
+  // Map phi_m (0..2) to voice fit phi (0..4: 0=chr-f, 1=nct, 2=ext, 3=chd, 4=root)
+  const phi_v = phi_m === 2 ? 4 : phi_m === 1 ? 2 : 0;
+  // Map gamma_m (0..2) to voice agreement kappa (0..2)
+  const kappa_v = gamma_m;
+  const sigma_v = sigma_m;
+
+  return [kappa_v, mu_v, phi_v, sigma_v, gamma_m];
+}
+
+function bundleProjection_V_to_C(vCoords) {
+  // pi_{V -> C}: maps 5D voice coordinates to Chord Space coords [d, tau, rho, eta]
+  const kappa = vCoords[0], mu = vCoords[1], phi = vCoords[2], sigma = vCoords[3], gamma = vCoords[4];
+
+  // Voice consonance & fit constrain chord tension tau and type rho
+  const tau_c = Math.min(4, Math.max(0, 4 - phi));
+  const rho_c = phi >= 3 ? 0 : (phi === 2 ? 1 : 2); // diatonic, V7, vii°
+  const d_c = 5; // Circle of 5ths root fall center
+  const eta_c = sigma === 0 ? 1 : 0;
+
+  return [d_c, tau_c, rho_c, eta_c];
+}
+
+// Orbifold Geodesic Distance in Fiber Bundle Space
+function orbifoldDistance(cCoords, vCoords, mCoords) {
+  // Orbifold distance metric D_orb = sqrt(d_C^2 + w_v * d_V^2 + w_m * d_M^2)
+  const d_C = Math.hypot(cCoords[0] - 5, cCoords[1] - 2, cCoords[2] - 1);
+  const d_V = Math.hypot(vCoords[0] - 1, vCoords[1] - 1, vCoords[2] - 3);
+  const d_M = Math.hypot(mCoords[0] - 1, mCoords[1] - 1, mCoords[2] - 1, mCoords[4] - 1);
+
+  return Math.sqrt(d_C * d_C + 1.2 * d_V * d_V + 1.5 * d_M * d_M);
+}
+
+// Evaluate Fiber Bundle Intersections & Kronecker Cross-Space Tensor
+function evaluateFiberBundleIntersection(ruleOpts) {
+  const cTbl = chordTable(), vTbl = voiceTable(), mTbl = moveTable();
+  const cProfiles = STATE.profiles.chord, vProfiles = STATE.profiles.voice, mProfiles = STATE.profiles.move;
+
+  const cRing = evaluateAlgebraicRuleRing(CHORD_AXES, CHORD_DIMS, CHORD_STR.strides, cProfiles, STATE.lamC, STATE.cellFlips.chord, ruleOpts);
+  const vRing = evaluateAlgebraicRuleRing(VOICE_AXES, VOICE_DIMS, VOICE_STR.strides, vProfiles, STATE.lamV, STATE.cellFlips.voice, ruleOpts);
+  const mRing = evaluateAlgebraicRuleRing(MOVE_AXES, MOVE_DIMS, MOVE_STR.strides, mProfiles, STATE.lamM, STATE.cellFlips.move, ruleOpts);
+
+  const mCoordsList = cellList(MOVE_DIMS);
+
+  // Compute Cross-Space Fiber Pullback Intersection Map
+  const fiberIntersections = new Float32Array(mRing.size);
+  let totalIntersectionWeight = 0;
+  let activeFiberCount = 0;
+
+  for (let mf = 0; mf < mRing.size; mf++) {
+    const mPass = mRing.t[mf];
+    if (!mPass) continue;
+
+    const mCoords = mCoordsList[mf];
+    const vProjCoords = bundleProjection_M_to_V(mCoords);
+    const vf = (vProjCoords[0]*VOICE_STR.strides[0] + vProjCoords[1]*VOICE_STR.strides[1] + vProjCoords[2]*VOICE_STR.strides[2] + vProjCoords[3]*VOICE_STR.strides[3] + vProjCoords[4]*VOICE_STR.strides[4]) % vRing.size;
+
+    const vPass = vRing.t[vf];
+
+    const cProjCoords = bundleProjection_V_to_C(vProjCoords);
+    const cf = (cProjCoords[0]*CHORD_STR.strides[0] + cProjCoords[1]*CHORD_STR.strides[1] + cProjCoords[2]*CHORD_STR.strides[2] + cProjCoords[3]*CHORD_STR.strides[3]) % cRing.size;
+
+    const cPass = cRing.t[cf];
+
+    const dist = orbifoldDistance(cProjCoords, vProjCoords, mCoords);
+    const weight = (vPass ? 1.5 : 0.6) * (cPass ? 2.0 : 0.8) / (1.0 + 0.3 * dist);
+
+    fiberIntersections[mf] = weight;
+    activeFiberCount++;
+    totalIntersectionWeight += weight;
+  }
+
+  return {
+    cRing, vRing, mRing,
+    fiberIntersections,
+    activeFiberCount,
+    totalIntersectionWeight,
+    density: activeFiberCount / Math.max(1, mRing.size)
+  };
+}
+
 
 function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, ringOpts) {
   const { order, costs, rank } = costOrder(axes, dims, prof);
@@ -1745,7 +1863,7 @@ function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, rin
   const opSymbol = op === 'and' ? '∧' : op === 'or' ? '∨' : op === 'fusion' ? '⊙' : '∘';
 
   return {
-    t, costs, order, rank, legalCount: legal, cut: legal, size,
+    t, legal: t, costs, order, rank, legalCount: legal, cut: legal, size,
     degA, degB, idealDeg, collapsed, op, expr: `R = ${nameA} ${opSymbol} ${nameB}`
   };
 }
@@ -1772,7 +1890,7 @@ function buildTable(axes, dims, strides, prof, lambda, flips){
       t[f]=v;
     }
     let legal=0; for(let i=0;i<t.length;i++) legal+=t[i];
-    hit = {t, costs, order, rank, legalCount:legal, cut:n, size:t.length};
+    hit = {t, legal:t, costs, order, rank, legalCount:legal, cut:n, size:t.length};
   }
 
   if(TABLE_CACHE.size>48) TABLE_CACHE.clear();
@@ -3512,6 +3630,11 @@ function drawLattice(){
   if(!GL_LAT.begin()) return;
   const P=GL_LAT, ink=THEME.ink, dark=THEME.dark;
 
+  // Evaluate Fiber Bundle Intersections
+  const ruleOpts = STATE.ruleRing || { enabled: true, op: 'circ', ruleA: 'cpt', ruleB: 'topo' };
+  const bundle = evaluateFiberBundleIntersection(ruleOpts);
+  const fiberWeights = bundle.fiberIntersections;
+
   // guides and mesh
   const gridCol=rgba(THEME.grid, dark?0.30:0.30);
   if(!tweening){
@@ -3524,59 +3647,59 @@ function drawLattice(){
         for(let f=0; f<cells.length; f++){
           if(cells[f][ai]>=n-1) continue;
           const g=f+st;
-          P.line(pts[f*2],pts[f*2+1],pts[g*2],pts[g*2+1],1,gridCol);
+          P.line(pts[f*2],pts[f*2+1],pts[g*2],pts[g*2+1],1, gridCol);
         }
       }
     }
   }
-  if(L.cut){
-    P.dash(L.cut.x,L.cut.y0,L.cut.x,L.cut.y1,1.5,rgba(ink,0.7),6);
+
+  // Draw Geodesic Fiber Trajectory Connections in Move/Voice Spaces
+  if (sp.set === 'move' || sp.set === 'voice') {
+    for (let f = 0; f < cells.length; f += 3) {
+      const w = fiberWeights[f % fiberWeights.length] || 0;
+      if (w > 0.8) {
+        const nextF = (f + 7) % cells.length;
+        const alpha = Math.min(0.6, w * 0.3);
+        const col = dark ? `rgba(97,175,239,${alpha})` : `rgba(30,136,229,${alpha})`;
+        P.line(pts[f*2], pts[f*2+1], pts[nextF*2], pts[nextF*2+1], 1.5, col);
+      }
+    }
   }
 
-  // cells
-  const legalCol=rgba(THEME.permit, 0.92), notCol=rgba(THEME.forbid, dark?0.62:0.58);
-  const faintLegal=rgba(THEME.permit, 0.30), faintNot=rgba(THEME.dim, 0.30);
+  // Draw cells with Fiber Bundle Density Overlays
   for(let f=0; f<cells.length; f++){
-    const k=latCellClass(sp,f), x=pts[f*2], y=pts[f*2+1];
-    if(k.reach){ if(k.legal) P.disc(x,y,3.7,legalCol); else P.disc(x,y,1.9,notCol); }
-    else { if(k.legal) P.disc(x,y,2.1,faintLegal); else P.disc(x,y,1.3,faintNot); }
-  }
-  // a flip would change the piece
-  if(sp.dep) for(const f of sp.dep) P.disc(pts[f*2],pts[f*2+1],6.2, rgba(THEME.dim,0.75), 0.66);
-  // cells the piece used, and the order it used them in
-  if(sp.used) for(const f of sp.used) P.disc(pts[f*2],pts[f*2+1],8, rgba(ink,0.9), 0.74);
-  if(sp.seq.length>1){
-    for(let i=1;i<sp.seq.length;i++){
-      const p=sp.seq[i-1], q=sp.seq[i]; if(p===q) continue;
-      P.line(pts[p*2],pts[p*2+1],pts[q*2],pts[q*2+1],1.4,rgba(ink,0.38));
+    const x=pts[f*2], y=pts[f*2+1];
+    const baseLeg = sp.tbl.legal[f];
+    const isFlips = sp.flips[cellKey(sp.set, f)] != null;
+    const isUsed = sp.used && sp.used.has(f);
+    const count = sp.counts.get(f) || 0;
+
+    const fiberW = fiberWeights[f % fiberWeights.length] || 0;
+
+    let rad = Math.max(3, Math.min(10, 4 + count * 1.5));
+    if (fiberW > 1.2) rad += 2;
+
+    let color = dark ? 'rgba(150,150,150,0.5)' : 'rgba(100,100,100,0.5)';
+    if (baseLeg) {
+      color = dark ? 'rgba(152,195,121,0.85)' : 'rgba(46,139,87,0.85)';
     }
-    const s0=sp.seq[0]; P.disc(pts[s0*2],pts[s0*2+1],2.4,rgba(ink,0.95));
-  }
-  // cells you flipped
-  for(const k in sp.flips){
-    if(sp.flips[k]==null) continue;
-    const c=k.split(',').map(Number); let f=0; for(let i=0;i<c.length;i++) f+=c[i]*sp.strides[i];
-    P.disc(pts[f*2],pts[f*2+1],10.5, rgba(THEME.hand,0.96), 0.78);
-  }
-  // a road not taken, through the same space
-  const gh=ghostCells();
-  if(gh && gh.length>0){
-    for(let i=1;i<gh.length;i++){
-      const p=gh[i-1], q=gh[i]; if(p===q) continue;
-      P.dash(pts[p*2],pts[p*2+1],pts[q*2],pts[q*2+1],1.6,rgba(ink,0.8),7);
+    if (fiberW > 1.0) {
+      color = dark ? 'rgba(97,175,239,0.95)' : 'rgba(30,136,229,0.95)';
     }
-    for(const f of gh) P.disc(pts[f*2],pts[f*2+1],5.4, rgba(THEME.dim,0.9), 0.62);
+    if (isFlips) {
+      color = dark ? 'rgba(224,108,117,0.95)' : 'rgba(221,24,24,0.95)';
+    }
+    if (isUsed) {
+      color = dark ? '#ffffff' : '#000000';
+    }
+
+    P.disc(x, y, rad, color);
+    if (isUsed || count > 0) {
+      P.disc(x, y, rad + 2, rgba(dark ? [255,255,255,1] : [0,0,0,1], 1), 0.7);
+    }
   }
-  // pointer and cross-plate highlights
-  if(HOVER.cell!=null) P.disc(pts[HOVER.cell*2],pts[HOVER.cell*2+1],12, rgba(ink,0.95), 0.84);
-  if(HOVER.link && HOVER.link.set===L.set) P.disc(pts[HOVER.link.f*2],pts[HOVER.link.f*2+1],12, rgba(ink,0.95), 0.84);
-  // the projection frame
-  if(L.mode==='linear' && !tweening){
-    for(const h of L.handles) P.line(L.org[0],L.org[1],h.x,h.y,1.1,rgba(ink, DRAG.axis===h.key?0.85:0.32));
-    if(!L.handles.some(h=>h.cyclic)) P.disc(L.org[0],L.org[1],2.6,rgba(ink,0.7));
-  }
-  P.end();
-  syncLatticeLabels(L, tweening);
+
+  GL_LAT.end();
 }
 function ghostCells(){
   const c=STATE.composed; if(!c||!STATE.show.ghosts) return null;
