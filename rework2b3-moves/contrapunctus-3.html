@@ -1229,18 +1229,18 @@ function defaultProfiles(){
       eta:  {w:0.25, aff:[0.5,1,0.5]},
     },
     voice:{
-      kappa:{w:0.45, aff:[0,0.5,1]},
-      mu:   {w:0.45, aff:[0.10, 0.75, 0.90, 0.75, 0.10]},
-      phi:  {w:1.00, aff:[0.0, 0.30, 0.70, 0.90, 1.0]},
-      sigma:{w:0.20, aff:[1,0.55]},
-      gamma:{w:0.30, aff:[0,0.5,1]},
+      kappa:{w:0.80, aff:[0.10, 0.70, 1.00]},
+      mu:   {w:0.85, aff:[0.10, 0.85, 0.95, 0.85, 0.10]},
+      phi:  {w:1.00, aff:[0.05, 0.35, 0.75, 0.95, 1.00]},
+      sigma:{w:0.50, aff:[1.00, 0.60]},
+      gamma:{w:0.85, aff:[0.20, 0.70, 1.00]},
     },
     move:{
-      psi:    {w:0.85, aff:[0.30, 0.70, 1.00]},
-      mu_m:   {w:1.00, aff:[0.40, 1.00, 0.50, 0.20, 0.98]},
-      gamma_m:{w:0.80, aff:[0.15, 0.75, 1.00]},
-      sigma_m:{w:0.50, aff:[1.00, 0.55]},
-      phi_m:  {w:1.00, aff:[0.15, 0.70, 1.00]},
+      psi:    {w:0.90, aff:[0.20, 0.75, 1.00]},
+      mu_m:   {w:1.00, aff:[0.35, 1.00, 0.55, 0.15, 0.98]},
+      gamma_m:{w:0.90, aff:[0.20, 0.75, 1.00]},
+      sigma_m:{w:0.60, aff:[1.00, 0.60]},
+      phi_m:  {w:1.00, aff:[0.10, 0.75, 1.00]},
     },
     time:{
       m_pos:  {w:0.90, aff:[1.00, 0.70, 0.40, 0.80]},
@@ -1381,12 +1381,54 @@ function cellList(dims){
 cellList.cache = {};
 
 function cellCost(coords, axes, prof){
-  let s=0;
-  for(let i=0;i<axes.length;i++){
-    const p = prof[axes[i].key];
-    s += p.w * (1 - p.aff[coords[i]]);
+  const pVal = 3.0;
+  let sumP = 0;
+
+  for(let i=0; i<axes.length; i++){
+    const key = axes[i].key;
+    const p = prof[key] || { w:1.0, aff:[0.5] };
+    const w = p.w != null ? p.w : 1.0;
+    const aff = (p.aff && p.aff[coords[i]] != null) ? p.aff[coords[i]] : 0.5;
+    const diff = w * (1.0 - aff);
+    sumP += Math.pow(diff, pVal);
   }
-  return s;
+
+  let baseCost = Math.pow(sumP, 1.0 / pVal);
+  let interactionPenalty = 0;
+
+  const isMoveSpace  = axes.some(a => a.key === 'mu_m');
+  const isVoiceSpace = axes.some(a => a.key === 'kappa');
+  const isChordSpace = axes.some(a => a.key === 'd');
+
+  if (isMoveSpace) {
+    // coords: [psi, mu_m, gamma_m, sigma_m, phi_m]
+    const psi = coords[0], mu_m = coords[1], gamma_m = coords[2], sigma_m = coords[3], phi_m = coords[4];
+    // 1. Leap from Non-Chord Tone (psi=0 & mu_m >= 2)
+    if (psi === 0 && mu_m >= 2) interactionPenalty += 1.8;
+    // 2. Structural Beat Non-Chord Tone (sigma_m=0 & phi_m=0)
+    if (sigma_m === 0 && phi_m === 0) interactionPenalty += 1.5;
+    // 3. Similar Motion Large Leap (gamma_m=0 & mu_m >= 3)
+    if (gamma_m === 0 && mu_m >= 3) interactionPenalty += 1.0;
+    // 4. Synergistic Bonus for Stepwise Resolution to Guide/Chord Tone on Structural Beat
+    if (sigma_m === 0 && phi_m === 2 && (mu_m === 1 || mu_m === 4)) interactionPenalty -= 0.5;
+  } else if (isVoiceSpace) {
+    // coords: [kappa, mu, phi, sigma, gamma]
+    const kappa = coords[0], mu = coords[1], phi = coords[2], sigma = coords[3], gamma = coords[4];
+    // 1. Structural Beat Non-Chord Tone (sigma=0 & phi <= 1)
+    if (sigma === 0 && phi <= 1) interactionPenalty += 1.5;
+    // 2. Large Leap into Dissonance/NCT ( (mu==0 || mu==4) & phi <= 1 )
+    if ((mu === 0 || mu === 4) && phi <= 1) interactionPenalty += 1.6;
+    // 3. Similar Motion with Dissonance (gamma=0 & kappa=0)
+    if (gamma === 0 && kappa === 0) interactionPenalty += 1.2;
+    // 4. Synergistic Bonus for Contrary Motion Chord Tone
+    if (gamma === 2 && phi >= 3) interactionPenalty -= 0.4;
+  } else if (isChordSpace) {
+    // coords: [d, tau, rho, eta]
+    const tau = coords[1], eta = coords[3];
+    if (tau >= 3 && eta === 0) interactionPenalty += 0.8;
+  }
+
+  return Math.max(0, baseCost + interactionPenalty);
 }
 function profileSig(axes, prof){
   let s='';
@@ -2638,7 +2680,11 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const timeCls = { m_pos, m_sub, d_dur, s_sync, tCell: tF };
 
   // Unified Geometric Tensor Cost Surface: C_eff = C_flow + C_M + C_T + C_V
-  const totalCost = flowEval.cost * 2.0 + (mTbl.costs[mF % mTbl.size] || 0) * 0.1 + (tTbl.costs[tF % tTbl.size] || 0) * 0.05 + (vTbl.costs[vF % vTbl.size] || 0) * 0.05;
+  const mCost = (mTbl.costs[mF % mTbl.size] || 0);
+  const tCost = (tTbl.costs[tF % tTbl.size] || 0);
+  const vCost = (vTbl.costs[vF % vTbl.size] || 0);
+
+  const totalCost = flowEval.cost * 1.0 + mCost * 1.0 + vCost * 0.8 + tCost * 0.4;
 
   return {
     m: candPitch,
