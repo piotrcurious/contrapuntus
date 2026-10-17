@@ -2474,7 +2474,7 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   const absDp = Math.abs(dp);
   const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
 
-  // 1. Departure Context psi (0: NCT/chromatic, 1: Diatonic extension, 2: Essential chord/guide tone)
+  // 1. Departure Context psi
   const prevPc = prevPitch != null ? ((prevPitch % 12) + 12) % 12 : null;
   let psi = 1;
   if (boardState.isDissonant) {
@@ -2493,7 +2493,7 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   } else if (absDp <= 4) mu_m = 2; // Small leap
   else mu_m = 3; // Large leap
 
-  // 3. Relative Voice Motion gamma_m (0: similar/parallel, 1: oblique, 2: contrary)
+  // 3. Relative Voice Motion gamma_m
   let gamma_m = 1;
   if (otherPitches && otherPitches.length) {
     const otherMove = (otherPitches[0] && typeof otherPitches[0].pitch === 'number' && typeof otherPitches[0].prevPitch === 'number') ? (otherPitches[0].pitch - otherPitches[0].prevPitch) : 0;
@@ -2503,10 +2503,10 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
     }
   }
 
-  // 4. Metric Accent sigma_m (0: structural beat, 1: passing beat)
+  // 4. Metric Accent sigma_m
   const sigma_m = boardState.metricPhase;
 
-  // 5. Target Fit Class phi_m (0: NCT/chromatic, 1: Diatonic extension, 2: Essential chord/guide tone)
+  // 5. Target Fit Class phi_m
   const activeScalePcs = (typeof scalePCsNow === 'function') ? scalePCsNow() : [0,2,4,5,7,9,11];
   const targetPc = ((targetPitch % 12) + 12) % 12;
   const isScale = activeScalePcs.includes(targetPc);
@@ -2518,31 +2518,54 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   else if (isScale) phi_m = 1;
   else phi_m = 0;
 
-  // SPECIES COUNTERPOINT VECTOR FIELD SINGULARITIES (Hard Constraints)
+  // STRICT SPECIES COUNTERPOINT & FUSION DISSONANCE HARD CONSTRAINTS
+  // Constraint A: Prohibit entering leaps into non-chord tones
   if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
+
+  // Constraint B: Prohibit leaping from active dissonances V(s) > 0 (Dissonance Resolution Gradient)
   if (boardState.isDissonant && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Leap from Dissonance' };
+
+  // Constraint C: Prohibit unrecovered large leaps (absDp >= 5)
   if (absDp >= 5 && prevLeapMomentum != null && prevLeapMomentum * dp > 0) {
     return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
+  }
+
+  // Constraint D: Prohibit ungrounded minor 2nd / minor 9th (1 semitone above bass) on structural beats in Fusion/Jazz
+  if (boardState.bass != null && voiceIdx !== 2) {
+    const intervalAboveBass = ((targetPitch - boardState.bass) % 12 + 12) % 12;
+    if (intervalAboveBass === 1 && sigma_m === 0 && phi_m < 2) {
+      return { valid: false, cost: 950, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Ungrounded m2/b9 on structural beat' };
+    }
   }
 
   // CONTRAPUNTAL VECTOR FIELD POTENTIAL V_cpt
   let kineticInertia = 0;
   if (dp === 0) {
-    kineticInertia += 1.2; // Hold penalty
+    kineticInertia += 1.2;
   } else if (absDp <= 2) {
     kineticInertia += 0.05 * absDp; // Prefer stepwise motion
   } else {
     kineticInertia += absDp * 0.15; // Moderate leap inertia
   }
 
-  // Energy Release & Recovery Gradient
-  if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8; // Resolution energy release
-  if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) kineticInertia -= 0.6; // Stepwise leap recovery bonus
+  // Energy Release & Dissonance Resolution Gradient
+  if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8;
+  if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) kineticInertia -= 0.6;
 
-  // Leading-Tone Resolution Vector: 7th scale degree resolves upwards to 1st degree
-  const scaleRootPc = (STATE && STATE.root != null) ? STATE.root : 0;
-  if (prevPc != null && ((prevPc - scaleRootPc + 12) % 12) === 11) {
-    if (targetPc === scaleRootPc) kineticInertia -= 0.7; // Leading-tone resolution bonus
+  // Fusion/Jazz Guide-Tone Resolution Chain: 3rd -> 7th or 7th -> 3rd stepwise motion (1 or 2 semitones)
+  if (prevPc != null) {
+    const scaleRootPc = (STATE && STATE.root != null) ? STATE.root : 0;
+    const prevDegree = (prevPc - scaleRootPc + 12) % 12;
+    const targetDegree = (targetPc - scaleRootPc + 12) % 12;
+
+    // 7th degree (11 semitones) resolving stepwise to 3rd degree (3/4 semitones) or tonic (0 semitones)
+    if (prevDegree === 11 && (targetDegree === 0 || targetDegree === 3 || targetDegree === 4)) {
+      kineticInertia -= 0.9; // Guide-tone resolution attractor
+    }
+    // 3rd degree (3 or 4 semitones) resolving to 7th degree (10/11 semitones) in dominant chains
+    if ((prevDegree === 3 || prevDegree === 4) && (targetDegree === 10 || targetDegree === 11) && absDp <= 2) {
+      kineticInertia -= 0.7; // Voice-leading guide-tone chain attractor
+    }
   }
 
   // Anti-Stagnation & Oscillation Potential Barriers
@@ -4029,31 +4052,67 @@ function chordCellExamples(f, limit){
   return out;
 }
 function latticeReadout(f){
-  const el=$('latticeRead'), sp=latticeSpec();
-  if(f==null){
-    const c=STATE.composed, size=sp.tbl.size;
-    if(sp.set==='chord' && c && c.reach){
-      let r=0, rl=0; for(let i=0;i<size;i++) if(c.reach[i]){ r++; if(sp.tbl.t[i]) rl++; }
-      el.innerHTML='This vocabulary can ask <b>'+r+'</b> of the '+size+' cells. <b>'+rl+'</b> of those are legal at λ '+fmt2(STATE.lamC)
-        +(c.dep ? '; flipping any one of <b>'+c.dep.changed+'</b> changes the opening chords.' : '.')
-        +'<br>Hover a cell to read it. The other '+(size-r)+' are drawn faint: flipping them does nothing.';
-    } else el.innerHTML='Hover a cell to read it. Click to flip it by hand.<br>&nbsp;';
-    return;
+  const el = $('cellReadout'); if(!el) return;
+  if(f == null){ el.innerHTML = 'Hover a cell in the 3D Rule Hypercube to inspect its music-theoretic coordinate algebra and manifold legalities.'; return; }
+
+  const sp = latticeSpec();
+  const set = sp.set;
+  const coords = cellList(sp.dims)[f];
+  const leg = sp.tbl.legal[f] === 1;
+  const cst = sp.tbl.costs[f] || 0;
+  const maxCost = Math.max.apply(null, sp.tbl.costs) || 1;
+
+  let axisDetails = [];
+  if (set === 'move') {
+    // coords: [psi, mu_m, gamma_m, sigma_m, phi_m]
+    const psiStr = ['NCT / Chromatic Approach', 'Diatonic Scale Extension', 'Essential Chord / Guide Tone'][coords[0]] || 'Diatonic';
+    const muStr  = ['Hold (0st)', 'Stepwise (1-2st)', 'Small Leap (3-4st)', 'Large Leap (>=5st)', 'Leap Recovery / Resolution'][coords[1]] || 'Step';
+    const gammaStr = ['Similar Parallel Motion', 'Oblique Motion', 'Contrary Motion'][coords[2]] || 'Oblique';
+    const sigmaStr = ['Structural Beat (1,3,5,7)', 'Passing Beat (2,4,6,8)'][coords[3]] || 'Beat';
+    const phiStr   = ['NCT / Chromatic Foreign', 'Diatonic Scale Tone', 'Essential Chord / Guide Tone'][coords[4]] || 'Chord Tone';
+
+    axisDetails = [
+      `<b>Departure Context (ψ):</b> ${coords[0]} (${psiStr})`,
+      `<b>Step Class (μ_m):</b> ${coords[1]} (${muStr})`,
+      `<b>Relative Motion (γ_m):</b> ${coords[2]} (${gammaStr})`,
+      `<b>Metric Accent (σ_m):</b> ${coords[3]} (${sigmaStr})`,
+      `<b>Target Fit Class (φ_m):</b> ${coords[4]} (${phiStr})`
+    ];
+  } else if (set === 'time') {
+    // coords: [m_pos, m_sub, d_dur, s_sync]
+    const posStr = ['Downbeat (Beat 1)', 'Weak Beat (Beat 3)', 'Offbeat (Beat 2/4)', 'Syncopation Phase'][coords[0]] || 'Beat';
+    const subStr = ['Quarter Density (1/4)', 'Eighth Density (1/8)', 'Sixteenth Density (1/16)'][coords[1]] || '1/8';
+    const durStr = ['Staccato Short', 'Normal Gate', 'Sustained Hold'][coords[2]] || 'Normal';
+    const syncStr = ['Straight Metric Phase', 'Syncopated Cross-Beat Phase'][coords[3]] || 'Straight';
+
+    axisDetails = [
+      `<b>Metric Position (m_pos):</b> ${coords[0]} (${posStr})`,
+      `<b>Subdivision (m_sub):</b> ${coords[1]} (${subStr})`,
+      `<b>Duration Class (d_dur):</b> ${coords[2]} (${durStr})`,
+      `<b>Syncopation Phase (s_sync):</b> ${coords[3]} (${syncStr})`
+    ];
+  } else if (set === 'voice') {
+    // coords: [kappa, mu, phi, sigma, gamma]
+    axisDetails = [
+      `<b>Voice Agreement (κ):</b> ${coords[0]}`,
+      `<b>Leap Class (μ):</b> ${coords[1]}`,
+      `<b>Fit Taxonomy (φ):</b> ${coords[2]}`,
+      `<b>Metric Accent (σ):</b> ${coords[3]}`,
+      `<b>Relative Motion (γ):</b> ${coords[4]}`
+    ];
+  } else {
+    // chord coords: [d, tau, rho, eta]
+    axisDetails = [
+      `<b>Root Fall (d):</b> ${coords[0]}st`,
+      `<b>Tension (τ):</b> ${coords[1]}`,
+      `<b>Chord Type (ρ):</b> ${coords[2]}`,
+      `<b>Momentum (η):</b> ${coords[3]}`
+    ];
   }
-  const c=cellList(sp.dims)[f], maxCost=Math.max.apply(null, Array.from(sp.tbl.costs));
-  const parts=sp.axes.map((a,i)=>a.label+' <b>'+a.tick(c[i])+'</b>');
-  const legal=sp.tbl.t[f], flipped=sp.flips[c.join(',')]!=null, n=sp.counts.get(f)||0;
-  const k=latCellClass(sp,f);
-  let l2;
-  if(sp.set==='chord'){
-    if(!k.reach) l2='no move in this vocabulary lands here, so the rule never asks about this cell';
-    else { const ex=chordCellExamples(f,3); l2='asked by moves like '+(ex.length?ex.join(', '):'(depends on momentum)'); }
-  } else l2='';
-  el.innerHTML = parts.join('  ')+'   ·   cost <b>'+(sp.tbl.costs[f]/Math.max(1e-9,maxCost)).toFixed(2)+'</b>   ·   <b>'+(legal?'legal':'not legal')+'</b>'
-    + (flipped?'   ·   <span class="hand">flipped by you</span>':'')
-    + '<br>'+(l2?l2+'   ·   ':'')
-    + (n?'used <b>'+n+'×</b> by this piece':'not used by this piece')
-    + (sp.dep && sp.dep.has(f)?'   ·   <b>flipping it changes the piece</b>':'');
+
+  const legStr = leg ? '<span style="color:#98c379;font-weight:bold">LEGAL (Allowed)</span>' : '<span style="color:#e06c75;font-weight:bold">PROHIBITED (Singularity)</span>';
+  el.innerHTML = `<strong>${set.toUpperCase()} CELL ${f} [${coords.join(',')}]</strong> &nbsp;·&nbsp; ${legStr} &nbsp;·&nbsp; Potential Energy: <b>${cst.toFixed(3)}</b><br>` +
+                 axisDetails.join(' &nbsp;│&nbsp; ');
 }
 
 /* ---- legend and axis modes ------------------------------------------------ */
