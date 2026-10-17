@@ -2686,12 +2686,11 @@ function pickNote(cands, ctx){
       if (ra !== rb) return ra - rb;
     }
 
-    // Filter out heavy flow penalties (like dp === 0 static stagnation) when ranking in bold/strong modes
-    if (mode === 'bold') {
-      // Bold mode prefers larger interval leaps among valid flow candidates
-      const leapA = Math.abs(a.m - (prevP != null ? prevP : a.m));
-      const leapB = Math.abs(b.m - (prevP != null ? prevP : b.m));
-      if (leapA !== leapB) return leapA - leapB; // Smooth ascending leap cost
+    // In 'bold' mode, prefer non-zero stepwise/leap motion (moving pitches over stationary holds)
+    if (mode === 'bold' && prevP != null) {
+      const isZeroA = (a.m === prevP) ? 1 : 0;
+      const isZeroB = (b.m === prevP) ? 1 : 0;
+      if (isZeroA !== isZeroB) return isZeroA - isZeroB;
     }
 
     // Vector Field Flow Combined Cost (integrates Tangent Space Inertia, Dissonance Potential, and Phase Space Conservation)
@@ -3930,6 +3929,13 @@ function drawLattice(){
       const mCoords = [vCoords[2] >= 3 ? 2 : vCoords[2] >= 2 ? 1 : 0, vCoords[1], vCoords[4], vCoords[3], vCoords[2] >= 3 ? 2 : vCoords[2] >= 2 ? 1 : 0];
       const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
       return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
+    } else if (sp.set === 'time') {
+      const tCoords = cellList(TIME_DIMS)[f];
+      const sigma_m = tCoords[0] === 0 ? 0 : 1;
+      const psi = tCoords[0] <= 1 ? 2 : 1;
+      const mCoords = [psi, 1, 1, sigma_m, 2];
+      const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
+      return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
     } else {
       const cCoords = cellList(CHORD_DIMS)[f];
       const phi_v = Math.max(0, 4 - cCoords[1]);
@@ -4075,7 +4081,7 @@ function chordCellExamples(f, limit){
   return out;
 }
 function latticeReadout(f){
-  const el = $('cellReadout'); if(!el) return;
+  const el = $('latticeRead'); if(!el) return;
   if(f == null){ el.innerHTML = 'Hover a cell in the 3D Rule Hypercube to inspect its music-theoretic coordinate algebra and manifold legalities.'; return; }
 
   const sp = latticeSpec();
@@ -5359,8 +5365,8 @@ const NOTE_RE = /^[0-2]:\d{1,4}$/;
 /* ---- state <-> object ---------------------------------------------------------- */
 function serializeState(opts){
   opts = opts||{};
-  const prof={chord:{}, voice:{}, move:{}};
-  for(const set of ['chord','voice','move']){
+  const prof={chord:{}, voice:{}, move:{}, time:{}};
+  for(const set of ['chord','voice','move','time']){
     const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
     for(const a of axes){ const p=STATE.profiles[set][a.key]; prof[set][a.key]={w:r3(p.w), aff:p.aff.map(r3)}; }
   }
@@ -5386,7 +5392,7 @@ function serializeState(opts){
   };
   if(opts.view){
     o.view = { set:STATE.lattice.set, show:Object.assign({},STATE.show),
-      proj:{chord:JSON.parse(JSON.stringify(PROJ.chord)), voice:JSON.parse(JSON.stringify(PROJ.voice)), move:JSON.parse(JSON.stringify(PROJ.move))} };
+      proj:{chord:JSON.parse(JSON.stringify(PROJ.chord)), voice:JSON.parse(JSON.stringify(PROJ.voice)), move:JSON.parse(JSON.stringify(PROJ.move)), time:JSON.parse(JSON.stringify(PROJ.time))} };
   }
   return o;
 }
@@ -5455,7 +5461,7 @@ function restoreState(o){
   const total = N.bars*N.stepsPerBar, segs = Math.ceil(total/(N.harmonic==='bar'?N.stepsPerBar:Math.max(1,Math.floor(N.stepsPerBar/2))));
 
   N.profiles = defaultProfiles();
-  if(isPlain(o.profiles)) for(const set of ['chord','voice','move']){
+  if(isPlain(o.profiles)) for(const set of ['chord','voice','move','time']){
     const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES, src=o.profiles[set];
     if(!isPlain(src)) continue;
     for(const a of axes){
@@ -5468,9 +5474,9 @@ function restoreState(o){
       }
     }
   }
-  N.cellFlips={chord:{}, voice:{}, move:{}};
-  if(isPlain(o.cellFlips)) for(const set of ['chord','voice','move']){
-    const dims = set==='chord'?CHORD_DIMS:set==='voice'?VOICE_DIMS:MOVE_DIMS, src=o.cellFlips[set]; if(!isPlain(src)) continue;
+  N.cellFlips={chord:{}, voice:{}, move:{}, time:{}};
+  if(isPlain(o.cellFlips)) for(const set of ['chord','voice','move','time']){
+    const dims = set==='chord'?CHORD_DIMS:set==='voice'?VOICE_DIMS:set==='move'?MOVE_DIMS:TIME_DIMS, src=o.cellFlips[set]; if(!isPlain(src)) continue;
     let n=0;
     for(const k of Object.keys(src)){
       if(!FLIP_RE.test(k) || (src[k]!==0 && src[k]!==1)){ continue; }
@@ -5525,9 +5531,9 @@ function restoreState(o){
   // the view (projection, which table, toggles) is optional and never blocks a load
   let view=null;
   if(isPlain(o.view)){
-    view={set:vEnum(o.view.set,['chord','voice','move'],'chord'), show:{}, proj:{}};
+    view={set:vEnum(o.view.set,['chord','voice','move','time'],'chord'), show:{}, proj:{}};
     for(const k of ['tails','ghosts','sounding']) view.show[k]=isPlain(o.view.show)?vBool(o.view.show[k],STATE.show[k]):STATE.show[k];
-    for(const set of ['chord','voice','move']){
+    for(const set of ['chord','voice','move','time']){
       const src=isPlain(o.view.proj)?o.view.proj[set]:null; if(!isPlain(src)) continue;
       const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES, P={basis:{}, cyclic:{}};
       P.preset=vEnum(src.preset, set==='chord'?['grid','hyper','cycle','cost']:['grid','hyper','cost'], 'grid');
