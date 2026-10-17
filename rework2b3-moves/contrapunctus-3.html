@@ -2511,7 +2511,7 @@ function computeBoardState(voicesPitches, stepIndex) {
 }
 
 // 2. Evaluates Movement Vector m in Tangent Space T_s S against the Local Constraint Manifold M_valid(s, lambda)
-function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches) {
+function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches, options) {
   const dp = moveVector;
   const absDp = Math.abs(dp);
   const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
@@ -2548,19 +2548,28 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   // 4. Metric Accent sigma_m
   const sigma_m = boardState.metricPhase;
 
-  // 5. Target Fit Class phi_m
-  const activeScalePcs = (typeof scalePCsNow === 'function') ? scalePCsNow() : [0,2,4,5,7,9,11];
+  // 5. Target Fit Class phi_m evaluated against HARMONIC CHORD TONES
+  let activeChordPcs = [];
+  if (options && options.chordTones && Array.isArray(options.chordTones)) {
+    activeChordPcs = options.chordTones.map(pcOf);
+  } else if (options && options.chords) {
+    const seg = segOfStep(options.step || 0);
+    if (options.chords[seg] && options.chords[seg].tones) {
+      activeChordPcs = options.chords[seg].tones.map(pcOf);
+    }
+  }
+
+  const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : [0,2,4,5,7,9,11];
   const targetPc = ((targetPitch % 12) + 12) % 12;
+  const isChordTone = activeChordPcs.length > 0 ? activeChordPcs.includes(targetPc) : boardState.pitches.filter(p => p != null).map(pcOf).includes(targetPc);
   const isScale = activeScalePcs.includes(targetPc);
-  const chordPcs = boardState.pitches.filter(p => p != null).map(p => ((p % 12) + 12) % 12);
-  const isChordTone = chordPcs.includes(targetPc);
 
   let phi_m = 0;
   if (isChordTone) phi_m = 2;
   else if (isScale) phi_m = 1;
   else phi_m = 0;
 
-  // STRICT SPECIES COUNTERPOINT & FUSION DISSONANCE HARD CONSTRAINTS
+  // STRICT SPECIES COUNTERPOINT & VERTICAL CONSONANCE HARD CONSTRAINTS
   // Constraint A: Prohibit entering leaps into non-chord tones
   if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
 
@@ -2572,11 +2581,17 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
     return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
   }
 
-  // Constraint D: Prohibit ungrounded minor 2nd / minor 9th (1 semitone above bass) on structural beats in Fusion/Jazz
-  if (boardState.bass != null && voiceIdx !== 2) {
-    const intervalAboveBass = ((targetPitch - boardState.bass) % 12 + 12) % 12;
-    if (intervalAboveBass === 1 && sigma_m === 0 && phi_m < 2) {
-      return { valid: false, cost: 950, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Ungrounded m2/b9 on structural beat' };
+  // Constraint D: Structural beat vertical consonance above bass (3rds, 5ths, 6ths, 8ves required for upper voices)
+  if (sigma_m === 0) {
+    if (boardState.bass != null && voiceIdx !== 2) {
+      const intervalAboveBass = ((targetPitch - boardState.bass) % 12 + 12) % 12;
+      const isConsonantVertical = (intervalAboveBass === 0 || intervalAboveBass === 3 || intervalAboveBass === 4 || intervalAboveBass === 7 || intervalAboveBass === 8 || intervalAboveBass === 9);
+      if (!isConsonantVertical && psi !== 2) {
+        return { valid: false, cost: 990, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Structural Beat Dissonance above Bass' };
+      }
+    }
+    if (voiceIdx === 2 && phi_m < 2) {
+      return { valid: false, cost: 980, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Bass Non-Chord Tone on Structural Beat' };
     }
   }
 
@@ -2625,7 +2640,7 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
 }
 
 
-function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitches, prev2Pitch, prev3Pitch) {
+function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitches, prev2Pitch, prev3Pitch, options) {
   // Construct complete 3-part voice pitch vector [soprano, alto, bass]
   const fullPitches = [60, 60, 36];
   if (otherPitches && Array.isArray(otherPitches)) {
@@ -2643,7 +2658,7 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const dp = prevPitch != null ? candPitch - prevPitch : 0;
   const prevLeapMomentum = (prevPitch != null && prev2Pitch != null) ? (prevPitch - prev2Pitch) : 0;
 
-  const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches);
+  const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches, options);
 
   // 1. Movement Rule Space Cell Coordinates
   const [psi, mu_m, gamma_m, sigma_m, phi_m] = flowEval.coords;
@@ -2734,7 +2749,7 @@ function evaluateLookaheadMove(candPitch, voiceIdx, stepIndex, totalSteps, chord
     const nextDp = nextP - candPitch;
     const absNextDp = Math.abs(nextDp);
 
-    const evalNext = evalCandidateMove(candPitch, nextP, voiceIdx, nextStep, otherPitches, prevPitch, prev2Pitch);
+    const evalNext = evalCandidateMove(candPitch, nextP, voiceIdx, nextStep, otherPitches, prevPitch, prev2Pitch, { chordTones: nextChord.tones, chords, step: nextStep });
 
     if (evalNext.isLegal || evalNext.voiceLegal) {
       validCount++;
@@ -2784,7 +2799,7 @@ function pickNote(cands, ctx){
   const prev3P = ctx.prev3Pitch;
 
   const evaluated = cands.map(m => {
-    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P);
+    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, ctx);
     const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
     base.lookahead = look;
     base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
@@ -2871,7 +2886,7 @@ function pickEnhancedBassNote(cands, ctx) {
   const { preferredPcs, approachPc, isEnclosure } = ctx;
 
   const evaluated = cands.map(m => {
-    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P);
+    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, ctx);
     const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
     base.lookahead = look;
     base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
@@ -2901,6 +2916,12 @@ function pickEnhancedBassNote(cands, ctx) {
     const isOscA = (prev2P != null && a.m === prev2P && a.m !== prevP) ? 1 : 0;
     const isOscB = (prev2P != null && b.m === prev2P && b.m !== prevP) ? 1 : 0;
     if (isOscA !== isOscB) return isOscA - isOscB;
+
+    if (ctx.structural && ctx.rootPc != null) {
+      const isRootA = pcOf(a.m) === ctx.rootPc ? 0 : 1;
+      const isRootB = pcOf(b.m) === ctx.rootPc ? 0 : 1;
+      if (isRootA !== isRootB) return isRootA - isRootB;
+    }
 
     if (preferredPcs && preferredPcs.length) {
       const rankA = preferredPcs.indexOf(pcOf(a.m));
