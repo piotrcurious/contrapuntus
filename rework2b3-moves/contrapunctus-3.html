@@ -1662,7 +1662,7 @@ function drawRingDashboard() {
   if (!tbl) return;
 
   const setProfiles = STATE.profiles ? STATE.profiles[sp.set] : defaultProfiles()[sp.set];
-  const activeLambda = sp.set === 'chord' ? STATE.lamC : sp.set === 'voice' ? STATE.lamV : STATE.lamM;
+  const activeLambda = sp.set === 'chord' ? STATE.lamC : sp.set === 'voice' ? STATE.lamV : sp.set === 'move' ? STATE.lamM : (STATE.lamT != null ? STATE.lamT : 0.50);
   const ruleRing = STATE.ruleRing || { enabled: true, op: 'circ', ruleA: 'cpt', ruleB: 'topo' };
 
   const ringInfo = evaluateAlgebraicRuleRing(
@@ -2617,15 +2617,23 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const tF = tIdx(m_pos, m_sub, d_dur, s_sync);
   const tTbl = timeTable();
 
-  // 3. Voice Rule Space Cell Coordinates
+  // 3. Voice Rule Space Cell Coordinates (kappa = count of consonant intervals 3, 4, 7, 8, 9, 12 with other voices)
+  let kappa_v = 0;
+  for (let u = 0; u < 3; u++) {
+    if (u === voiceIdx || fullPitches[u] == null) continue;
+    const ic = ((Math.abs(candPitch - fullPitches[u])) % 12 + 12) % 12;
+    if (ic === 3 || ic === 4 || ic === 7 || ic === 8 || ic === 9 || ic === 0) kappa_v++;
+  }
+  kappa_v = Math.min(2, kappa_v);
+
   const phi_v = phi_m === 2 ? 4 : (phi_m === 1 ? 2 : 0);
-  const vF = vIdx(gamma_m, mu_m, phi_v, sigma_m, gamma_m);
+  const vF = vIdx(kappa_v, mu_m, phi_v, sigma_m, gamma_m);
   const vTbl = voiceTable();
 
   // UNIFIED 4-SPACE RULE TENSOR EVALUATION: R_eff = R_M && R_T && R_V
   const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1) && (tTbl.t[tF % tTbl.size] === 1) && (vTbl.t[vF % vTbl.size] === 1);
 
-  const cls = { kappa: gamma_m, mu: mu_m, phi: phi_v, sigma: sigma_m, gamma: gamma_m, vCell: vF };
+  const cls = { kappa: kappa_v, mu: mu_m, phi: phi_v, sigma: sigma_m, gamma: gamma_m, vCell: vF };
   const moveCls = { psi, mu_m, gamma_m, sigma_m, phi_m, mCell: mF };
   const timeCls = { m_pos, m_sub, d_dur, s_sync, tCell: tF };
 
@@ -2683,7 +2691,7 @@ function pickNote(cands, ctx){
       // Bold mode prefers larger interval leaps among valid flow candidates
       const leapA = Math.abs(a.m - (prevP != null ? prevP : a.m));
       const leapB = Math.abs(b.m - (prevP != null ? prevP : b.m));
-      if (leapA !== leapB) return leapB - leapA;
+      if (leapA !== leapB) return leapA - leapB; // Smooth ascending leap cost
     }
 
     // Vector Field Flow Combined Cost (integrates Tangent Space Inertia, Dissonance Potential, and Phase Space Conservation)
@@ -3931,13 +3939,24 @@ function drawLattice(){
     }
   }
 
+  // Draw Sequential Progression Paths in Rule Spaces (Chord, Voice, Move, Time)
+  if (sp.seq && sp.seq.length > 1) {
+    const pathCol = rgba(dark ? [255,215,0] : [255,140,0], 0.85);
+    for (let i = 0; i < sp.seq.length - 1; i++) {
+      const f1 = sp.seq[i];
+      const f2 = sp.seq[i+1];
+      if (f1 < cells.length && f2 < cells.length) {
+        P.line(pts[f1*2], pts[f1*2+1], pts[f2*2], pts[f2*2+1], 2.5, pathCol);
+      }
+    }
+  }
+
   // Draw Tangent Vector Field Trajectory Connections in Move & Voice Spaces
   if (sp.set === 'move' || sp.set === 'voice') {
     const strides = sp.strides;
     for (let f = 0; f < cells.length; f++) {
       const w = getCellFiberWeight(f);
       if (w > 0.8 && sp.tbl.legal[f]) {
-        // Connect along valid step class vector (stride[1])
         const targetStepF = (f + strides[1]) % cells.length;
         if (sp.tbl.legal[targetStepF]) {
           const alpha = Math.min(0.7, w * 0.4);
