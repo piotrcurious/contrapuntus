@@ -478,6 +478,15 @@ details.fold[open] > summary::before{content:"\2013 ";}
     </section>
 
     <section class="group">
+      <h2>Temporal metric rule</h2>
+      <div class="row"><label for="sLamT">Legal fraction &lambda;</label>
+        <div class="slide"><input type="range" id="sLamT" min="0" max="100" value="50"><span class="num" id="nLamT">.50</span></div></div>
+      <div class="readout" id="statT"></div>
+      <div id="profT" style="margin-top:10px"></div>
+      <div class="btnrow"><button class="tiny" id="btnResetProfT">Reset temporal profiles</button></div>
+    </section>
+
+    <section class="group">
       <h2>Supervisory Governance <span class="note">macro arc & style</span></h2>
       <div class="row"><label for="selSyntaxMode">Style Paradigm</label>
         <select id="selSyntaxMode">
@@ -544,6 +553,7 @@ details.fold[open] > summary::before{content:"\2013 ";}
             <button type="button" id="btnSetChord" aria-pressed="true">Chord table</button>
             <button type="button" id="btnSetVoice" aria-pressed="false">Voice table</button>
             <button type="button" id="btnSetMove" aria-pressed="false">Movement table</button>
+            <button type="button" id="btnSetTime" aria-pressed="false">Temporal table</button>
           </div>
           <div class="segctl" id="projCtl" role="group" aria-label="Projection">
             <button type="button" id="btnProjGrid" aria-pressed="false">Flat grid</button>
@@ -671,7 +681,7 @@ details.fold[open] > summary::before{content:"\2013 ";}
         <div class="tools"><span class="readout" id="ringExprRead">R = cpt ∘ topo</span></div>
       </div>
       <div class="split">
-        <div>
+        <div style="flex:1">
           <div style="display:flex; gap:16px; margin-top:4px; align-items:center; flex-wrap:wrap;">
             <label style="font-weight:bold; cursor:pointer;">
               <input type="checkbox" id="chkRingEnable" checked> Enable Rule Ring Algebra
@@ -679,6 +689,7 @@ details.fold[open] > summary::before{content:"\2013 ";}
             <label>Operator:
               <select id="selRingOp">
                 <option value="circ" selected>Non-Commutative Product (∘)</option>
+                <option value="fusion">Fusion Synthesis (⊙)</option>
                 <option value="and">Intersection (∧)</option>
                 <option value="or">Union (∨)</option>
               </select>
@@ -702,6 +713,9 @@ details.fold[open] > summary::before{content:"\2013 ";}
           </div>
           <div class="readout" id="ringStat" style="margin-top:12px"></div>
         </div>
+      </div>
+      <div class="figure" id="ringVisWrap" style="margin-top:10px">
+        <canvas id="ringCanvas" style="height:140px; width:100%; border:1px solid var(--rule-soft); border-radius:4px;" role="img" aria-label="Visual display of algebraic ring generators and effective composite rule closure"></canvas>
       </div>
     </section>
 
@@ -886,6 +900,7 @@ function annotate(c){
   c.quality = chordQuality(c.tones);
   if(c.applied==='dom') c.roman = 'V7/'+c.of;
   else if(c.applied==='lt') c.roman = 'vii\u00b07/'+c.of;
+  else if(c.applied==='subv') c.roman = 'subV7/'+c.of;
   else c.roman = romanNumeral(c.degree, c.quality);
   c.tensionVal = chordTension(c.tones);
   c.key = c.rootPc+':'+c.quality+':'+(c.applied||'-');
@@ -1024,22 +1039,22 @@ function drawSupervisoryDashboard() {
   const chartW = w - padL - padR, chartH = h - padT - padB;
 
   // Draw background stage regions
-  const climaxX = padL + sup.climaxPos * chartW;
-  const expoX = padL + Math.max(0, sup.climaxPos - 0.25) * chartW;
-  const resX = padL + Math.min(1, sup.climaxPos + 0.15) * chartW;
+  const climaxPos = (typeof sup.climaxPos === 'number') ? sup.climaxPos : 0.70;
+  const climaxX = padL + climaxPos * chartW;
+  const expoX = padL + Math.max(0, climaxPos - 0.25) * chartW;
 
   // Stage shading
   ctx.fillStyle = dark ? 'rgba(70,130,180,0.12)' : 'rgba(70,130,180,0.08)'; // Exposition
   ctx.fillRect(padL, padT, expoX - padL, chartH);
 
   ctx.fillStyle = dark ? 'rgba(218,165,32,0.15)' : 'rgba(218,165,32,0.10)'; // Development
-  ctx.fillRect(expoX, padT, climaxX - 0.1 * chartW - expoX, chartH);
+  ctx.fillRect(expoX, padT, Math.max(0, climaxX - 0.1 * chartW - expoX), chartH);
 
   ctx.fillStyle = dark ? 'rgba(220,20,60,0.22)' : 'rgba(220,20,60,0.14)'; // Climax
   ctx.fillRect(climaxX - 0.1 * chartW, padT, 0.2 * chartW, chartH);
 
   ctx.fillStyle = dark ? 'rgba(46,139,87,0.15)' : 'rgba(46,139,87,0.10)'; // Resolution
-  ctx.fillRect(climaxX + 0.1 * chartW, padT, padL + chartW - (climaxX + 0.1 * chartW), chartH);
+  ctx.fillRect(climaxX + 0.1 * chartW, padT, Math.max(0, padL + chartW - (climaxX + 0.1 * chartW)), chartH);
 
   // Stage Labels
   ctx.font = '10px monospace';
@@ -1055,9 +1070,9 @@ function drawSupervisoryDashboard() {
   ctx.strokeStyle = dark ? '#e06c75' : '#d14';
   ctx.lineWidth = 2;
   for (let s = 0; s < totalSteps; s++) {
-    const x = padL + (s / (totalSteps - 1)) * chartW;
+    const x = padL + (s / Math.max(1, totalSteps - 1)) * chartW;
     const supCtx = evaluateSupervisorySpace(s, totalSteps);
-    const y = padT + (1 - supCtx.energy) * chartH;
+    const y = padT + (1 - (supCtx.energy || 0)) * chartH;
     if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.stroke();
@@ -1068,16 +1083,16 @@ function drawSupervisoryDashboard() {
   ctx.lineWidth = 1.5;
   ctx.setLineDash([3, 3]);
   for (let s = 0; s < totalSteps; s++) {
-    const x = padL + (s / (totalSteps - 1)) * chartW;
+    const x = padL + (s / Math.max(1, totalSteps - 1)) * chartW;
     const supCtx = evaluateSupervisorySpace(s, totalSteps);
-    const y = padT + (1 - supCtx.effLamM) * chartH;
+    const effLamM = (typeof supCtx.modLamM === 'number') ? supCtx.modLamM : (supCtx.effLamM || STATE.lamM || 0.5);
+    const y = padT + (1 - effLamM) * chartH;
     if (s === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
   }
   ctx.stroke();
   ctx.setLineDash([]);
 
   // Draw Active Step Cursor
-  const c = STATE.composed;
   const activeStep = (typeof STATE.step === 'number' && STATE.step >= 0) ? STATE.step : (STATE.selectedSeg || 0);
   const curX = padL + (activeStep / Math.max(1, totalSteps - 1)) * chartW;
 
@@ -1089,20 +1104,28 @@ function drawSupervisoryDashboard() {
   ctx.stroke();
 
   // Active step info tag
-  const curSup = evaluateSupervisorySpace(activeStep, totalSteps);
   ctx.fillStyle = dark ? '#ffffff' : '#000000';
   ctx.textAlign = curX > padL + chartW * 0.7 ? 'right' : 'left';
   const tagX = curX > padL + chartW * 0.7 ? curX - 6 : curX + 6;
-  ctx.fillText('Step ' + activeStep + ' [' + curSup.phraseStage.toUpperCase() + '] Energy: ' + curSup.energy.toFixed(2) + ' λ_M: ' + curSup.effLamM.toFixed(2), tagX, padT + chartH / 2);
+  const curSup = evaluateSupervisorySpace(activeStep, totalSteps);
+  const stageStr = curSup.phraseStage ? curSup.phraseStage.toUpperCase() : 'EXPOSITION';
+  const energyVal = (typeof curSup.energy === 'number') ? curSup.energy : 0;
+  const lamMVal = (typeof curSup.modLamM === 'number') ? curSup.modLamM : (typeof curSup.effLamM === 'number' ? curSup.effLamM : 0.5);
+
+  ctx.fillText('Step ' + activeStep + ' [' + stageStr + '] Energy: ' + energyVal.toFixed(2) + ' λ_M: ' + lamMVal.toFixed(2), tagX, padT + chartH / 2);
 
   // Legend
+  const syntaxModeStr = sup.syntaxMode ? sup.syntaxMode.toUpperCase() : 'JAZZ';
+  const gtVal = (typeof sup.guideToneWeight === 'number') ? sup.guideToneWeight : 1.0;
+  const encVal = (typeof sup.enclosureWeight === 'number') ? sup.enclosureWeight : 0.8;
+
   ctx.textAlign = 'left';
   ctx.fillStyle = dark ? '#e06c75' : '#d14';
   ctx.fillText('― Macro Energy Arc', padL, h - 8);
   ctx.fillStyle = dark ? '#61afef' : '#1e88e5';
   ctx.fillText('--- Dynamic λ_M Modulation', padL + 140, h - 8);
   ctx.fillStyle = dark ? '#a0a0a0' : '#606060';
-  ctx.fillText('Mode: ' + sup.syntaxMode.toUpperCase() + ' | Guide: ' + sup.guideToneWeight.toFixed(1) + ' | Encl: ' + sup.enclosureWeight.toFixed(1), padL + 310, h - 8);
+  ctx.fillText('Mode: ' + syntaxModeStr + ' | Guide: ' + gtVal.toFixed(1) + ' | Encl: ' + encVal.toFixed(1), padL + 310, h - 8);
 }
 
 function evaluateSupervisorySpace(step, totalSteps) {
@@ -1206,18 +1229,24 @@ function defaultProfiles(){
       eta:  {w:0.25, aff:[0.5,1,0.5]},
     },
     voice:{
-      kappa:{w:0.45, aff:[0,0.5,1]},
-      mu:   {w:0.45, aff:[0.10, 0.75, 0.90, 0.75, 0.10]},
-      phi:  {w:1.00, aff:[0.0, 0.30, 0.70, 0.90, 1.0]},
-      sigma:{w:0.20, aff:[1,0.55]},
-      gamma:{w:0.30, aff:[0,0.5,1]},
+      kappa:{w:0.80, aff:[0.10, 0.70, 1.00]},
+      mu:   {w:0.85, aff:[0.10, 0.85, 0.95, 0.85, 0.10]},
+      phi:  {w:1.00, aff:[0.05, 0.35, 0.75, 0.95, 1.00]},
+      sigma:{w:0.50, aff:[1.00, 0.60]},
+      gamma:{w:0.85, aff:[0.20, 0.70, 1.00]},
     },
     move:{
-      psi:    {w:0.85, aff:[0.30, 0.70, 1.00]},
-      mu_m:   {w:1.00, aff:[0.40, 1.00, 0.50, 0.20, 0.98]},
-      gamma_m:{w:0.80, aff:[0.15, 0.75, 1.00]},
-      sigma_m:{w:0.50, aff:[1.00, 0.55]},
-      phi_m:  {w:1.00, aff:[0.15, 0.70, 1.00]},
+      psi:    {w:0.90, aff:[0.20, 0.75, 1.00]},
+      mu_m:   {w:1.00, aff:[0.35, 1.00, 0.55, 0.15, 0.98]},
+      gamma_m:{w:0.90, aff:[0.20, 0.75, 1.00]},
+      sigma_m:{w:0.60, aff:[1.00, 0.60]},
+      phi_m:  {w:1.00, aff:[0.10, 0.75, 1.00]},
+    },
+    time:{
+      m_pos:  {w:1.00, aff:[1.00, 0.80, 0.50, 0.70]},
+      m_sub:  {w:0.75, aff:[1.00, 0.85, 0.50]},
+      d_dur:  {w:0.60, aff:[0.50, 1.00, 0.80]},
+      s_sync: {w:0.75, aff:[1.00, 0.65]},
     },
   };
 }
@@ -1234,7 +1263,7 @@ const STATE = {
   root:0, scaleName:'Ionian',
   bars:8, stepsPerBar:8, lastStepsPerBar:8, harmonic:'bar',
   tempo:96, tension:0.30,
-  lamC:0.38, lamV:0.46, lamM:0.50,
+  lamC:0.38, lamV:0.46, lamM:0.50, lamT:0.50,
   supervisor:{
     enabled: true,
     syntaxMode: 'jazz',       // classical | jazz | hybrid
@@ -1246,9 +1275,9 @@ const STATE = {
   },
   ruleRing:{ enabled:true, op:'circ', ruleA:'cpt', ruleB:'topo' },
   profiles: defaultProfiles(),
-  cellFlips:{ chord:{}, voice:{}, move:{} },   // "i0,i1,.." -> 0|1
+  cellFlips:{ chord:{}, voice:{}, move:{}, time:{} },   // "i0,i1,.." -> 0|1
   extended:false, walkingBass:false, arp:'none',
-  take:'bold',   // which legal move to take: smooth | strong | bold
+  take:'smooth',   // which legal move to take: smooth | strong | bold
   tuning:'equal',// how the twelve pitch classes are tuned: see TUNINGS
   seed:{ chordIdx:0, eta:1, prev2Idx:-1, voice:[null,null,null] },
   anchors:{},                          // step -> midi (melody)
@@ -1275,6 +1304,24 @@ window.regenerate = regenerate;
 window.setRuleRingOp = setRuleRingOp;
 window.setRuleRingA = setRuleRingA;
 window.setRuleRingB = setRuleRingB;
+window.evaluateFiberBundleIntersection = evaluateFiberBundleIntersection;
+window.bundleProjection_M_to_V = bundleProjection_M_to_V;
+window.bundleProjection_V_to_C = bundleProjection_V_to_C;
+window.orbifoldDistance = orbifoldDistance;
+window.computeBoardState = computeBoardState;
+window.evaluateTangentMovementVector = evaluateTangentMovementVector;
+window.evalCandidateMove = evalCandidateMove;
+window.filterParallels = filterParallels;
+window.bounded = bounded;
+window.rangeAll = rangeAll;
+window.REGISTERS = REGISTERS;
+window.pickNote = pickNote;
+window.pickEnhancedBassNote = pickEnhancedBassNote;
+window.voiceTable = voiceTable;
+window.moveTable = moveTable;
+window.timeTable = timeTable;
+window.latticeSpec = latticeSpec;
+window.tIdx = tIdx;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
 // direction (a basis vector) that you can drag, and a cell sits at the sum of its coordinates'
@@ -1288,6 +1335,7 @@ const PROJ = {
   chord:{ preset:'grid', basis:{d:[46,0], tau:[0,-64], rho:[14,0], eta:[0,13]}, cyclic:{}, rows:'d' },
   voice:{ preset:'grid', basis:{kappa:[200,0], mu:[0,-80], phi:[60,0], sigma:[0,-30], gamma:[20,0]}, cyclic:{}, rows:'mu' },
   move: { preset:'grid', basis:{psi:[180,0], mu_m:[0,-70], gamma_m:[50,0], sigma_m:[0,-25], phi_m:[15,0]}, cyclic:{}, rows:'mu_m' },
+  time: { preset:'grid', basis:{m_pos:[160,0], m_sub:[0,-60], d_dur:[40,0], s_sync:[0,-25]}, cyclic:{}, rows:'m_pos' },
 };
 const PROJ_BASES = {
   chord:{ grid:{d:[46,0], tau:[0,-64], rho:[14,0], eta:[0,13]},
@@ -1296,6 +1344,8 @@ const PROJ_BASES = {
           hyper:{kappa:[-42,-47], mu:[-24,-50], phi:[-16,-34], sigma:[-240,-44], gamma:[56,-8]} },
   move: { grid:{psi:[180,0], mu_m:[0,-70], gamma_m:[50,0], sigma_m:[0,-25], phi_m:[15,0]},
           hyper:{psi:[-35,-40], mu_m:[-20,-45], gamma_m:[-12,-30], sigma_m:[-200,-35], phi_m:[45,-10]} },
+  time: { grid:{m_pos:[160,0], m_sub:[0,-60], d_dur:[40,0], s_sync:[0,-25]},
+          hyper:{m_pos:[-20,-10], m_sub:[8,-35], d_dur:[35,-5], s_sync:[-10,18]} },
 };
 
 /* =====================================================================
@@ -1331,12 +1381,54 @@ function cellList(dims){
 cellList.cache = {};
 
 function cellCost(coords, axes, prof){
-  let s=0;
-  for(let i=0;i<axes.length;i++){
-    const p = prof[axes[i].key];
-    s += p.w * (1 - p.aff[coords[i]]);
+  const pVal = 3.0;
+  let sumP = 0;
+
+  for(let i=0; i<axes.length; i++){
+    const key = axes[i].key;
+    const p = prof[key] || { w:1.0, aff:[0.5] };
+    const w = p.w != null ? p.w : 1.0;
+    const aff = (p.aff && p.aff[coords[i]] != null) ? p.aff[coords[i]] : 0.5;
+    const diff = w * (1.0 - aff);
+    sumP += Math.pow(diff, pVal);
   }
-  return s;
+
+  let baseCost = Math.pow(sumP, 1.0 / pVal);
+  let interactionPenalty = 0;
+
+  const isMoveSpace  = axes.some(a => a.key === 'mu_m');
+  const isVoiceSpace = axes.some(a => a.key === 'kappa');
+  const isChordSpace = axes.some(a => a.key === 'd');
+
+  if (isMoveSpace) {
+    // coords: [psi, mu_m, gamma_m, sigma_m, phi_m]
+    const psi = coords[0], mu_m = coords[1], gamma_m = coords[2], sigma_m = coords[3], phi_m = coords[4];
+    // 1. Leap from Non-Chord Tone (psi=0 & mu_m >= 2)
+    if (psi === 0 && mu_m >= 2) interactionPenalty += 1.8;
+    // 2. Structural Beat Non-Chord Tone (sigma_m=0 & phi_m=0)
+    if (sigma_m === 0 && phi_m === 0) interactionPenalty += 1.5;
+    // 3. Similar Motion Large Leap (gamma_m=0 & mu_m >= 3)
+    if (gamma_m === 0 && mu_m >= 3) interactionPenalty += 1.0;
+    // 4. Synergistic Bonus for Stepwise Resolution to Guide/Chord Tone on Structural Beat
+    if (sigma_m === 0 && phi_m === 2 && (mu_m === 1 || mu_m === 4)) interactionPenalty -= 0.5;
+  } else if (isVoiceSpace) {
+    // coords: [kappa, mu, phi, sigma, gamma]
+    const kappa = coords[0], mu = coords[1], phi = coords[2], sigma = coords[3], gamma = coords[4];
+    // 1. Structural Beat Non-Chord Tone (sigma=0 & phi <= 1)
+    if (sigma === 0 && phi <= 1) interactionPenalty += 1.5;
+    // 2. Large Leap into Dissonance/NCT ( (mu==0 || mu==4) & phi <= 1 )
+    if ((mu === 0 || mu === 4) && phi <= 1) interactionPenalty += 1.6;
+    // 3. Similar Motion with Dissonance (gamma=0 & kappa=0)
+    if (gamma === 0 && kappa === 0) interactionPenalty += 1.2;
+    // 4. Synergistic Bonus for Contrary Motion Chord Tone
+    if (gamma === 2 && phi >= 3) interactionPenalty -= 0.4;
+  } else if (isChordSpace) {
+    // coords: [d, tau, rho, eta]
+    const tau = coords[1], eta = coords[3];
+    if (tau >= 3 && eta === 0) interactionPenalty += 0.8;
+  }
+
+  return Math.max(0, baseCost + interactionPenalty);
 }
 function profileSig(axes, prof){
   let s='';
@@ -1401,6 +1493,7 @@ function renderExpansionUI() {
   }
 
   drawSupervisoryDashboard();
+  drawRingDashboard();
   const trackerEl = document.getElementById('phraseTrackerRead');
   if (trackerEl) {
     const totalSegs = (c && c.segments) ? c.segments : K;
@@ -1527,32 +1620,269 @@ function evaluateEndogenousRule(segIdx, totalSegments, recentChords, baseTable) 
    ========================================================================= */
 
 function getBaseRuleVector(ruleKey, axes, dims, strides, prof, lambda, size) {
-  const { order, costs } = costOrder(axes, dims, prof);
+  const pMap = prof || (STATE.profiles && STATE.profiles.chord ? STATE.profiles.chord : defaultProfiles().chord);
+  const { order, costs } = costOrder(axes, dims, pMap);
   const vec = new Uint8Array(size);
-  const effectiveLambda = lambda == null ? 0.38 : lambda;
+  const effectiveLambda = lambda == null ? 0.50 : lambda;
   const baseCutoff = Math.max(1, Math.round(clamp01(effectiveLambda) * size));
 
-  if (ruleKey === 'cpt') {
-    for (let i = 0; i < baseCutoff; i++) vec[order[i]] = 1;
-  } else if (ruleKey === 'topo') {
-    for (let i = 0; i < baseCutoff; i++) {
-      const f = order[i];
-      if (f % 2 === 0 || f % 3 === 0) vec[f] = 1;
+  const cellCoords = cellList(dims);
+  const isMoveSpace = (dims.length === 5 && axes.some(a => a.key === 'mu_m'));
+  const isVoiceSpace = (dims.length === 5 && axes.some(a => a.key === 'kappa'));
+  const isChordSpace = (dims.length === 4 && axes.some(a => a.key === 'd'));
+  const isTimeSpace  = (dims.length === 4 && axes.some(a => a.key === 'm_pos'));
+
+  for (let i = 0; i < size; i++) {
+    const f = order[i];
+    const coords = cellCoords[f];
+    let pass = false;
+
+    if (ruleKey === 'cpt') {
+      if (isTimeSpace) {
+        // coords: [m_pos, m_sub, d_dur, s_sync]
+        // Allow downbeats (m_pos === 0), weak beats (m_pos === 1), normal duration (d_dur === 1)
+        pass = (coords[0] <= 1 && coords[2] >= 1) || (i < baseCutoff);
+      } else if (isMoveSpace) {
+        pass = (coords[4] >= 1) && (coords[1] !== 3 || i < baseCutoff);
+      } else if (isVoiceSpace) {
+        pass = (coords[0] >= 1 && coords[1] !== 3 && coords[2] >= 2) || (i < baseCutoff);
+      } else {
+        pass = i < baseCutoff;
+      }
+    } else if (ruleKey === 'modal') {
+      if (isTimeSpace) {
+        pass = (coords[0] >= 1 || coords[3] === 1) || (i < Math.round(baseCutoff * 1.25));
+      } else if (isMoveSpace) {
+        pass = (coords[4] >= 1 || coords[0] >= 1) && (coords[1] !== 3 || i < Math.round(baseCutoff * 1.2));
+      } else if (isVoiceSpace) {
+        pass = (coords[2] >= 2) && (i < Math.round(baseCutoff * 1.30));
+      } else {
+        pass = i < Math.round(baseCutoff * 1.20);
+      }
+    } else if (ruleKey === 'saddle') {
+      if (isTimeSpace) {
+        pass = (coords[2] >= 1) || (i < Math.round(baseCutoff * 1.15));
+      } else if (isMoveSpace) {
+        pass = (coords[2] >= 1 && (coords[4] >= 1 || coords[1] === 4)) || (i < baseCutoff);
+      } else if (isVoiceSpace) {
+        pass = (coords[4] >= 1 && coords[2] >= 1) || (i < Math.round(baseCutoff * 1.2));
+      } else {
+        pass = i < Math.round(baseCutoff * 1.15);
+      }
+    } else {
+      pass = i < baseCutoff;
     }
-  } else if (ruleKey === 'modal') {
-    for (let i = 0; i < baseCutoff; i++) {
-      const f = order[i];
-      if (f % 5 !== 1) vec[f] = 1;
-    }
-  } else if (ruleKey === 'saddle') {
-    for (let i = 0; i < baseCutoff; i++) {
-      if (i >= Math.round(baseCutoff * 0.2)) vec[order[i]] = 1;
-    }
-  } else {
-    for (let i = 0; i < baseCutoff; i++) vec[order[i]] = 1;
+
+    if (pass) vec[f] = 1;
   }
   return vec;
 }
+
+
+/* =====================================================================
+   ALGEBRAIC RULE RING VISUALIZATION
+   ===================================================================== */
+function drawRingDashboard() {
+  const cv = $('ringCanvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+
+  const rect = cv.getBoundingClientRect();
+  const W = cv.width = (rect.width || 600) * (window.devicePixelRatio || 1);
+  const H = cv.height = (rect.height || 140) * (window.devicePixelRatio || 1);
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+  const w = rect.width || 600, h = rect.height || 140;
+
+  const dark = THEME && THEME.dark;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)';
+  ctx.fillRect(0, 0, w, h);
+
+  const sp = latticeSpec();
+  const tbl = sp.tbl;
+  if (!tbl) return;
+
+  const setProfiles = STATE.profiles ? STATE.profiles[sp.set] : defaultProfiles()[sp.set];
+  const activeLambda = sp.set === 'chord' ? STATE.lamC : sp.set === 'voice' ? STATE.lamV : sp.set === 'move' ? STATE.lamM : (STATE.lamT != null ? STATE.lamT : 0.50);
+  const ruleRing = STATE.ruleRing || { enabled: true, op: 'circ', ruleA: 'cpt', ruleB: 'topo' };
+
+  const ringInfo = evaluateAlgebraicRuleRing(
+    sp.axes, sp.dims, sp.strides,
+    setProfiles, activeLambda,
+    sp.flips, ruleRing
+  );
+
+  const bundle = evaluateFiberBundleIntersection(ruleRing);
+
+  const padL = 50, padR = 20, padT = 20, padB = 25;
+  const chartW = w - padL - padR, chartH = h - padT - padB;
+
+  // Render cell state bars across rule space order
+  const size = tbl.size;
+  const barW = chartW / size;
+
+  const vecA = getBaseRuleVector(ruleRing.ruleA, sp.axes, sp.dims, sp.strides, setProfiles, activeLambda, size);
+  const vecB = getBaseRuleVector(ruleRing.ruleB, sp.axes, sp.dims, sp.strides, setProfiles, activeLambda, size);
+
+  for (let f = 0; f < size; f++) {
+    const x = padL + f * barW;
+
+    // Rule A indicator (top bar)
+    if (vecA[f]) {
+      ctx.fillStyle = dark ? 'rgba(97,175,239,0.5)' : 'rgba(30,136,229,0.5)';
+      ctx.fillRect(x, padT, Math.max(1, barW), chartH * 0.22);
+    }
+
+    // Rule B indicator (second bar)
+    if (vecB[f]) {
+      ctx.fillStyle = dark ? 'rgba(224,108,117,0.5)' : 'rgba(221,24,24,0.5)';
+      ctx.fillRect(x, padT + chartH * 0.25, Math.max(1, barW), chartH * 0.22);
+    }
+
+    // Effective Composite Ring Result (third bar)
+    if (tbl.t[f]) {
+      ctx.fillStyle = dark ? 'rgba(152,195,121,0.85)' : 'rgba(46,139,87,0.85)';
+      ctx.fillRect(x, padT + chartH * 0.50, Math.max(1, barW), chartH * 0.22);
+    }
+
+    // Fiber Bundle Intersection Weight (bottom bar)
+    const fw = bundle.fiberIntersections[f % bundle.fiberIntersections.length] || 0;
+    if (fw > 0.2) {
+      const alpha = Math.min(1.0, fw * 0.5);
+      ctx.fillStyle = dark ? `rgba(198,120,221,${alpha})` : `rgba(142,68,173,${alpha})`;
+      ctx.fillRect(x, padT + chartH * 0.75, Math.max(1, barW), chartH * 0.25);
+    }
+  }
+
+  // Bar labels
+  ctx.font = '10px monospace';
+  ctx.fillStyle = dark ? '#a0a0a0' : '#606060';
+  ctx.textAlign = 'right';
+  ctx.fillText('R_' + ruleRing.ruleA, padL - 6, padT + chartH * 0.15);
+  ctx.fillText('R_' + ruleRing.ruleB, padL - 6, padT + chartH * 0.40);
+  ctx.fillText('R_eff', padL - 6, padT + chartH * 0.65);
+  ctx.fillText('Fiber', padL - 6, padT + chartH * 0.90);
+
+  // Status footer with Fiber Bundle Density Metrics
+  ctx.textAlign = 'left';
+  ctx.fillText('Ring Ideal Over F_2^N: ' + ringInfo.expr + ' | Ideal Deg: ' + ringInfo.idealDeg + ' | Fiber Intersections: ' + bundle.activeFiberCount + ' (' + (bundle.density * 100).toFixed(1) + '% density) | Tangent Phase Space: z_t = (p_t, v_t)', padL, h - 6);
+}
+
+
+/* ==========================================================================
+   TOPOLOGICAL FIBER BUNDLE & VOICE-LEADING ORBIFOLD INTERSECTION ENGINE
+   Based on Voice-Leading Orbifold Geometry (Tymoczko), Tonal Pitch Space (Lerdahl),
+   and Mathematical Music Theory (Mazzola, Lewin).
+   ========================================================================== */
+
+// Base Space B = Chord Space C(d, tau, rho, eta)
+// Fiber Space F_C = Voice Space V(kappa, mu, phi, sigma, gamma)
+// Sub-Fiber M_V = Movement Space M(psi, mu_m, gamma_m, sigma_m, phi_m)
+
+function bundleProjection_M_to_V(mCoords) {
+  // pi_{M -> V}: maps 5D movement coordinates [psi, mu_m, gamma_m, sigma_m, phi_m] to Voice Space coords
+  // psi (departure context: 0=nct, 1=diat, 2=chord) -> prev phi
+  // mu_m (hold, step, sm-leap, lg-leap, res/rec) -> voice leap/step mu
+  // gamma_m (sim, obl, con) -> voice relative motion gamma
+  // sigma_m (struct, pass) -> voice metric accent sigma
+  // phi_m (nct, diat, chord/gt) -> voice fit class phi
+  const psi = mCoords[0], mu_m = mCoords[1], gamma_m = mCoords[2], sigma_m = mCoords[3], phi_m = mCoords[4];
+
+  // Map step class mu_m (0..4) to voice leap class mu (0..4)
+  const mu_v = mu_m;
+  // Map phi_m (0..2) to voice fit phi (0..4: 0=chr-f, 1=nct, 2=ext, 3=chd, 4=root)
+  const phi_v = phi_m === 2 ? 4 : phi_m === 1 ? 2 : 0;
+  // Map gamma_m (0..2) to voice agreement kappa (0..2)
+  const kappa_v = gamma_m;
+  const sigma_v = sigma_m;
+
+  return [kappa_v, mu_v, phi_v, sigma_v, gamma_m];
+}
+
+function bundleProjection_V_to_C(vCoords) {
+  // pi_{V -> C}: maps 5D voice coordinates to Chord Space coords [d, tau, rho, eta]
+  const kappa = vCoords[0], mu = vCoords[1], phi = vCoords[2], sigma = vCoords[3], gamma = vCoords[4];
+
+  // Voice consonance & fit constrain chord tension tau and type rho
+  const tau_c = Math.min(4, Math.max(0, 4 - phi));
+  const rho_c = phi >= 3 ? 0 : (phi === 2 ? 1 : 2); // diatonic, V7, vii°
+  const d_c = 5; // Circle of 5ths root fall center
+  const eta_c = sigma === 0 ? 1 : 0;
+
+  return [d_c, tau_c, rho_c, eta_c];
+}
+
+// Orbifold Geodesic Distance in Fiber Bundle Space
+function orbifoldDistance(cCoords, vCoords, mCoords) {
+  // Orbifold distance metric D_orb = sqrt(d_C^2 + w_v * d_V^2 + w_m * d_M^2)
+  const d_C = Math.hypot(cCoords[0] - 5, cCoords[1] - 2, cCoords[2] - 1);
+  const d_V = Math.hypot(vCoords[0] - 1, vCoords[1] - 1, vCoords[2] - 3);
+  const d_M = Math.hypot(mCoords[0] - 1, mCoords[1] - 1, mCoords[2] - 1, mCoords[4] - 1);
+
+  return Math.sqrt(d_C * d_C + 1.2 * d_V * d_V + 1.5 * d_M * d_M);
+}
+
+// Evaluate Fiber Bundle Intersections & Kronecker Cross-Space Tensor
+let BUNDLE_CACHE = null;
+let BUNDLE_CACHE_KEY = '';
+
+function evaluateFiberBundleIntersection(ruleOpts) {
+  const key = [
+    STATE.lamC, STATE.lamV, STATE.lamM,
+    ruleOpts ? ruleOpts.op : '', ruleOpts ? ruleOpts.ruleA : '', ruleOpts ? ruleOpts.ruleB : '',
+    STATE.supervisor ? STATE.supervisor.syntaxMode : ''
+  ].join('|');
+
+  if (BUNDLE_CACHE && BUNDLE_CACHE_KEY === key) return BUNDLE_CACHE;
+  const cTbl = chordTable(), vTbl = voiceTable(), mTbl = moveTable();
+  const cProfiles = STATE.profiles.chord, vProfiles = STATE.profiles.voice, mProfiles = STATE.profiles.move;
+
+  const cRing = evaluateAlgebraicRuleRing(CHORD_AXES, CHORD_DIMS, CHORD_STR.strides, cProfiles, STATE.lamC, STATE.cellFlips.chord, ruleOpts);
+  const vRing = evaluateAlgebraicRuleRing(VOICE_AXES, VOICE_DIMS, VOICE_STR.strides, vProfiles, STATE.lamV, STATE.cellFlips.voice, ruleOpts);
+  const mRing = evaluateAlgebraicRuleRing(MOVE_AXES, MOVE_DIMS, MOVE_STR.strides, mProfiles, STATE.lamM, STATE.cellFlips.move, ruleOpts);
+
+  const mCoordsList = cellList(MOVE_DIMS);
+
+  // Compute Cross-Space Fiber Pullback Intersection Map
+  const fiberIntersections = new Float32Array(mRing.size);
+  let totalIntersectionWeight = 0;
+  let activeFiberCount = 0;
+
+  for (let mf = 0; mf < mRing.size; mf++) {
+    const mPass = mRing.t[mf];
+    if (!mPass) continue;
+
+    const mCoords = mCoordsList[mf];
+    const vProjCoords = bundleProjection_M_to_V(mCoords);
+    const vf = (vProjCoords[0]*VOICE_STR.strides[0] + vProjCoords[1]*VOICE_STR.strides[1] + vProjCoords[2]*VOICE_STR.strides[2] + vProjCoords[3]*VOICE_STR.strides[3] + vProjCoords[4]*VOICE_STR.strides[4]) % vRing.size;
+
+    const vPass = vRing.t[vf];
+
+    const cProjCoords = bundleProjection_V_to_C(vProjCoords);
+    const cf = (cProjCoords[0]*CHORD_STR.strides[0] + cProjCoords[1]*CHORD_STR.strides[1] + cProjCoords[2]*CHORD_STR.strides[2] + cProjCoords[3]*CHORD_STR.strides[3]) % cRing.size;
+
+    const cPass = cRing.t[cf];
+
+    const dist = orbifoldDistance(cProjCoords, vProjCoords, mCoords);
+    const weight = (vPass ? 1.5 : 0.6) * (cPass ? 2.0 : 0.8) / (1.0 + 0.3 * dist);
+
+    fiberIntersections[mf] = weight;
+    activeFiberCount++;
+    totalIntersectionWeight += weight;
+  }
+
+  BUNDLE_CACHE = {
+    cRing, vRing, mRing,
+    fiberIntersections,
+    activeFiberCount,
+    totalIntersectionWeight,
+    density: activeFiberCount / Math.max(1, mRing.size)
+  };
+  BUNDLE_CACHE_KEY = key;
+  return BUNDLE_CACHE;
+}
+
 
 function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, ringOpts) {
   const { order, costs, rank } = costOrder(axes, dims, prof);
@@ -1568,25 +1898,53 @@ function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, rin
   for (let f = 0; f < size; f++) { if (vecA[f]) degA++; if (vecB[f]) degB++; }
 
   const t = new Uint8Array(size);
+  const syntaxMode = (STATE.supervisor && STATE.supervisor.syntaxMode) ? STATE.supervisor.syntaxMode : 'jazz';
+  const cellCoordsList = cellList(dims);
 
   if (op === 'and') {
+    // Style-Aware Cadential Intersection R_A ∧ R_B
     for (let f = 0; f < size; f++) t[f] = vecA[f] & vecB[f];
   } else if (op === 'or') {
+    // Harmonic Symmetry Union R_A ∨ R_B
     for (let f = 0; f < size; f++) t[f] = vecA[f] | vecB[f];
   } else if (op === 'circ') {
-    const shift = (degA * 3 + 1) % size;
+    // Non-Commutative Product R_A ∘ R_B via Axis Coordinate Group Translation T_k(c)
+    const k0 = (degA + (syntaxMode === 'jazz' ? 2 : 1)) % dims[0];
+    const k1 = (degB + (syntaxMode === 'classical' ? 1 : 2)) % dims[1];
+
     for (let f = 0; f < size; f++) {
-      const mappedIdx = (f + shift) % size;
-      t[f] = vecA[f] & vecB[mappedIdx];
+      const c = cellCoordsList[f];
+      const c_shifted = c.slice();
+      c_shifted[0] = (c[0] + k0) % dims[0];
+      c_shifted[1] = (c[1] + k1) % dims[1];
+
+      let mappedF = 0;
+      for (let i = 0; i < c_shifted.length; i++) mappedF += c_shifted[i] * strides[i];
+
+      t[f] = vecA[f] & vecB[mappedF % size];
+    }
+  } else if (op === 'fusion') {
+    // Fusion Modal Synthesis (R_A ⊙ R_B) via Coordinate Axis Inversion I(c)
+    for (let f = 0; f < size; f++) {
+      const c = cellCoordsList[f];
+      const c_inv = c.slice();
+      c_inv[1] = dims[1] - 1 - c[1];
+
+      let mappedF = 0;
+      for (let i = 0; i < c_inv.length; i++) mappedF += c_inv[i] * strides[i];
+
+      const isGuideToneCell = c[c.length - 1] >= 1; // Fit class is diatonic/chord tone
+      t[f] = isGuideToneCell ? (vecA[f] | vecB[mappedF % size]) : (vecA[f] & vecB[f]);
     }
   }
 
+  // Apply manual cell overrides/flips
   for (const k in flips) {
     const v = flips[k];
     if (v == null) continue;
     const c = k.split(',').map(Number);
     let f = 0; for (let i = 0; i < c.length; i++) f += c[i] * strides[i];
-    t[f] = v;
+    if (f < size) t[f] = v;
   }
 
   let legal = 0;
@@ -1595,9 +1953,10 @@ function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, rin
   let collapsed = false;
   let idealDeg = legal;
 
+  // Non-collapsing algebraic sub-automaton projection
   if (legal === 0) {
     collapsed = true;
-    const minCells = Math.max(1, Math.round(0.08 * size));
+    const minCells = Math.max(1, Math.round(0.12 * size));
     for (let i = 0; i < minCells; i++) {
       t[order[i]] = 1;
     }
@@ -1605,9 +1964,11 @@ function evaluateAlgebraicRuleRing(axes, dims, strides, prof, lambda, flips, rin
     idealDeg = minCells;
   }
 
+  const opSymbol = op === 'and' ? '∧' : op === 'or' ? '∨' : op === 'fusion' ? '⊙' : '∘';
+
   return {
-    t, costs, order, rank, legalCount: legal, cut: legal, size,
-    degA, degB, idealDeg, collapsed, op, expr: `R = ${nameA} ${op === 'and' ? '∧' : op === 'or' ? '∨' : '∘'} ${nameB}`
+    t, legal: t, costs, order, rank, legalCount: legal, cut: legal, size,
+    degA, degB, idealDeg, collapsed, op, expr: `R = ${nameA} ${opSymbol} ${nameB}`
   };
 }
 
@@ -1633,7 +1994,7 @@ function buildTable(axes, dims, strides, prof, lambda, flips){
       t[f]=v;
     }
     let legal=0; for(let i=0;i<t.length;i++) legal+=t[i];
-    hit = {t, costs, order, rank, legalCount:legal, cut:n, size:t.length};
+    hit = {t, legal:t, costs, order, rank, legalCount:legal, cut:n, size:t.length};
   }
 
   if(TABLE_CACHE.size>48) TABLE_CACHE.clear();
@@ -1659,9 +2020,28 @@ function moveTable(lambda, flips, prof){
     lambda==null?STATE.lamM:lambda,
     flips||STATE.cellFlips.move);
 }
+function timeTable(lambda, flips, prof){
+  return buildTable(TIME_AXES, TIME_DIMS, TIME_STR.strides,
+    prof||(STATE.profiles && STATE.profiles.time ? STATE.profiles.time : defaultProfiles().time),
+    lambda==null?(STATE.lamT != null ? STATE.lamT : 0.50):lambda,
+    flips||(STATE.cellFlips && STATE.cellFlips.time ? STATE.cellFlips.time : {}));
+}
 const CS = CHORD_STR.strides, VS = VOICE_STR.strides, MS = MOVE_STR.strides;
 function cIdx(d,tau,rho,eta){ return d*CS[0]+tau*CS[1]+rho*CS[2]+eta*CS[3]; }
 function vIdx(k,mu,phi,sg,gm){ return k*VS[0]+mu*VS[1]+phi*VS[2]+sg*VS[3]+gm*VS[4]; }
+
+const TIME_AXES = [
+  {key:'m_pos', n:4, label:'m_pos', what:'metric beat position (downbeat -> weak beat -> offbeat -> sync)', tick:i=>['down','weak','off','sync'][i]},
+  {key:'m_sub', n:3, label:'m_sub', what:'subdivision density (quarter -> eighth -> sixteenth)', tick:i=>['1/4','1/8','1/16'][i]},
+  {key:'d_dur', n:3, label:'d_dur', what:'duration class (staccato -> normal -> sustained)', tick:i=>['stacc','norm','sust'][i]},
+  {key:'s_sync',n:2, label:'s_sync',what:'syncopation phase (straight -> syncopated)', tick:i=>['str','sync'][i]}
+];
+const TIME_DIMS = TIME_AXES.map(a=>a.n);
+const TIME_STR = axisStrides(TIME_DIMS);
+const TS = TIME_STR.strides;
+function tIdx(pos, sub, dur, sync){ return pos*TIME_STR.strides[0] + sub*TIME_STR.strides[1] + dur*TIME_STR.strides[2] + sync*TIME_STR.strides[3]; }
+
+
 function mIdx(psi,mu_m,gm_m,sg_m,phi_m){ return psi*MS[0]+mu_m*MS[1]+gm_m*MS[2]+sg_m*MS[3]+phi_m*MS[4]; }
 
 // Momentum class now reads the composer's own d-profile, so reshaping which
@@ -2082,113 +2462,328 @@ function applyMotionConstraint(cands, prevPitch, motionMode, ear) {
   return filtered.length ? filtered : cands;
 }
 
-function evalCandidateMove(m, ctx) {
-  const { prevPitch, prev2Pitch, prevPhi, others, chordTones, rootPc, scalePCs, tblVoice, tblMove, supCtx, structural } = ctx;
-  const chordPCs = chordTones ? chordTones.map(pcOf) : [];
-  const root = rootPc != null ? rootPc : (chordTones && chordTones.length ? pcOf(chordTones[0]) : 0);
-  const fit = fitClass(pcOf(m), chordPCs, scalePCs, root);
-  const dv = prevPitch == null ? 0 : (m - prevPitch);
-  const absDv = Math.abs(dv);
 
-  // 1. Voice Tensor Classification
-  const kappa = Math.min(2, consonanceCount(m, others));
-  const mu = prevPitch == null ? 2 : motionClass(dv);
-  const phi = fit;
-  const sigma = structural ? 0 : 1;
-  const gamma = relativeMotion(dv, others);
+/* ==========================================================================
+   GEOMETRIC MUSIC THEORY: BOARD TANGENT SPACE & CONSTRAINT MANIFOLD ENGINE
+   Represents Board State s in S, Tangent Space T_s S, Consonance Potential V(s),
+   and Vector Field Rules governing Movement Vectors m in T_s S.
+   ========================================================================== */
 
-  const vCell = vIdx(kappa, mu, phi, sigma, gamma);
-  const voiceLegal = tblVoice ? tblVoice.t[vCell] === 1 : true;
-  const voiceCost = tblVoice ? tblVoice.costs[vCell] : 0;
+// 1. Board State s = (pitches p, intervals I, consonance potential V(s), metric phase sigma)
+function computeBoardState(voicesPitches, stepIndex) {
+  const mod12_local = x => ((x % 12) + 12) % 12;
+  const pitches = (voicesPitches || []).map(p => (p && typeof p === 'object' && typeof p.pitch === 'number') ? p.pitch : (typeof p === 'number' ? p : 60));
+  const bass = pitches[2] != null ? pitches[2] : (pitches[1] != null ? pitches[1] : pitches[0]);
 
-  // 2. Intermediate Movement Tensor Classification
-  // psi: departure tone context (0: nct/chromatic, 1: diatonic scale/extension, 2: chord/guide tone)
-  let psi = 2; // Default to chord tone if no previous state
-  if (prevPhi != null) {
-    if (prevPhi < 2) psi = 0;       // NCT or chromatic approach
-    else if (prevPhi === 2) psi = 1; // Diatonic passing / extension
-    else psi = 2;                    // Essential chord tone / guide tone (phi >= 3)
-  }
+  // Compute vertical interval matrix I relative to bass
+  const intervals = pitches.map(p => p != null ? mod12_local(p - bass) : 0);
 
-  // phi_m: target tone fit category (0: nct/chromatic, 1: diatonic scale/extension, 2: chord/guide tone)
-  let phi_m = 2;
-  if (fit < 2) phi_m = 0;       // NCT / chromatic
-  else if (fit === 2) phi_m = 1; // Diatonic scale / extension
-  else phi_m = 2;                // Chord / guide tone (fit >= 3)
-
-  // mu_m: movement step class (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: resolution/recovery)
-  // Music theory definition of res/rec (index 4):
-  // Stepwise motion (1 or 2 semitones) landing on a chord/guide tone (phi_m === 2) that EITHER:
-  // (a) Resolves an unstable departure (psi < 2)
-  // (b) Recovers a previous leap (prevPitch - prev2Pitch was a leap > 2 semitones in opposite direction)
-  let mu_m = 1;
-  const prevLeap = (prevPitch != null && prev2Pitch != null) ? (prevPitch - prev2Pitch) : 0;
-  const isOppositeRecovery = Math.abs(prevLeap) > 2 && (dv * prevLeap < 0);
-  const isUnstableDeparture = (psi < 2);
-
-  if (absDv === 0) {
-    mu_m = 0; // hold
-  } else if (absDv <= 2) {
-    if (phi_m === 2 && (isUnstableDeparture || isOppositeRecovery)) {
-      mu_m = 4; // resolution / recovery
-    } else {
-      mu_m = 1; // step
+  // Vertical Dissonance Potential V(s): 0 = fully consonant (3rd, 6th, 5th, 8ve), >0 = dissonant (2nd, 7th, 4th above bass, tritone)
+  let consonanceEnergy = 0;
+  for (let i = 0; i < pitches.length; i++) {
+    if (pitches[i] == null) continue;
+    for (let j = i + 1; j < pitches.length; j++) {
+      if (pitches[j] == null) continue;
+      const ic = mod12_local(Math.abs(pitches[i] - pitches[j]));
+      // Fourth above bass is dissonant in 3-part species counterpoint
+      if (i === 2 || j === 2) {
+        const otherIdx = i === 2 ? j : i;
+        const intervalAboveBass = mod12_local(pitches[otherIdx] - bass);
+        if (intervalAboveBass === 5) consonanceEnergy += 1.5; // Perfect 4th above bass
+      }
+      if (ic === 1 || ic === 2 || ic === 10 || ic === 11) consonanceEnergy += 2.0; // Seconds / Sevenths
+      else if (ic === 6) consonanceEnergy += 2.5; // Tritone
     }
-  } else if (absDv <= 4) {
-    mu_m = 2; // sm-leap
-  } else {
-    mu_m = 3; // lg-leap
   }
 
-  const gamma_m = gamma; // 0: sim, 1: obl, 2: con
-  const sigma_m = sigma; // 0: struct, 1: pass
-
-  const mCell = mIdx(psi, mu_m, gamma_m, sigma_m, phi_m);
-  const moveLegal = tblMove ? tblMove.t[mCell] === 1 : true;
-  const moveCost = tblMove ? tblMove.costs[mCell] : 0;
-
-  // 3. Strict Music Theory Hard Constraints on Movement & Style Syntax
-  let styleBonus = 0;
-  let moveAllowedByTheory = true;
-
-  // (1) Prohibit leaping from a non-chord tone / chromatic tone (psi === 0 && absDv > 2)
-  if (psi === 0 && absDv > 2) {
-    moveAllowedByTheory = false;
-  }
-
-  // (2) Prohibit leaping into non-chord tones on structural beats
-  if (structural && phi_m === 0) {
-    moveAllowedByTheory = false;
-  }
-
-  // (3) Prohibit unresolved non-chord tones on structural beats unless stepwise resolved
-  if (structural && fit < 2 && mu_m !== 4) {
-    moveAllowedByTheory = false;
-  }
-
-  if (supCtx && supCtx.syntaxMode === 'jazz') {
-    const pc = pcOf(m);
-    const is3rdOr7th = chordTones && chordTones.some(ct => {
-      const interval = (pcOf(ct) - root + 12) % 12;
-      return interval === 3 || interval === 4 || interval === 10 || interval === 11;
-    });
-    if (is3rdOr7th) styleBonus += (supCtx.guideToneWeight || 1.0) * 0.25;
-    if (absDv === 1 && fit < 3) styleBonus += (supCtx.enclosureWeight || 0.8) * 0.20;
-  }
-
-  const combinedCost = (moveCost * 0.50) + (voiceCost * 0.50) - styleBonus;
-  const isLegal = moveLegal && voiceLegal && moveAllowedByTheory;
+  const stepsPerBar = STATE.stepsPerBar || 8;
+  const metricPhase = (stepIndex % 2 === 0) ? 0 : 1; // 0 = structural beat, 1 = passing off-beat
 
   return {
-    m,
-    isLegal,
-    moveLegal,
-    voiceLegal,
-    combinedCost,
-    moveCost,
-    voiceCost,
-    cls: { kappa, mu, phi, sigma, gamma },
-    moveCls: { psi, mu_m, gamma_m, sigma_m, phi_m, mCell },
+    pitches,
+    bass,
+    intervals,
+    V: consonanceEnergy,
+    isDissonant: consonanceEnergy > 0.0,
+    metricPhase,
+    stepIndex
+  };
+}
+
+// 2. Evaluates Movement Vector m in Tangent Space T_s S against the Local Constraint Manifold M_valid(s, lambda)
+function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches, options) {
+  const dp = moveVector;
+  const absDp = Math.abs(dp);
+  const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
+
+  // 1. Departure Context psi
+  const prevPc = prevPitch != null ? ((prevPitch % 12) + 12) % 12 : null;
+  let psi = 1;
+  if (boardState.isDissonant) {
+    psi = 0; // Departing from dissonance/NCT
+  } else if (prevPc != null && boardState.intervals.some(i => i === prevPc)) {
+    psi = 2; // Departing from essential chord/guide tone
+  }
+
+  // 2. Movement Step Class mu_m (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: res/rec)
+  let mu_m = 0;
+  if (dp === 0) mu_m = 0;
+  else if (absDp <= 2) {
+    if (prevLeapMomentum != null && prevLeapMomentum * dp < 0) mu_m = 4; // Stepwise leap recovery
+    else if (boardState.isDissonant) mu_m = 4; // Stepwise resolution
+    else mu_m = 1; // Normal step
+  } else if (absDp <= 4) mu_m = 2; // Small leap
+  else mu_m = 3; // Large leap
+
+  // 3. Relative Voice Motion gamma_m
+  let gamma_m = 1;
+  if (otherPitches && otherPitches.length) {
+    const otherMove = (otherPitches[0] && typeof otherPitches[0].pitch === 'number' && typeof otherPitches[0].prevPitch === 'number') ? (otherPitches[0].pitch - otherPitches[0].prevPitch) : 0;
+    if (otherMove !== 0 && dp !== 0) {
+      if (dp * otherMove > 0) gamma_m = 0; // Similar
+      else if (dp * otherMove < 0) gamma_m = 2; // Contrary
+    }
+  }
+
+  // 4. Metric Accent sigma_m
+  const sigma_m = boardState.metricPhase;
+
+  // 5. Target Fit Class phi_m evaluated against HARMONIC CHORD TONES
+  let activeChordPcs = [];
+  if (options && options.chordTones && Array.isArray(options.chordTones)) {
+    activeChordPcs = options.chordTones.map(pcOf);
+  } else if (options && options.chords) {
+    const seg = segOfStep(options.step || 0);
+    if (options.chords[seg] && options.chords[seg].tones) {
+      activeChordPcs = options.chords[seg].tones.map(pcOf);
+    }
+  }
+
+  const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : [0,2,4,5,7,9,11];
+  const targetPc = ((targetPitch % 12) + 12) % 12;
+  const isChordTone = activeChordPcs.length > 0 ? activeChordPcs.includes(targetPc) : boardState.pitches.filter(p => p != null).map(pcOf).includes(targetPc);
+  const isScale = activeScalePcs.includes(targetPc);
+
+  let phi_m = 0;
+  if (isChordTone) phi_m = 2;
+  else if (isScale) phi_m = 1;
+  else phi_m = 0;
+
+  // STRICT SPECIES COUNTERPOINT & VERTICAL CONSONANCE HARD CONSTRAINTS
+  // Constraint A: Prohibit entering leaps into non-chord tones
+  if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
+
+  // Constraint B: Prohibit leaping from active dissonances V(s) > 0 (Dissonance Resolution Gradient)
+  if (boardState.isDissonant && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Leap from Dissonance' };
+
+  // Constraint C: Prohibit unrecovered large leaps (absDp >= 5)
+  if (absDp >= 5 && prevLeapMomentum != null && prevLeapMomentum * dp > 0) {
+    return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
+  }
+
+  // Constraint D: Structural beat vertical consonance above bass (3rds, 5ths, 6ths, 8ves required for upper voices)
+  if (sigma_m === 0) {
+    if (boardState.bass != null && voiceIdx !== 2) {
+      const intervalAboveBass = ((targetPitch - boardState.bass) % 12 + 12) % 12;
+      const isConsonantVertical = (intervalAboveBass === 0 || intervalAboveBass === 3 || intervalAboveBass === 4 || intervalAboveBass === 7 || intervalAboveBass === 8 || intervalAboveBass === 9);
+      if (!isConsonantVertical && psi !== 2) {
+        return { valid: false, cost: 990, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Structural Beat Dissonance above Bass' };
+      }
+    }
+    if (voiceIdx === 2 && phi_m < 2) {
+      return { valid: false, cost: 980, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Bass Non-Chord Tone on Structural Beat' };
+    }
+  }
+
+  // CONTRAPUNTAL VECTOR FIELD POTENTIAL V_cpt
+  let kineticInertia = 0;
+  if (dp === 0) {
+    kineticInertia += 1.2;
+  } else if (absDp <= 2) {
+    kineticInertia += 0.05 * absDp; // Prefer stepwise motion
+  } else {
+    kineticInertia += absDp * 0.15; // Moderate leap inertia
+  }
+
+  // Energy Release & Dissonance Resolution Gradient
+  if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8;
+  if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) kineticInertia -= 0.6;
+
+  // Fusion/Jazz Guide-Tone Resolution Chain: 3rd -> 7th or 7th -> 3rd stepwise motion (1 or 2 semitones)
+  if (prevPc != null) {
+    const scaleRootPc = (STATE && STATE.root != null) ? STATE.root : 0;
+    const prevDegree = (prevPc - scaleRootPc + 12) % 12;
+    const targetDegree = (targetPc - scaleRootPc + 12) % 12;
+
+    // 7th degree (11 semitones) resolving stepwise to 3rd degree (3/4 semitones) or tonic (0 semitones)
+    if (prevDegree === 11 && (targetDegree === 0 || targetDegree === 3 || targetDegree === 4)) {
+      kineticInertia -= 0.9; // Guide-tone resolution attractor
+    }
+    // 3rd degree (3 or 4 semitones) resolving to 7th degree (10/11 semitones) in dominant chains
+    if ((prevDegree === 3 || prevDegree === 4) && (targetDegree === 10 || targetDegree === 11) && absDp <= 2) {
+      kineticInertia -= 0.7; // Voice-leading guide-tone chain attractor
+    }
+  }
+
+  // Anti-Stagnation & Oscillation Potential Barriers
+  if (prevPitch != null && targetPitch === prevPitch) kineticInertia += 2.0;
+  if (prev2Pitch != null && targetPitch === prev2Pitch && targetPitch !== prevPitch) kineticInertia += 1.8;
+  if (prev3Pitch != null && targetPitch === prev3Pitch && targetPitch !== prevPitch) kineticInertia += 1.0;
+
+  return {
+    valid: true,
+    cost: Math.max(0, kineticInertia),
+    coords: [psi, mu_m, gamma_m, sigma_m, phi_m],
+    dp,
+    absDp
+  };
+}
+
+
+function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitches, prev2Pitch, prev3Pitch, options) {
+  // Construct complete 3-part voice pitch vector [soprano, alto, bass]
+  const fullPitches = [60, 60, 36];
+  if (otherPitches && Array.isArray(otherPitches)) {
+    for (const item of otherPitches) {
+      if (item && typeof item === 'object') {
+        if (item.v === 0) fullPitches[0] = item.pitch;
+        else if (item.v === 1) fullPitches[1] = item.pitch;
+        else if (item.v === 2) fullPitches[2] = item.pitch;
+      }
+    }
+  }
+  fullPitches[voiceIdx] = candPitch;
+
+  const boardState = computeBoardState(fullPitches, stepIndex);
+  const dp = prevPitch != null ? candPitch - prevPitch : 0;
+  const prevLeapMomentum = (prevPitch != null && prev2Pitch != null) ? (prevPitch - prev2Pitch) : 0;
+
+  const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches, options);
+
+  // 1. Movement Rule Space Cell Coordinates
+  const [psi, mu_m, gamma_m, sigma_m, phi_m] = flowEval.coords;
+  const mF = psi*MS[0] + mu_m*MS[1] + gamma_m*MS[2] + sigma_m*MS[3] + phi_m*MS[4];
+  const mTbl = moveTable();
+
+  // 2. Temporal Rule Space Cell Coordinates
+  const stepsPerBar = STATE.stepsPerBar || 8;
+  const m_pos = Math.floor((stepIndex % stepsPerBar) / Math.max(1, stepsPerBar / 4)) % 4;
+  const m_sub = (stepIndex % 2 === 0) ? 0 : 1;
+  const d_dur = 1;
+  const s_sync = (stepIndex % 2 === 1) ? 1 : 0;
+  const tF = tIdx(m_pos, m_sub, d_dur, s_sync);
+  const tTbl = timeTable();
+
+  // 3. Voice Rule Space Cell Coordinates (kappa = count of consonant intervals 3, 4, 7, 8, 9, 12 with other voices)
+  let kappa_v = 0;
+  for (let u = 0; u < 3; u++) {
+    if (u === voiceIdx || fullPitches[u] == null) continue;
+    const ic = ((Math.abs(candPitch - fullPitches[u])) % 12 + 12) % 12;
+    if (ic === 3 || ic === 4 || ic === 7 || ic === 8 || ic === 9 || ic === 0) kappa_v++;
+  }
+  kappa_v = Math.min(2, kappa_v);
+
+  const phi_v = phi_m === 2 ? 4 : (phi_m === 1 ? 2 : 0);
+  const vF = vIdx(kappa_v, mu_m, phi_v, sigma_m, gamma_m);
+  const vTbl = voiceTable();
+
+  // UNIFIED 4-SPACE RULE TENSOR EVALUATION: R_eff = R_M && R_T && R_V
+  const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1) && (tTbl.t[tF % tTbl.size] === 1) && (vTbl.t[vF % vTbl.size] === 1);
+
+  const cls = { kappa: kappa_v, mu: mu_m, phi: phi_v, sigma: sigma_m, gamma: gamma_m, vCell: vF };
+  const moveCls = { psi, mu_m, gamma_m, sigma_m, phi_m, mCell: mF };
+  const timeCls = { m_pos, m_sub, d_dur, s_sync, tCell: tF };
+
+  // Unified Geometric Tensor Cost Surface: C_eff = C_flow + C_M + C_T + C_V
+  const mCost = (mTbl.costs[mF % mTbl.size] || 0);
+  const tCost = (tTbl.costs[tF % tTbl.size] || 0);
+  const vCost = (vTbl.costs[vF % vTbl.size] || 0);
+
+  const totalCost = flowEval.cost * 1.0 + mCost * 1.0 + vCost * 0.8 + tCost * 0.4;
+
+  return {
+    m: candPitch,
+    isLegal: isMoveLegal,
+    legal: isMoveLegal,
+    moveLegal: isMoveLegal,
+    voiceLegal: flowEval.valid,
+    combinedCost: totalCost,
+    cost: totalCost,
+    coords: flowEval.coords,
+    cls,
+    moveCls,
+    timeCls,
+    flowEval
+  };
+}
+
+function evaluateLookaheadMove(candPitch, voiceIdx, stepIndex, totalSteps, chords, prevPitch, prev2Pitch, otherPitches) {
+  if (!chords || stepIndex >= totalSteps - 1) return { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
+
+  const nextStep = stepIndex + 1;
+  const nextSeg = Math.min(segOfStep(nextStep), chords.length - 1);
+  const nextChord = chords[nextSeg];
+  if (!nextChord || !nextChord.tones) return { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
+
+  const reg = REGISTERS[voiceIdx] || REGISTERS[0];
+  const dp = prevPitch != null ? candPitch - prevPitch : 0;
+  const absDp = Math.abs(dp);
+
+  const candsNext = bounded(rangeAll(reg.lo, reg.hi), Math.max(reg.lo, candPitch - 12), Math.min(reg.hi, candPitch + 12));
+
+  let validCount = 0;
+  let hasStepwiseChordResolution = false;
+  let hasLeapRecovery = false;
+  let minNextCost = Infinity;
+
+  const targetPc = pcOf(candPitch);
+  const currentSeg = segOfStep(stepIndex);
+  const currentChordPcs = (chords[currentSeg] && chords[currentSeg].tones) ? chords[currentSeg].tones.map(pcOf) : [];
+  const isNCT = currentChordPcs.length > 0 && !currentChordPcs.includes(targetPc);
+  const isLargeLeap = absDp >= 5;
+
+  const nextChordPcs = nextChord.tones.map(pcOf);
+
+  for (let k = 0; k < candsNext.length; k++) {
+    const nextP = candsNext[k];
+    const nextDp = nextP - candPitch;
+    const absNextDp = Math.abs(nextDp);
+
+    const evalNext = evalCandidateMove(candPitch, nextP, voiceIdx, nextStep, otherPitches, prevPitch, prev2Pitch, { chordTones: nextChord.tones, chords, step: nextStep });
+
+    if (evalNext.isLegal || evalNext.voiceLegal) {
+      validCount++;
+      if (evalNext.combinedCost < minNextCost) minNextCost = evalNext.combinedCost;
+
+      const nextPc = pcOf(nextP);
+      const isNextChordTone = nextChordPcs.includes(nextPc);
+
+      if (absNextDp <= 2 && isNextChordTone) {
+        hasStepwiseChordResolution = true;
+      }
+
+      if (absNextDp <= 2 && (dp * nextDp < 0)) {
+        hasLeapRecovery = true;
+      }
+    }
+  }
+
+  if (validCount === 0) {
+    return { isDeadEnd: true, penalty: 999.0, lookaheadCost: 999.0, reason: 'Dead End: No legal progression at t+1' };
+  }
+
+  if (isNCT && !hasStepwiseChordResolution) {
+    return { isDeadEnd: true, penalty: 888.0, lookaheadCost: 888.0, reason: 'Dead End: Unresolved Non-Chord Tone at t+1' };
+  }
+
+  if (isLargeLeap && !hasLeapRecovery) {
+    return { isDeadEnd: true, penalty: 777.0, lookaheadCost: 777.0, reason: 'Dead End: Unrecovered Leap at t+1' };
+  }
+
+  return {
+    isDeadEnd: false,
+    penalty: 0.0,
+    lookaheadCost: isFinite(minNextCost) ? minNextCost : 0.0
   };
 }
 
@@ -2196,44 +2791,69 @@ function pickNote(cands, ctx){
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
   if(!cands || !cands.length) return { pitch: ctx.prevPitch || 60, cls: {kappa:1,mu:2,phi:4,sigma:0,gamma:1}, moveCls:{psi:2,mu_m:0,gamma_m:1,sigma_m:0,phi_m:2,mCell:0}, fellBack: true };
 
-  const { tbl, tblVoice, tblMove, supCtx } = ctx;
-  const tV = tblVoice || tbl || voiceTable();
-  const tM = tblMove || moveTable();
-  const sup = supCtx || (ctx.step != null ? evaluateSupervisorySpace(ctx.step, ctx.totalSteps || 64) : { syntaxMode:'jazz', guideToneWeight:1.0, enclosureWeight:0.8 });
+  const prevP = ctx.prevPitch;
+  const vIdx = ctx.v != null ? ctx.v : 0;
+  const stepIdx = ctx.step || 0;
+  const otherP = ctx.others || [60, 64, 48];
+  const prev2P = ctx.prev2Pitch;
+  const prev3P = ctx.prev3Pitch;
 
-  const evalCtx = Object.assign({}, ctx, { tblVoice: tV, tblMove: tM, supCtx: sup });
-  const evaluated = cands.map(m => evalCandidateMove(m, evalCtx));
+  const evaluated = cands.map(m => {
+    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, ctx);
+    const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
+    base.lookahead = look;
+    base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
+    return base;
+  });
 
-  let legal = evaluated.filter(e => e.isLegal);
+  let legal = evaluated.filter(e => e.isLegal && !e.lookahead.isDeadEnd);
   let fellBack = false;
 
   if (!legal.length) {
-    legal = evaluated.filter(e => e.moveLegal || e.voiceLegal);
-    if (!legal.length) legal = evaluated.slice();
+    legal = evaluated.filter(e => e.isLegal);
+    if (!legal.length) {
+      legal = evaluated.filter(e => e.voiceLegal && !e.lookahead.isDeadEnd);
+      if (!legal.length) {
+        legal = evaluated.filter(e => e.voiceLegal);
+        if (!legal.length) legal = evaluated.slice();
+      }
+    }
     fellBack = true;
   }
 
   const mode = STATE.take;
   legal.sort((a, b) => {
+    if (a.lookahead.isDeadEnd !== b.lookahead.isDeadEnd) {
+      return a.lookahead.isDeadEnd ? 1 : -1;
+    }
+
     if (ctx.preferRoot != null) {
       const ra = pcOf(a.m) === ctx.preferRoot ? 0 : 1;
       const rb = pcOf(b.m) === ctx.preferRoot ? 0 : 1;
       if (ra !== rb) return ra - rb;
     }
 
-    if (mode === 'strong' && a.combinedCost !== b.combinedCost) return a.combinedCost - b.combinedCost;
-    if (mode === 'bold'   && a.combinedCost !== b.combinedCost) return b.combinedCost - a.combinedCost;
+    if (mode === 'bold' && prevP != null) {
+      const isZeroA = (a.m === prevP) ? 1 : 0;
+      const isZeroB = (b.m === prevP) ? 1 : 0;
+      if (isZeroA !== isZeroB) return isZeroA - isZeroB;
+    }
 
-    const da = ctx.prevPitch == null ? 0 : Math.abs(a.m - ctx.prevPitch);
-    const db = ctx.prevPitch == null ? 0 : Math.abs(b.m - ctx.prevPitch);
-    if (da !== db) return da - db;
+    if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.01) {
+      return a.totalPathCost - b.totalPathCost;
+    }
 
-    if (a.combinedCost !== b.combinedCost) return a.combinedCost - b.combinedCost;
+    if (prevP != null) {
+      const da = Math.abs(a.m - prevP);
+      const db = Math.abs(b.m - prevP);
+      if (da !== db) return da - db;
+    }
+
     return a.m - b.m;
   });
 
   const chosen = legal[0];
-  return { pitch: chosen.m, cls: chosen.cls, moveCls: chosen.moveCls, fellBack };
+  return { pitch: chosen.m, cls: chosen.cls, moveCls: chosen.moveCls, timeCls: chosen.timeCls, fellBack };
 }
 
 
@@ -2257,24 +2877,52 @@ function pickEnhancedBassNote(cands, ctx) {
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
   if(!cands || !cands.length) return { pitch: ctx.prevPitch || 36, cls: {kappa:1,mu:2,phi:4,sigma:0,gamma:1}, moveCls:{psi:2,mu_m:0,gamma_m:1,sigma_m:0,phi_m:2,mCell:0}, fellBack: true };
 
-  const { tbl, tblVoice, tblMove, supCtx, preferredPcs, approachPc, isEnclosure } = ctx;
-  const tV = tblVoice || tbl || voiceTable();
-  const tM = tblMove || moveTable();
-  const sup = supCtx || (ctx.step != null ? evaluateSupervisorySpace(ctx.step, ctx.totalSteps || 64) : { syntaxMode:'jazz', guideToneWeight:1.0, enclosureWeight:0.8 });
+  const prevP = ctx.prevPitch;
+  const vIdx = 2;
+  const stepIdx = ctx.step || 0;
+  const otherP = ctx.others || [60, 64, 36];
+  const prev2P = ctx.prev2Pitch;
+  const prev3P = ctx.prev3Pitch;
+  const { preferredPcs, approachPc, isEnclosure } = ctx;
 
-  const evalCtx = Object.assign({}, ctx, { tblVoice: tV, tblMove: tM, supCtx: sup });
-  const evaluated = cands.map(m => evalCandidateMove(m, evalCtx));
+  const evaluated = cands.map(m => {
+    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, ctx);
+    const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
+    base.lookahead = look;
+    base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
+    return base;
+  });
 
-  let legal = evaluated.filter(e => e.isLegal);
+  let legal = evaluated.filter(e => e.isLegal && !e.lookahead.isDeadEnd);
   let fellBack = false;
 
   if (!legal.length) {
-    legal = evaluated.filter(e => e.moveLegal || e.voiceLegal);
-    if (!legal.length) legal = evaluated.slice();
+    legal = evaluated.filter(e => e.isLegal);
+    if (!legal.length) {
+      legal = evaluated.filter(e => e.voiceLegal && !e.lookahead.isDeadEnd);
+      if (!legal.length) {
+        legal = evaluated.filter(e => e.voiceLegal);
+        if (!legal.length) legal = evaluated.slice();
+      }
+    }
     fellBack = true;
   }
 
   legal.sort((a, b) => {
+    if (a.lookahead.isDeadEnd !== b.lookahead.isDeadEnd) {
+      return a.lookahead.isDeadEnd ? 1 : -1;
+    }
+
+    const isOscA = (prev2P != null && a.m === prev2P && a.m !== prevP) ? 1 : 0;
+    const isOscB = (prev2P != null && b.m === prev2P && b.m !== prevP) ? 1 : 0;
+    if (isOscA !== isOscB) return isOscA - isOscB;
+
+    if (ctx.structural && ctx.rootPc != null) {
+      const isRootA = pcOf(a.m) === ctx.rootPc ? 0 : 1;
+      const isRootB = pcOf(b.m) === ctx.rootPc ? 0 : 1;
+      if (isRootA !== isRootB) return isRootA - isRootB;
+    }
+
     if (preferredPcs && preferredPcs.length) {
       const rankA = preferredPcs.indexOf(pcOf(a.m));
       const rankB = preferredPcs.indexOf(pcOf(b.m));
@@ -2297,12 +2945,15 @@ function pickEnhancedBassNote(cands, ctx) {
       }
     }
 
-    if (a.combinedCost !== b.combinedCost) return a.combinedCost - b.combinedCost;
+    if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.01) {
+      return a.totalPathCost - b.totalPathCost;
+    }
+
     return a.m - b.m;
   });
 
   const chosen = legal[0];
-  return { pitch: chosen.m, cls: chosen.cls, moveCls: chosen.moveCls, fellBack };
+  return { pitch: chosen.m, cls: chosen.cls, moveCls: chosen.moveCls, timeCls: chosen.timeCls, fellBack };
 }
 
 function deterministicShuffle(arr, seed){
@@ -2339,8 +2990,8 @@ function runVoiceWalk(chords){
   const tM = moveTable();
   const total = STATE.onsets[0].length;
   const held=[null,null,null];
-  const prev2Pitch=[null,null,null], prevPhi=[null,null,null];
-  for(let v=0;v<3;v++) if(STATE.seed.voice[v]!=null) held[v]=STATE.seed.voice[v];
+  const prev2Pitch=[null,null,null], prev3Pitch=[null,null,null], prevPhi=[null,null,null];
+  for(let v=0;v<3;v++) held[v] = STATE.seed.voice[v] != null ? STATE.seed.voice[v] : null;
   let arpGen=null, arpSeg=-1, arpI=0;
   const res=[];
   for(let step=0; step<total; step++){
@@ -2349,14 +3000,14 @@ function runVoiceWalk(chords){
     const chord = chords[g], next = chords[Math.min(g+1, chords.length-1)];
     const scalePCs = SCALES[scaleForSeg(g)].map(o=>(STATE.root+o)%12);
     const before = held.slice();
-    const pitches=[null,null,null], deco=[false,false,false], fb=[false,false,false], cells=[null,null,null], moveCells=[null,null,null];
+    const pitches=[null,null,null], deco=[false,false,false], fb=[false,false,false], cells=[null,null,null], moveCells=[null,null,null], timeCells=[null,null,null];
     const hears=(v)=>{
       const o=[];
       for(let u=0;u<3;u++){
         if(u===v) continue;
         const now=pitches[u], p = now!=null ? now : held[u];
         if(p==null) continue;
-        o.push({pitch:p, prevPitch: now!=null ? before[u] : p});
+        o.push({v:u, pitch:p, prevPitch: now!=null ? before[u] : p});
       }
       return o;
     };
@@ -2367,7 +3018,11 @@ function runVoiceWalk(chords){
       fb[v]=r.fellBack;
       cells[v]=r.cls;
       moveCells[v]=r.moveCls;
-      prev2Pitch[v]=held[v];
+      timeCells[v]=r.timeCls;
+      if (held[v] !== r.pitch) {
+        prev3Pitch[v]=prev2Pitch[v];
+        prev2Pitch[v]=held[v];
+      }
       prevPhi[v]=r.cls.phi;
       held[v]=r.pitch;
     };
@@ -2405,7 +3060,7 @@ function runVoiceWalk(chords){
       const mMode2 = (STATE.motionConstraints && STATE.motionConstraints[2] && STATE.motionConstraints[2][step]) || 'auto';
       put(2, pickEnhancedBassNote(cands, {
         prevPitch: held[2],
-        prev2Pitch: prev2Pitch[2],
+        prev2Pitch: prev2Pitch[2], prev3Pitch: prev3Pitch[2],
         prevPhi: prevPhi[2],
         others: ear,
         chordTones: chord.tones,
@@ -2420,7 +3075,8 @@ function runVoiceWalk(chords){
         motionMode: mMode2,
         rootPc: chord.rootPc,
         stepInSeg: step - (g * segLen()),
-        step, totalSteps: total
+        step, totalSteps: total,
+        chords
       }));
     }
 
@@ -2435,14 +3091,16 @@ function runVoiceWalk(chords){
         const beneath=[held[1],cur(2)].filter(x=>x!=null);
         const lo = beneath.length ? Math.max.apply(null, beneath)+1 : 0;
         const ear=hears(0);
-        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), lo, 127), held[0], ear);
+        const prev0 = (held[0] != null) ? held[0] : 72;
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[0].lo,REGISTERS[0].hi), Math.max(lo, prev0 - 12), Math.min(REGISTERS[0].hi, prev0 + 12)), prev0, ear);
         const mMode0 = (STATE.motionConstraints && STATE.motionConstraints[0] && STATE.motionConstraints[0][step]) || 'auto';
         const figMode0 = (STATE.melodyFigures && STATE.melodyFigures[step]) || 'auto';
         const isMetricAccented0 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
-        put(0, pickNote(cands, {
-          prevPitch:held[0], prev2Pitch:prev2Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
+        put(0, pickNote(cands, { v: 0,
+          prevPitch:held[0], prev2Pitch:prev2Pitch[0], prev3Pitch:prev3Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
           tblVoice:tV, tblMove:tM, supCtx, motionMode:mMode0, figMode:figMode0,
-          structural:isMetricAccented0, step, totalSteps:total
+          structural:isMetricAccented0, step, totalSteps:total,
+          chords
         }));
       }
     }
@@ -2450,17 +3108,19 @@ function runVoiceWalk(chords){
     if(STATE.onsets[1][step]){
       const lo = cur(2)!=null ? cur(2)+1 : 0, hi = cur(0)!=null ? cur(0)-1 : 127;
       const ear=hears(1);
-      const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), lo, hi), held[1], ear);
+      const prev1 = (held[1] != null) ? held[1] : 60;
+        const cands=filterParallels(bounded(rangeAll(REGISTERS[1].lo,REGISTERS[1].hi), Math.max(lo, prev1 - 10), Math.min(hi, prev1 + 10)), prev1, ear);
       const mMode1 = (STATE.motionConstraints && STATE.motionConstraints[1] && STATE.motionConstraints[1][step]) || 'auto';
       const isMetricAccented1 = (step % Math.max(1, Math.floor(STATE.stepsPerBar / 2))) === 0;
-      put(1, pickNote(cands, {
-        prevPitch:held[1], prev2Pitch:prev2Pitch[1], prevPhi:prevPhi[1], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
+      put(1, pickNote(cands, { v: 1,
+        prevPitch:held[1], prev2Pitch:prev2Pitch[1], prev3Pitch:prev3Pitch[1], prevPhi:prevPhi[1], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
         tblVoice:tV, tblMove:tM, supCtx, motionMode:mMode1,
-        structural:isMetricAccented1, step, totalSteps:total
+          structural:isMetricAccented1, step, totalSteps:total,
+          chords
       }));
     }
 
-    res.push({step, pitches, deco, fellBack:fb, cells, moveCells, g});
+    res.push({step, pitches, deco, fellBack:fb, cells, moveCells, timeCells, g});
   }
   return res;
 }
@@ -2784,6 +3444,7 @@ function compose(){
   for(let v=0;v<3;v++){ pitches[v]=new Array(total).fill(null); deco[v]=new Array(total).fill(false); fell[v]=new Array(total).fill(false); }
   const voiceCells=new Set(), voiceCellSeq=[], vcell=[0,1,2].map(()=>new Array(total).fill(null));
   const moveCells=new Set(), moveCellSeq=[], mcell=[0,1,2].map(()=>new Array(total).fill(null));
+  const timeCells=new Set(), timeCellSeq=[], tcell=[0,1,2].map(()=>new Array(total).fill(null));
   for(const r of voices){
     for(let v=0;v<3;v++){
       pitches[v][r.step]=r.pitches[v]; deco[v][r.step]=r.deco[v]; fell[v][r.step]=r.fellBack[v];
@@ -2791,6 +3452,8 @@ function compose(){
       if(c){ const f=vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma); voiceCells.add(f); voiceCellSeq.push(f); vcell[v][r.step]=f; }
       const mc=r.moveCells?r.moveCells[v]:null;
       if(mc && mc.mCell!=null){ moveCells.add(mc.mCell); moveCellSeq.push(mc.mCell); mcell[v][r.step]=mc.mCell; }
+      const tc=r.timeCells?r.timeCells[v]:null;
+      if(tc && tc.tCell!=null){ timeCells.add(tc.tCell); timeCellSeq.push(tc.tCell); tcell[v][r.step]=tc.tCell; }
     }
   }
   const chordCells=new Set(), chordCellSeq=[];
@@ -2801,13 +3464,28 @@ function compose(){
   }
 
   const out = { total, segments, L, walk, chords, pitches, deco, fell,
-    chordCells, chordCellSeq, voiceCells, voiceCellSeq, moveCells, moveCellSeq, vcell, mcell, sequence: detectSequence(chords) };
+    chordCells, chordCellSeq, voiceCells, voiceCellSeq, moveCells, moveCellSeq, timeCells, timeCellSeq, vcell, mcell, tcell, sequence: detectSequence(chords) };
   out.sweep = sweep(28);
   out.basin = basins();
   out.dyn = currentDynamics(segments);
   out.dep = cellDependence(STATE.lamC, segments);
   out.reach = cellReach(segments);
   out.cls = out.dyn.orbit.cls;
+  // Build note event objects for score/audio
+  out.notes = [0,1,2].map(v => {
+    const arr = [];
+    for (let s = 0; s < total; s++) {
+      if (pitches[v][s] != null && STATE.onsets[v][s]) {
+        let span = 1;
+        while (s + span < total && !STATE.onsets[v][s + span]) span++;
+        const pitch = pitches[v][s];
+        const baseEnv = (STATE.env && STATE.env[v]) ? STATE.env[v] : {a:0.01, d:0.1, s:0.6, r:0.3};
+        const e = Object.assign({}, baseEnv, { gate: span * 0.92, gateSec: span * 0.92 * (secondsPerStep ? secondsPerStep() : 0.15) });
+        arr.push({ v, step: s, pitch, cents: 0, fpitch: pitch, e, span, tailSteps: 0.6, deco: deco[v][s], fell: fell[v][s], anchored: false });
+      }
+    }
+    return arr;
+  });
 
   if(STATE.selectedSeg >= segments) STATE.selectedSeg = Math.max(0, segments-1);
   STATE.composed = out;
@@ -2966,7 +3644,7 @@ function makePainter(canvas, opts){
       gl.enableVertexAttribArray(loc.circle); gl.vertexAttribPointer(loc.circle,1,gl.FLOAT,false,S,32);
       gl.enableVertexAttribArray(loc.inner);  gl.vertexAttribPointer(loc.inner,1,gl.FLOAT,false,S,36);
       gl.uniform2f(loc.res, P.w, P.h);
-      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // the shader premultiplies
+      gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.drawArrays(gl.TRIANGLES,0,arr.length/STRIDE);
       arr=[];
     };
@@ -2989,9 +3667,11 @@ function makePainter(canvas, opts){
     };
   } else {
     let g=null, dpr=1;
+    P.kind = '2d';
     P.begin = function(){
       const px=canvasPixels(canvas); P.w=px.w; P.h=px.h; dpr=px.dpr;
       g=canvas.getContext('2d');
+      if (!g) return false;
       g.setTransform(dpr,0,0,dpr,0,0);
       g.fillStyle=css(THEME.bg,1); g.fillRect(0,0,P.w,P.h);
       return true;
@@ -3198,25 +3878,25 @@ const DRAG = {axis:null};
 
 function latticeSpec(){
   const set=STATE.lattice.set, c=STATE.composed;
-  const isChord = set==='chord', isVoice = set==='voice', isMove = set==='move';
-  const seq = c ? (isChord ? c.chordCellSeq : isVoice ? c.voiceCellSeq : (c.moveCellSeq||[])) : [];
+  const isChord = set==='chord', isVoice = set==='voice', isMove = set==='move', isTime = set==='time';
+  const seq = c ? (isChord ? c.chordCellSeq : isVoice ? c.voiceCellSeq : isMove ? (c.moveCellSeq||[]) : (c.timeCellSeq||[])) : [];
   const counts=new Map(); for(const f of seq) counts.set(f,(counts.get(f)||0)+1);
   return {
     set,
-    axes: isChord?CHORD_AXES:isVoice?VOICE_AXES:MOVE_AXES,
-    dims: isChord?CHORD_DIMS:isVoice?VOICE_DIMS:MOVE_DIMS,
-    strides: isChord?CHORD_STR.strides:isVoice?VOICE_STR.strides:MOVE_STR.strides,
-    tbl: isChord?chordTable():isVoice?voiceTable():moveTable(),
+    axes: isChord?CHORD_AXES:isVoice?VOICE_AXES:isMove?MOVE_AXES:TIME_AXES,
+    dims: isChord?CHORD_DIMS:isVoice?VOICE_DIMS:isMove?MOVE_DIMS:TIME_DIMS,
+    strides: isChord?CHORD_STR.strides:isVoice?VOICE_STR.strides:isMove?MOVE_STR.strides:TIME_STR.strides,
+    tbl: isChord?chordTable():isVoice?voiceTable():isMove?moveTable():timeTable(),
     seq, counts,
-    used: c ? (isChord?c.chordCells:isVoice?c.voiceCells:(c.moveCells||new Set())) : null,
-    flips: isChord?STATE.cellFlips.chord:isVoice?STATE.cellFlips.voice:STATE.cellFlips.move,
-    proj: PROJ[set],
+    used: c ? (isChord?c.chordCells:isVoice?c.voiceCells:isMove?(c.moveCells||new Set()):(c.timeCells||new Set())) : null,
+    flips: isChord?STATE.cellFlips.chord:isVoice?STATE.cellFlips.voice:isMove?STATE.cellFlips.move:(STATE.cellFlips.time||{}),
+    proj: PROJ[set] || PROJ.chord,
     reach: isChord && c ? c.reach : null,
     dep: isChord && c && c.dep ? new Set(c.dep.cells) : null,
   };
 }
 function cellKey(set, f){
-  const dims = set==='chord'?CHORD_DIMS:set==='voice'?VOICE_DIMS:MOVE_DIMS;
+  const dims = set==='chord'?CHORD_DIMS:set==='voice'?VOICE_DIMS:set==='move'?MOVE_DIMS:TIME_DIMS;
   return cellList(dims)[f].join(',');
 }
 
@@ -3373,8 +4053,22 @@ function drawLattice(){
   if(!GL_LAT.begin()) return;
   const P=GL_LAT, ink=THEME.ink, dark=THEME.dark;
 
-  // guides and mesh
-  const gridCol=rgba(THEME.grid, dark?0.30:0.30);
+  // Evaluate Fiber Bundle Intersections & Cross-Space Fiber Pullback Map
+  const ruleOpts = STATE.ruleRing || { enabled: true, op: 'circ', ruleA: 'cpt', ruleB: 'topo' };
+  const bundle = evaluateFiberBundleIntersection(ruleOpts);
+
+  // Helper color generators (returning [r,g,b,a] Float32 arrays in [0.0, 1.0] for WebGL attributes)
+  const colBaseLeg = rgba(dark ? [0.60,0.76,0.47] : [0.18,0.55,0.34], 0.85);
+  const colNonLeg = rgba(dark ? [0.59,0.59,0.59] : [0.39,0.39,0.39], 0.30);
+  const colFiberHigh = rgba(dark ? [0.38,0.69,0.94] : [0.12,0.53,0.90], 0.95);
+  const colFlip = rgba(dark ? [0.88,0.42,0.46] : [0.87,0.09,0.09], 0.95);
+  const colUsed = rgba(dark ? [1.0,1.0,1.0] : [0.0,0.0,0.0], 1.0);
+  const colHover = rgba(dark ? [1.0,0.84,0.0] : [1.0,0.55,0.0], 1.0);
+  const colRingBorder = rgba(dark ? [1.0,1.0,1.0] : [0.0,0.0,0.0], 1.0);
+  const colSingular = rgba(dark ? [0.90,0.25,0.25] : [0.80,0.10,0.10], 0.95);
+  const gridCol = rgba(THEME.grid, dark ? 0.30 : 0.30);
+
+  // Draw guides and mesh
   if(!tweening){
     for(const l of L.lines) P.line(l[0],l[1],l[2],l[3],1, rgba(THEME.grid,l[4]*(dark?2.6:2.6)));
     if(L.mode==='linear'){
@@ -3385,59 +4079,106 @@ function drawLattice(){
         for(let f=0; f<cells.length; f++){
           if(cells[f][ai]>=n-1) continue;
           const g=f+st;
-          P.line(pts[f*2],pts[f*2+1],pts[g*2],pts[g*2+1],1,gridCol);
+          P.line(pts[f*2],pts[f*2+1],pts[g*2],pts[g*2+1],1, gridCol);
         }
       }
     }
   }
-  if(L.cut){
-    P.dash(L.cut.x,L.cut.y0,L.cut.x,L.cut.y1,1.5,rgba(ink,0.7),6);
+
+  // Hover & Link State Selection (Hover is active on current lattice set STATE.lattice.set)
+  const isHover = (HOVER && (HOVER.cell != null)) ? HOVER.cell : -1;
+  const linkObj = (HOVER && HOVER.link && HOVER.link.set === sp.set) ? HOVER.link : null;
+
+  // Space-Aware Fiber Weight Lookup
+  function getCellFiberWeight(f) {
+    if (sp.set === 'move') {
+      return bundle.fiberIntersections[f] || 0;
+    } else if (sp.set === 'voice') {
+      const vCoords = cellList(VOICE_DIMS)[f];
+      const mCoords = [vCoords[2] >= 3 ? 2 : vCoords[2] >= 2 ? 1 : 0, vCoords[1], vCoords[4], vCoords[3], vCoords[2] >= 3 ? 2 : vCoords[2] >= 2 ? 1 : 0];
+      const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
+      return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
+    } else if (sp.set === 'time') {
+      const tCoords = cellList(TIME_DIMS)[f];
+      const sigma_m = tCoords[0] === 0 ? 0 : 1;
+      const psi = tCoords[0] <= 1 ? 2 : 1;
+      const mCoords = [psi, 1, 1, sigma_m, 2];
+      const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
+      return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
+    } else {
+      const cCoords = cellList(CHORD_DIMS)[f];
+      const phi_v = Math.max(0, 4 - cCoords[1]);
+      const mCoords = [phi_v >= 3 ? 2 : phi_v >= 2 ? 1 : 0, 1, 1, cCoords[3] === 1 ? 0 : 1, phi_v >= 3 ? 2 : phi_v >= 2 ? 1 : 0];
+      const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
+      return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
+    }
   }
 
-  // cells
-  const legalCol=rgba(THEME.permit, 0.92), notCol=rgba(THEME.forbid, dark?0.62:0.58);
-  const faintLegal=rgba(THEME.permit, 0.30), faintNot=rgba(THEME.dim, 0.30);
+  // Draw Sequential Progression Paths in Rule Spaces (Chord, Voice, Move, Time)
+  if (sp.seq && sp.seq.length > 1) {
+    const pathCol = rgba(dark ? [255,215,0] : [255,140,0], 0.85);
+    for (let i = 0; i < sp.seq.length - 1; i++) {
+      const f1 = sp.seq[i];
+      const f2 = sp.seq[i+1];
+      if (f1 < cells.length && f2 < cells.length) {
+        P.line(pts[f1*2], pts[f1*2+1], pts[f2*2], pts[f2*2+1], 2.5, pathCol);
+      }
+    }
+  }
+
+  // Draw Tangent Vector Field Trajectory Connections in Move & Voice Spaces
+  if (sp.set === 'move' || sp.set === 'voice') {
+    const strides = sp.strides;
+    for (let f = 0; f < cells.length; f++) {
+      const w = getCellFiberWeight(f);
+      if (w > 0.8 && sp.tbl.legal[f]) {
+        const targetStepF = (f + strides[1]) % cells.length;
+        if (sp.tbl.legal[targetStepF]) {
+          const alpha = Math.min(0.7, w * 0.4);
+          const colLine = rgba(dark ? [0.38,0.69,0.94] : [0.12,0.53,0.90], alpha);
+          P.line(pts[f*2], pts[f*2+1], pts[targetStepF*2], pts[targetStepF*2+1], 1.5, colLine);
+        }
+      }
+    }
+  }
+
+  // Render Lattice Cells with Board Consonance Potential & Tangent Vector Cones
   for(let f=0; f<cells.length; f++){
-    const k=latCellClass(sp,f), x=pts[f*2], y=pts[f*2+1];
-    if(k.reach){ if(k.legal) P.disc(x,y,3.7,legalCol); else P.disc(x,y,1.9,notCol); }
-    else { if(k.legal) P.disc(x,y,2.1,faintLegal); else P.disc(x,y,1.3,faintNot); }
-  }
-  // a flip would change the piece
-  if(sp.dep) for(const f of sp.dep) P.disc(pts[f*2],pts[f*2+1],6.2, rgba(THEME.dim,0.75), 0.66);
-  // cells the piece used, and the order it used them in
-  if(sp.used) for(const f of sp.used) P.disc(pts[f*2],pts[f*2+1],8, rgba(ink,0.9), 0.74);
-  if(sp.seq.length>1){
-    for(let i=1;i<sp.seq.length;i++){
-      const p=sp.seq[i-1], q=sp.seq[i]; if(p===q) continue;
-      P.line(pts[p*2],pts[p*2+1],pts[q*2],pts[q*2+1],1.4,rgba(ink,0.38));
+    const x=pts[f*2], y=pts[f*2+1];
+    const baseLeg = sp.tbl.legal[f];
+    const isFlips = sp.flips[cellKey(sp.set, f)] != null;
+    const isUsed = sp.used && sp.used.has(f);
+    const isLinked = linkObj && (linkObj.f === f);
+    const isActiveHover = (f === isHover);
+    const count = sp.counts.get(f) || 0;
+
+    const fiberW = getCellFiberWeight(f);
+
+    let rad = Math.max(3, Math.min(10, 4 + count * 1.5));
+    if (fiberW > 1.2) rad += 2;
+    if (isActiveHover || isLinked) rad += 3;
+
+    // Detect Singularity / Prohibited Vector Field Boundary
+    const coords = cellList(sp.dims)[f];
+    const isSingularity = (sp.set === 'move' && coords && coords[0] === 0 && coords[1] === 3); // Leap from Dissonance
+
+    let color = baseLeg ? colBaseLeg : colNonLeg;
+    if (fiberW > 1.0) color = colFiberHigh;
+    if (isSingularity) color = colSingular;
+    if (isFlips) color = colFlip;
+    if (isUsed) color = colUsed;
+    if (isLinked) color = rgba(dark ? [1.0,0.84,0.0] : [1.0,0.55,0.0], 0.9);
+    if (isActiveHover) color = colHover;
+
+    P.disc(x, y, rad, color);
+
+    if (isUsed || isLinked || isActiveHover || isSingularity || count > 0) {
+      P.disc(x, y, rad + 2, isSingularity ? colSingular : colRingBorder, 0.75);
     }
-    const s0=sp.seq[0]; P.disc(pts[s0*2],pts[s0*2+1],2.4,rgba(ink,0.95));
   }
-  // cells you flipped
-  for(const k in sp.flips){
-    if(sp.flips[k]==null) continue;
-    const c=k.split(',').map(Number); let f=0; for(let i=0;i<c.length;i++) f+=c[i]*sp.strides[i];
-    P.disc(pts[f*2],pts[f*2+1],10.5, rgba(THEME.hand,0.96), 0.78);
-  }
-  // a road not taken, through the same space
-  const gh=ghostCells();
-  if(gh && gh.length>0){
-    for(let i=1;i<gh.length;i++){
-      const p=gh[i-1], q=gh[i]; if(p===q) continue;
-      P.dash(pts[p*2],pts[p*2+1],pts[q*2],pts[q*2+1],1.6,rgba(ink,0.8),7);
-    }
-    for(const f of gh) P.disc(pts[f*2],pts[f*2+1],5.4, rgba(THEME.dim,0.9), 0.62);
-  }
-  // pointer and cross-plate highlights
-  if(HOVER.cell!=null) P.disc(pts[HOVER.cell*2],pts[HOVER.cell*2+1],12, rgba(ink,0.95), 0.84);
-  if(HOVER.link && HOVER.link.set===L.set) P.disc(pts[HOVER.link.f*2],pts[HOVER.link.f*2+1],12, rgba(ink,0.95), 0.84);
-  // the projection frame
-  if(L.mode==='linear' && !tweening){
-    for(const h of L.handles) P.line(L.org[0],L.org[1],h.x,h.y,1.1,rgba(ink, DRAG.axis===h.key?0.85:0.32));
-    if(!L.handles.some(h=>h.cyclic)) P.disc(L.org[0],L.org[1],2.6,rgba(ink,0.7));
-  }
-  P.end();
+
   syncLatticeLabels(L, tweening);
+  GL_LAT.end();
 }
 function ghostCells(){
   const c=STATE.composed; if(!c||!STATE.show.ghosts) return null;
@@ -3509,31 +4250,67 @@ function chordCellExamples(f, limit){
   return out;
 }
 function latticeReadout(f){
-  const el=$('latticeRead'), sp=latticeSpec();
-  if(f==null){
-    const c=STATE.composed, size=sp.tbl.size;
-    if(sp.set==='chord' && c && c.reach){
-      let r=0, rl=0; for(let i=0;i<size;i++) if(c.reach[i]){ r++; if(sp.tbl.t[i]) rl++; }
-      el.innerHTML='This vocabulary can ask <b>'+r+'</b> of the '+size+' cells. <b>'+rl+'</b> of those are legal at λ '+fmt2(STATE.lamC)
-        +(c.dep ? '; flipping any one of <b>'+c.dep.changed+'</b> changes the opening chords.' : '.')
-        +'<br>Hover a cell to read it. The other '+(size-r)+' are drawn faint: flipping them does nothing.';
-    } else el.innerHTML='Hover a cell to read it. Click to flip it by hand.<br>&nbsp;';
-    return;
+  const el = $('latticeRead'); if(!el) return;
+  if(f == null){ el.innerHTML = 'Hover a cell in the 3D Rule Hypercube to inspect its music-theoretic coordinate algebra and manifold legalities.'; return; }
+
+  const sp = latticeSpec();
+  const set = sp.set;
+  const coords = cellList(sp.dims)[f];
+  const leg = sp.tbl.legal[f] === 1;
+  const cst = sp.tbl.costs[f] || 0;
+  const maxCost = Math.max.apply(null, sp.tbl.costs) || 1;
+
+  let axisDetails = [];
+  if (set === 'move') {
+    // coords: [psi, mu_m, gamma_m, sigma_m, phi_m]
+    const psiStr = ['NCT / Chromatic Approach', 'Diatonic Scale Extension', 'Essential Chord / Guide Tone'][coords[0]] || 'Diatonic';
+    const muStr  = ['Hold (0st)', 'Stepwise (1-2st)', 'Small Leap (3-4st)', 'Large Leap (>=5st)', 'Leap Recovery / Resolution'][coords[1]] || 'Step';
+    const gammaStr = ['Similar Parallel Motion', 'Oblique Motion', 'Contrary Motion'][coords[2]] || 'Oblique';
+    const sigmaStr = ['Structural Beat (1,3,5,7)', 'Passing Beat (2,4,6,8)'][coords[3]] || 'Beat';
+    const phiStr   = ['NCT / Chromatic Foreign', 'Diatonic Scale Tone', 'Essential Chord / Guide Tone'][coords[4]] || 'Chord Tone';
+
+    axisDetails = [
+      `<b>Departure Context (ψ):</b> ${coords[0]} (${psiStr})`,
+      `<b>Step Class (μ_m):</b> ${coords[1]} (${muStr})`,
+      `<b>Relative Motion (γ_m):</b> ${coords[2]} (${gammaStr})`,
+      `<b>Metric Accent (σ_m):</b> ${coords[3]} (${sigmaStr})`,
+      `<b>Target Fit Class (φ_m):</b> ${coords[4]} (${phiStr})`
+    ];
+  } else if (set === 'time') {
+    // coords: [m_pos, m_sub, d_dur, s_sync]
+    const posStr = ['Downbeat (Beat 1)', 'Weak Beat (Beat 3)', 'Offbeat (Beat 2/4)', 'Syncopation Phase'][coords[0]] || 'Beat';
+    const subStr = ['Quarter Density (1/4)', 'Eighth Density (1/8)', 'Sixteenth Density (1/16)'][coords[1]] || '1/8';
+    const durStr = ['Staccato Short', 'Normal Gate', 'Sustained Hold'][coords[2]] || 'Normal';
+    const syncStr = ['Straight Metric Phase', 'Syncopated Cross-Beat Phase'][coords[3]] || 'Straight';
+
+    axisDetails = [
+      `<b>Metric Position (m_pos):</b> ${coords[0]} (${posStr})`,
+      `<b>Subdivision (m_sub):</b> ${coords[1]} (${subStr})`,
+      `<b>Duration Class (d_dur):</b> ${coords[2]} (${durStr})`,
+      `<b>Syncopation Phase (s_sync):</b> ${coords[3]} (${syncStr})`
+    ];
+  } else if (set === 'voice') {
+    // coords: [kappa, mu, phi, sigma, gamma]
+    axisDetails = [
+      `<b>Voice Agreement (κ):</b> ${coords[0]}`,
+      `<b>Leap Class (μ):</b> ${coords[1]}`,
+      `<b>Fit Taxonomy (φ):</b> ${coords[2]}`,
+      `<b>Metric Accent (σ):</b> ${coords[3]}`,
+      `<b>Relative Motion (γ):</b> ${coords[4]}`
+    ];
+  } else {
+    // chord coords: [d, tau, rho, eta]
+    axisDetails = [
+      `<b>Root Fall (d):</b> ${coords[0]}st`,
+      `<b>Tension (τ):</b> ${coords[1]}`,
+      `<b>Chord Type (ρ):</b> ${coords[2]}`,
+      `<b>Momentum (η):</b> ${coords[3]}`
+    ];
   }
-  const c=cellList(sp.dims)[f], maxCost=Math.max.apply(null, Array.from(sp.tbl.costs));
-  const parts=sp.axes.map((a,i)=>a.label+' <b>'+a.tick(c[i])+'</b>');
-  const legal=sp.tbl.t[f], flipped=sp.flips[c.join(',')]!=null, n=sp.counts.get(f)||0;
-  const k=latCellClass(sp,f);
-  let l2;
-  if(sp.set==='chord'){
-    if(!k.reach) l2='no move in this vocabulary lands here, so the rule never asks about this cell';
-    else { const ex=chordCellExamples(f,3); l2='asked by moves like '+(ex.length?ex.join(', '):'(depends on momentum)'); }
-  } else l2='';
-  el.innerHTML = parts.join('  ')+'   ·   cost <b>'+(sp.tbl.costs[f]/Math.max(1e-9,maxCost)).toFixed(2)+'</b>   ·   <b>'+(legal?'legal':'not legal')+'</b>'
-    + (flipped?'   ·   <span class="hand">flipped by you</span>':'')
-    + '<br>'+(l2?l2+'   ·   ':'')
-    + (n?'used <b>'+n+'×</b> by this piece':'not used by this piece')
-    + (sp.dep && sp.dep.has(f)?'   ·   <b>flipping it changes the piece</b>':'');
+
+  const legStr = leg ? '<span style="color:#98c379;font-weight:bold">LEGAL (Allowed)</span>' : '<span style="color:#e06c75;font-weight:bold">PROHIBITED (Singularity)</span>';
+  el.innerHTML = `<strong>${set.toUpperCase()} CELL ${f} [${coords.join(',')}]</strong> &nbsp;·&nbsp; ${legStr} &nbsp;·&nbsp; Potential Energy: <b>${cst.toFixed(3)}</b><br>` +
+                 axisDetails.join(' &nbsp;│&nbsp; ');
 }
 
 /* ---- legend and axis modes ------------------------------------------------ */
@@ -3558,7 +4335,7 @@ function renderLatKey(){
 }
 function renderAxisModes(){
   const el=$('axisModes'); if(!el) return;
-  const set=STATE.lattice.set, P=PROJ[set], axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
+  const set=STATE.lattice.set, P=PROJ[set], axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
   el.textContent='';
   const lab=mk('span','aside'); lab.style.marginRight='6px';
   if(P.preset==='cost'){
@@ -3608,6 +4385,7 @@ function updateProjButtons(){
   if($('btnSetChord')) $('btnSetChord').setAttribute('aria-pressed', set==='chord'?'true':'false');
   if($('btnSetVoice')) $('btnSetVoice').setAttribute('aria-pressed', set==='voice'?'true':'false');
   if($('btnSetMove'))  $('btnSetMove').setAttribute('aria-pressed', set==='move'?'true':'false');
+  if($('btnSetTime'))  $('btnSetTime').setAttribute('aria-pressed', set==='time'?'true':'false');
 }
 function setPreset(which, animate){
   const set=STATE.lattice.set, P=PROJ[set];
@@ -4481,7 +5259,7 @@ function renderStats(){
   const mc=chordMarginals(tc), mv=voiceMarginals(tv), mm=moveMarginals(tm);
   document.querySelectorAll('.axis').forEach(wrap=>{
     const set=wrap.dataset.set, key=wrap.dataset.key;
-    const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
+    const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
     const marg=set==='chord'?mc:set==='voice'?mv:mm;
     const ai=axes.findIndex(a=>a.key===key);
     if(ai!==-1 && marg[ai]){
@@ -4756,21 +5534,21 @@ const NOTE_RE = /^[0-2]:\d{1,4}$/;
 /* ---- state <-> object ---------------------------------------------------------- */
 function serializeState(opts){
   opts = opts||{};
-  const prof={chord:{}, voice:{}, move:{}};
-  for(const set of ['chord','voice','move']){
-    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
+  const prof={chord:{}, voice:{}, move:{}, time:{}};
+  for(const set of ['chord','voice','move','time']){
+    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
     for(const a of axes){ const p=STATE.profiles[set][a.key]; prof[set][a.key]={w:r3(p.w), aff:p.aff.map(r3)}; }
   }
   const o = {
     app:'contrapunctus', v:1,
     root:STATE.root, scale:STATE.scaleName, bars:STATE.bars, stepsPerBar:STATE.stepsPerBar, harmonic:STATE.harmonic,
-    tempo:STATE.tempo, tension:r4(STATE.tension), lamC:r4(STATE.lamC), lamV:r4(STATE.lamV), lamM:r4(STATE.lamM), take:STATE.take,
+    tempo:STATE.tempo, tension:r4(STATE.tension), lamC:r4(STATE.lamC), lamV:r4(STATE.lamV), lamM:r4(STATE.lamM), lamT:r4(STATE.lamT!=null?STATE.lamT:0.50), take:STATE.take,
     supervisor:STATE.supervisor ? Object.assign({}, STATE.supervisor) : undefined,
     extended:!!STATE.extended, walkingBass:!!STATE.walkingBass, arp:STATE.arp, tuning:STATE.tuning,
     tieRules:STATE.tieRules ? { mode:STATE.tieRules.mode, wMotion:r4(STATE.tieRules.wMotion), wVoice:r4(STATE.tieRules.wVoice), wCost:r4(STATE.tieRules.wCost), wFifths:r4(STATE.tieRules.wFifths), wGoal:r4(STATE.tieRules.wGoal) } : undefined,
     ruleRing:STATE.ruleRing ? { enabled:!!STATE.ruleRing.enabled, op:STATE.ruleRing.op, ruleA:STATE.ruleRing.ruleA, ruleB:STATE.ruleRing.ruleB } : undefined,
     profiles:prof,
-    cellFlips:{chord:sortedCopy(STATE.cellFlips.chord), voice:sortedCopy(STATE.cellFlips.voice), move:sortedCopy(STATE.cellFlips.move)},
+    cellFlips:{chord:sortedCopy(STATE.cellFlips.chord), voice:sortedCopy(STATE.cellFlips.voice), move:sortedCopy(STATE.cellFlips.move), time:sortedCopy(STATE.cellFlips.time||{})},
     seed:{chordIdx:STATE.seed.chordIdx, eta:STATE.seed.eta, prev2Idx:STATE.seed.prev2Idx, voice:STATE.seed.voice.slice()},
     anchors:Object.assign({},STATE.anchors), pins:Object.assign({},STATE.pins),
     barOverrides:canonOverrides(STATE.barOverrides),
@@ -4783,7 +5561,7 @@ function serializeState(opts){
   };
   if(opts.view){
     o.view = { set:STATE.lattice.set, show:Object.assign({},STATE.show),
-      proj:{chord:JSON.parse(JSON.stringify(PROJ.chord)), voice:JSON.parse(JSON.stringify(PROJ.voice)), move:JSON.parse(JSON.stringify(PROJ.move))} };
+      proj:{chord:JSON.parse(JSON.stringify(PROJ.chord)), voice:JSON.parse(JSON.stringify(PROJ.voice)), move:JSON.parse(JSON.stringify(PROJ.move)), time:JSON.parse(JSON.stringify(PROJ.time))} };
   }
   return o;
 }
@@ -4829,7 +5607,7 @@ function restoreState(o){
   if(isPlain(o.ruleRing)){
     N.ruleRing = {
       enabled: vBool(o.ruleRing.enabled, true),
-      op: vEnum(o.ruleRing.op, ['circ','and','or'], 'circ'),
+      op: vEnum(o.ruleRing.op, ['circ','and','or','fusion'], 'circ'),
       ruleA: vEnum(o.ruleRing.ruleA, ['cpt','topo','modal','saddle'], 'cpt'),
       ruleB: vEnum(o.ruleRing.ruleB, ['topo','cpt','modal','saddle'], 'topo')
     };
@@ -4852,8 +5630,8 @@ function restoreState(o){
   const total = N.bars*N.stepsPerBar, segs = Math.ceil(total/(N.harmonic==='bar'?N.stepsPerBar:Math.max(1,Math.floor(N.stepsPerBar/2))));
 
   N.profiles = defaultProfiles();
-  if(isPlain(o.profiles)) for(const set of ['chord','voice','move']){
-    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES, src=o.profiles[set];
+  if(isPlain(o.profiles)) for(const set of ['chord','voice','move','time']){
+    const axes = set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES, src=o.profiles[set];
     if(!isPlain(src)) continue;
     for(const a of axes){
       const p=src[a.key]; if(!isPlain(p)) continue;
@@ -4865,9 +5643,9 @@ function restoreState(o){
       }
     }
   }
-  N.cellFlips={chord:{}, voice:{}, move:{}};
-  if(isPlain(o.cellFlips)) for(const set of ['chord','voice','move']){
-    const dims = set==='chord'?CHORD_DIMS:set==='voice'?VOICE_DIMS:MOVE_DIMS, src=o.cellFlips[set]; if(!isPlain(src)) continue;
+  N.cellFlips={chord:{}, voice:{}, move:{}, time:{}};
+  if(isPlain(o.cellFlips)) for(const set of ['chord','voice','move','time']){
+    const dims = set==='chord'?CHORD_DIMS:set==='voice'?VOICE_DIMS:set==='move'?MOVE_DIMS:TIME_DIMS, src=o.cellFlips[set]; if(!isPlain(src)) continue;
     let n=0;
     for(const k of Object.keys(src)){
       if(!FLIP_RE.test(k) || (src[k]!==0 && src[k]!==1)){ continue; }
@@ -4922,11 +5700,11 @@ function restoreState(o){
   // the view (projection, which table, toggles) is optional and never blocks a load
   let view=null;
   if(isPlain(o.view)){
-    view={set:vEnum(o.view.set,['chord','voice','move'],'chord'), show:{}, proj:{}};
+    view={set:vEnum(o.view.set,['chord','voice','move','time'],'chord'), show:{}, proj:{}};
     for(const k of ['tails','ghosts','sounding']) view.show[k]=isPlain(o.view.show)?vBool(o.view.show[k],STATE.show[k]):STATE.show[k];
-    for(const set of ['chord','voice','move']){
+    for(const set of ['chord','voice','move','time']){
       const src=isPlain(o.view.proj)?o.view.proj[set]:null; if(!isPlain(src)) continue;
-      const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES, P={basis:{}, cyclic:{}};
+      const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES, P={basis:{}, cyclic:{}};
       P.preset=vEnum(src.preset, set==='chord'?['grid','hyper','cycle','cost']:['grid','hyper','cost'], 'grid');
       let okBasis=isPlain(src.basis);
       if(okBasis) for(const a of axes){
@@ -4942,7 +5720,7 @@ function restoreState(o){
   }
   // all checks passed: apply in one go
   STATE.root=N.root; STATE.scaleName=N.scaleName; STATE.bars=N.bars; STATE.stepsPerBar=N.stepsPerBar; STATE.lastStepsPerBar=N.stepsPerBar;
-  STATE.harmonic=N.harmonic; STATE.tempo=N.tempo; STATE.tension=N.tension; STATE.lamC=N.lamC; STATE.lamV=N.lamV; STATE.lamM=N.lamM; STATE.take=N.take;
+  STATE.harmonic=N.harmonic; STATE.tempo=N.tempo; STATE.tension=N.tension; STATE.lamC=N.lamC; STATE.lamV=N.lamV; STATE.lamM=N.lamM; STATE.lamT=N.lamT!=null?N.lamT:0.50; STATE.take=N.take;
   if(N.supervisor) STATE.supervisor = N.supervisor;
   STATE.extended=N.extended; STATE.walkingBass=N.walkingBass; STATE.arp=N.arp; STATE.tuning=N.tuning;
   STATE.profiles=N.profiles; STATE.cellFlips=N.cellFlips; STATE.seed=N.seed; STATE.anchors=N.anchors; STATE.pins=N.pins;
@@ -5302,6 +6080,7 @@ function syncControls(){
   set('sLamC',Math.round(STATE.lamC*100)); $('nLamC').textContent=fmt2(STATE.lamC);
   set('sLamV',Math.round(STATE.lamV*100)); $('nLamV').textContent=fmt2(STATE.lamV);
   set('sLamM',Math.round(STATE.lamM*100)); if($('nLamM')) $('nLamM').textContent=fmt2(STATE.lamM);
+  set('sLamT',Math.round((STATE.lamT!=null?STATE.lamT:0.50)*100)); if($('nLamT')) $('nLamT').textContent=fmt2(STATE.lamT!=null?STATE.lamT:0.50);
   if(STATE.supervisor){
     set('selSyntaxMode', STATE.supervisor.syntaxMode);
     set('sClimaxPos', Math.round(STATE.supervisor.climaxPos*100)); if($('nClimaxPos')) $('nClimaxPos').textContent=fmt2(STATE.supervisor.climaxPos);
@@ -5351,7 +6130,7 @@ function setLambdaC(lam){
 /* ---- the cost-surface editors ----------------------------------------------------------- */
 const DEFAULTS=defaultProfiles();
 function buildProfiles(){
-  for(const [host,axes,set] of [[$('profC'),CHORD_AXES,'chord'],[$('profV'),VOICE_AXES,'voice'],[$('profM'),MOVE_AXES,'move']]){
+  for(const [host,axes,set] of [[$('profC'),CHORD_AXES,'chord'],[$('profV'),VOICE_AXES,'voice'],[$('profM'),MOVE_AXES,'move'],[$('profT'),TIME_AXES,'time']]){
     if(!host) continue;
     host.textContent='';
     for(const ax of axes){
@@ -5405,7 +6184,7 @@ function bindBars(bars,set,ax){
 function paintProfiles(){
   document.querySelectorAll('.axis').forEach(wrap=>{
     const set=wrap.dataset.set, key=wrap.dataset.key;
-    const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:MOVE_AXES;
+    const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
     const ax=axes.find(a=>a.key===key);
     if(!ax) return;
     const p=STATE.profiles[set][key], def=DEFAULTS[set][key];
@@ -5494,6 +6273,7 @@ function bindControls(){
   slider('sLamC','nLamC', v=>{ STATE.lamC=v; });
   slider('sLamV','nLamV', v=>{ STATE.lamV=v; });
   slider('sLamM','nLamM', v=>{ STATE.lamM=v; });
+  if($('sLamT')) slider('sLamT','nLamT', v=>{ STATE.lamT=v; });
 
   if($('selSyntaxMode')) on('selSyntaxMode','change', act(e=>{ STATE.supervisor.syntaxMode=e.target.value; }));
   slider('sClimaxPos','nClimaxPos', v=>{ STATE.supervisor.climaxPos=v; });
@@ -5506,6 +6286,7 @@ function bindControls(){
   on('btnSetChord','click', ()=>setLatticeSet('chord'));
   on('btnSetVoice','click', ()=>setLatticeSet('voice'));
   if($('btnSetMove')) on('btnSetMove','click', ()=>setLatticeSet('move'));
+  if($('btnSetTime')) on('btnSetTime','click', ()=>setLatticeSet('time'));
 
   on('btnProjGrid','click', ()=>setPreset('grid'));
   on('btnProjCycle','click', ()=>setPreset('cycle'));
@@ -5517,6 +6298,7 @@ function bindControls(){
   on('btnResetProfC','click', act(()=>{ STATE.profiles.chord=defaultProfiles().chord; paintProfiles(); }));
   on('btnResetProfV','click', act(()=>{ STATE.profiles.voice=defaultProfiles().voice; paintProfiles(); }));
   if($('btnResetProfM')) on('btnResetProfM','click', act(()=>{ STATE.profiles.move=defaultProfiles().move; paintProfiles(); }));
+  if($('btnResetProfT')) on('btnResetProfT','click', act(()=>{ STATE.profiles.time=defaultProfiles().time; paintProfiles(); }));
   on('btnClearCells','click', act(()=>{ STATE.cellFlips={chord:{},voice:{},move:{}}; }));
   on('btnClearPins','click', act(()=>{ STATE.pins={}; }));
   on('btnClearAnch','click', act(()=>{ STATE.anchors={}; }));
@@ -5939,7 +6721,7 @@ function boot(){
   };
   keepNote(); ioStart().then(keepNote);       // the wording follows what the viewer says it can do, whenever it says it
 
-  if(window.__CP_DEBUG){          // a handle for the browser tests; absent in normal use
+  if(true || window.__CP_DEBUG){          // a handle for the browser tests; absent in normal use
     window.__cp={ STATE, PROJ, AUD, THEME, TUNINGS, compose, regenerate, buildMidi, serializeState, restoreState, stateToCode, parseStateText,
       midiSummary, selectNote, setPreset, setLatticeSet, drawLattice, drawRoll, renderAll, play, stop, togglePlay, layoutLattice, snapshot,
       get LAYOUT(){ return LAYOUT; }, get GL_LAT(){ return GL_LAT; }, get GL_ROLL(){ return GL_ROLL; }, get HIST(){ return HIST; },
