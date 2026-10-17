@@ -1243,10 +1243,10 @@ function defaultProfiles(){
       phi_m:  {w:1.00, aff:[0.10, 0.75, 1.00]},
     },
     time:{
-      m_pos:  {w:0.90, aff:[1.00, 0.70, 0.40, 0.80]},
-      m_sub:  {w:0.60, aff:[0.80, 1.00, 0.50]},
-      d_dur:  {w:0.75, aff:[0.50, 1.00, 0.80]},
-      s_sync: {w:0.50, aff:[1.00, 0.60]},
+      m_pos:  {w:1.00, aff:[1.00, 0.80, 0.50, 0.70]},
+      m_sub:  {w:0.75, aff:[1.00, 0.85, 0.50]},
+      d_dur:  {w:0.60, aff:[0.50, 1.00, 0.80]},
+      s_sync: {w:0.75, aff:[1.00, 0.65]},
     },
   };
 }
@@ -2702,6 +2702,76 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   };
 }
 
+function evaluateLookaheadMove(candPitch, voiceIdx, stepIndex, totalSteps, chords, prevPitch, prev2Pitch, otherPitches) {
+  if (!chords || stepIndex >= totalSteps - 1) return { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
+
+  const nextStep = stepIndex + 1;
+  const nextSeg = Math.min(segOfStep(nextStep), chords.length - 1);
+  const nextChord = chords[nextSeg];
+  if (!nextChord || !nextChord.tones) return { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
+
+  const reg = REGISTERS[voiceIdx] || REGISTERS[0];
+  const dp = prevPitch != null ? candPitch - prevPitch : 0;
+  const absDp = Math.abs(dp);
+
+  const candsNext = bounded(rangeAll(reg.lo, reg.hi), Math.max(reg.lo, candPitch - 12), Math.min(reg.hi, candPitch + 12));
+
+  let validCount = 0;
+  let hasStepwiseChordResolution = false;
+  let hasLeapRecovery = false;
+  let minNextCost = Infinity;
+
+  const targetPc = pcOf(candPitch);
+  const currentSeg = segOfStep(stepIndex);
+  const currentChordPcs = (chords[currentSeg] && chords[currentSeg].tones) ? chords[currentSeg].tones.map(pcOf) : [];
+  const isNCT = currentChordPcs.length > 0 && !currentChordPcs.includes(targetPc);
+  const isLargeLeap = absDp >= 5;
+
+  const nextChordPcs = nextChord.tones.map(pcOf);
+
+  for (let k = 0; k < candsNext.length; k++) {
+    const nextP = candsNext[k];
+    const nextDp = nextP - candPitch;
+    const absNextDp = Math.abs(nextDp);
+
+    const evalNext = evalCandidateMove(candPitch, nextP, voiceIdx, nextStep, otherPitches, prevPitch, prev2Pitch);
+
+    if (evalNext.isLegal || evalNext.voiceLegal) {
+      validCount++;
+      if (evalNext.combinedCost < minNextCost) minNextCost = evalNext.combinedCost;
+
+      const nextPc = pcOf(nextP);
+      const isNextChordTone = nextChordPcs.includes(nextPc);
+
+      if (absNextDp <= 2 && isNextChordTone) {
+        hasStepwiseChordResolution = true;
+      }
+
+      if (absNextDp <= 2 && (dp * nextDp < 0)) {
+        hasLeapRecovery = true;
+      }
+    }
+  }
+
+  if (validCount === 0) {
+    return { isDeadEnd: true, penalty: 999.0, lookaheadCost: 999.0, reason: 'Dead End: No legal progression at t+1' };
+  }
+
+  if (isNCT && !hasStepwiseChordResolution) {
+    return { isDeadEnd: true, penalty: 888.0, lookaheadCost: 888.0, reason: 'Dead End: Unresolved Non-Chord Tone at t+1' };
+  }
+
+  if (isLargeLeap && !hasLeapRecovery) {
+    return { isDeadEnd: true, penalty: 777.0, lookaheadCost: 777.0, reason: 'Dead End: Unrecovered Leap at t+1' };
+  }
+
+  return {
+    isDeadEnd: false,
+    penalty: 0.0,
+    lookaheadCost: isFinite(minNextCost) ? minNextCost : 0.0
+  };
+}
+
 function pickNote(cands, ctx){
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
   if(!cands || !cands.length) return { pitch: ctx.prevPitch || 60, cls: {kappa:1,mu:2,phi:4,sigma:0,gamma:1}, moveCls:{psi:2,mu_m:0,gamma_m:1,sigma_m:0,phi_m:2,mCell:0}, fellBack: true };
@@ -2713,35 +2783,49 @@ function pickNote(cands, ctx){
   const prev2P = ctx.prev2Pitch;
   const prev3P = ctx.prev3Pitch;
 
-  const evaluated = cands.map(m => evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P));
+  const evaluated = cands.map(m => {
+    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P);
+    const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
+    base.lookahead = look;
+    base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
+    return base;
+  });
 
-  let legal = evaluated.filter(e => e.isLegal);
+  let legal = evaluated.filter(e => e.isLegal && !e.lookahead.isDeadEnd);
   let fellBack = false;
 
   if (!legal.length) {
-    legal = evaluated.filter(e => e.voiceLegal);
-    if (!legal.length) legal = evaluated.slice();
+    legal = evaluated.filter(e => e.isLegal);
+    if (!legal.length) {
+      legal = evaluated.filter(e => e.voiceLegal && !e.lookahead.isDeadEnd);
+      if (!legal.length) {
+        legal = evaluated.filter(e => e.voiceLegal);
+        if (!legal.length) legal = evaluated.slice();
+      }
+    }
     fellBack = true;
   }
 
   const mode = STATE.take;
   legal.sort((a, b) => {
+    if (a.lookahead.isDeadEnd !== b.lookahead.isDeadEnd) {
+      return a.lookahead.isDeadEnd ? 1 : -1;
+    }
+
     if (ctx.preferRoot != null) {
       const ra = pcOf(a.m) === ctx.preferRoot ? 0 : 1;
       const rb = pcOf(b.m) === ctx.preferRoot ? 0 : 1;
       if (ra !== rb) return ra - rb;
     }
 
-    // In 'bold' mode, prefer non-zero stepwise/leap motion (moving pitches over stationary holds)
     if (mode === 'bold' && prevP != null) {
       const isZeroA = (a.m === prevP) ? 1 : 0;
       const isZeroB = (b.m === prevP) ? 1 : 0;
       if (isZeroA !== isZeroB) return isZeroA - isZeroB;
     }
 
-    // Vector Field Flow Combined Cost (integrates Tangent Space Inertia, Dissonance Potential, and Phase Space Conservation)
-    if (Math.abs(a.combinedCost - b.combinedCost) > 0.01) {
-      return a.combinedCost - b.combinedCost;
+    if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.01) {
+      return a.totalPathCost - b.totalPathCost;
     }
 
     if (prevP != null) {
@@ -2786,19 +2870,34 @@ function pickEnhancedBassNote(cands, ctx) {
   const prev3P = ctx.prev3Pitch;
   const { preferredPcs, approachPc, isEnclosure } = ctx;
 
-  const evaluated = cands.map(m => evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P));
+  const evaluated = cands.map(m => {
+    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P);
+    const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
+    base.lookahead = look;
+    base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
+    return base;
+  });
 
-  let legal = evaluated.filter(e => e.isLegal);
+  let legal = evaluated.filter(e => e.isLegal && !e.lookahead.isDeadEnd);
   let fellBack = false;
 
   if (!legal.length) {
-    legal = evaluated.filter(e => e.voiceLegal);
-    if (!legal.length) legal = evaluated.slice();
+    legal = evaluated.filter(e => e.isLegal);
+    if (!legal.length) {
+      legal = evaluated.filter(e => e.voiceLegal && !e.lookahead.isDeadEnd);
+      if (!legal.length) {
+        legal = evaluated.filter(e => e.voiceLegal);
+        if (!legal.length) legal = evaluated.slice();
+      }
+    }
     fellBack = true;
   }
 
   legal.sort((a, b) => {
-    // 1. Anti-oscillation penalty check for bass (A -> B -> A)
+    if (a.lookahead.isDeadEnd !== b.lookahead.isDeadEnd) {
+      return a.lookahead.isDeadEnd ? 1 : -1;
+    }
+
     const isOscA = (prev2P != null && a.m === prev2P && a.m !== prevP) ? 1 : 0;
     const isOscB = (prev2P != null && b.m === prev2P && b.m !== prevP) ? 1 : 0;
     if (isOscA !== isOscB) return isOscA - isOscB;
@@ -2825,8 +2924,8 @@ function pickEnhancedBassNote(cands, ctx) {
       }
     }
 
-    if (Math.abs(a.combinedCost - b.combinedCost) > 0.01) {
-      return a.combinedCost - b.combinedCost;
+    if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.01) {
+      return a.totalPathCost - b.totalPathCost;
     }
 
     return a.m - b.m;
@@ -2955,7 +3054,8 @@ function runVoiceWalk(chords){
         motionMode: mMode2,
         rootPc: chord.rootPc,
         stepInSeg: step - (g * segLen()),
-        step, totalSteps: total
+        step, totalSteps: total,
+        chords
       }));
     }
 
@@ -2978,7 +3078,8 @@ function runVoiceWalk(chords){
         put(0, pickNote(cands, { v: 0,
           prevPitch:held[0], prev2Pitch:prev2Pitch[0], prev3Pitch:prev3Pitch[0], prevPhi:prevPhi[0], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
           tblVoice:tV, tblMove:tM, supCtx, motionMode:mMode0, figMode:figMode0,
-          structural:isMetricAccented0, step, totalSteps:total
+          structural:isMetricAccented0, step, totalSteps:total,
+          chords
         }));
       }
     }
@@ -2993,7 +3094,8 @@ function runVoiceWalk(chords){
       put(1, pickNote(cands, { v: 1,
         prevPitch:held[1], prev2Pitch:prev2Pitch[1], prev3Pitch:prev3Pitch[1], prevPhi:prevPhi[1], others:ear, chordTones:chord.tones, rootPc:chord.rootPc, scalePCs,
         tblVoice:tV, tblMove:tM, supCtx, motionMode:mMode1,
-        structural:isMetricAccented1, step, totalSteps:total
+          structural:isMetricAccented1, step, totalSteps:total,
+          chords
       }));
     }
 
