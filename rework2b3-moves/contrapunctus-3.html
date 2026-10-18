@@ -2590,7 +2590,9 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
     }
   }
 
-  const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : [0,2,4,5,7,9,11];
+  const currentRoot = (STATE && STATE.root != null) ? STATE.root : 0;
+  const currentScaleSteps = (STATE && STATE.scaleName && SCALES[STATE.scaleName]) ? SCALES[STATE.scaleName] : SCALES.Ionian;
+  const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : currentScaleSteps.map(o => (currentRoot + o) % 12);
   const targetPc = ((targetPitch % 12) + 12) % 12;
   const isChordTone = activeChordPcs.length > 0 ? activeChordPcs.includes(targetPc) : boardState.pitches.filter(p => p != null).map(pcOf).includes(targetPc);
   const isScale = activeScalePcs.includes(targetPc);
