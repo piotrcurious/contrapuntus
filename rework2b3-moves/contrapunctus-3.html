@@ -2735,7 +2735,7 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   // UNIFIED 4-SPACE RULE TENSOR EVALUATION: R_eff = R_M && R_T && R_V
   const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1) && (tTbl.t[tF % tTbl.size] === 1) && (vTbl.t[vF % vTbl.size] === 1);
 
-  const cls = { kappa: kappa_v, mu: mu_m, phi: phi_v, sigma: sigma_m, gamma: gamma_m, vCell: vF };
+  const cls = { kappa: kappa_v, mu: mu_v, phi: phi_v, sigma: sigma_m, gamma: gamma_m, vCell: vF };
   const moveCls = { psi, mu_m, gamma_m, sigma_m, phi_m, mCell: mF };
   const timeCls = { m_pos, m_sub, d_dur, s_sync, tCell: tF };
 
