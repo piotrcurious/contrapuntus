@@ -2497,7 +2497,9 @@ function computeBoardState(voicesPitches, stepIndex) {
   }
 
   const stepsPerBar = STATE.stepsPerBar || 8;
-  const metricPhase = (stepIndex % 2 === 0) ? 0 : 1; // 0 = structural beat, 1 = passing off-beat
+  const beatPeriod = Math.max(1, Math.floor(stepsPerBar / 4));
+  const isStructuralBeat = (stepIndex % beatPeriod === 0);
+  const metricPhase = isStructuralBeat ? 0 : 1; // 0 = structural beat, 1 = passing off-beat
 
   return {
     pitches,
@@ -4138,7 +4140,7 @@ function drawLattice(){
       return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
     } else if (sp.set === 'time') {
       const tCoords = cellList(TIME_DIMS)[f];
-      const sigma_m = tCoords[0] === 0 ? 0 : 1;
+      const sigma_m = (tCoords[0] === 0 || tCoords[0] === 2) ? 0 : 1;
       const psi = tCoords[0] <= 1 ? 2 : 1;
       const mCoords = [psi, 1, 1, sigma_m, 2];
       const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
@@ -5287,12 +5289,14 @@ function renderStats(){
   const br=chordBranching(tc, vocab, STATE.tension);
   const reach=c.reach; let rl=0; for(let i=0;i<tc.t.length;i++) if(reach[i] && tc.t[i]) rl++;
   const flips=Object.keys(STATE.cellFlips.chord).length;
+  const tt=timeTable();
   if($('statC')) $('statC').innerHTML=
     '<b>'+tc.legalCount+'</b> of '+tc.size+' cells legal'+(flips?' (λ alone admits '+tc.cut+')':'')
     +'<br>this vocabulary can ask <b>'+popcount(reach)+'</b> of them, <b>'+rl+'</b> legal'
     +'<br>from a state, <b>'+br.mean.toFixed(1)+'</b> of '+vocab.length+' moves are legal · <b>'+pct(br.forced)+'</b> forced · <b>'+pct(br.dead)+'</b> none';
   if($('statV')) $('statV').innerHTML='<b>'+tv.legalCount+'</b> of '+tv.size+' cells legal'+(Object.keys(STATE.cellFlips.voice).length?' (λ alone admits '+tv.cut+')':'');
   if($('statM')) $('statM').innerHTML='<b>'+tm.legalCount+'</b> of '+tm.size+' cells legal'+(Object.keys(STATE.cellFlips.move).length?' (λ alone admits '+tm.cut+')':'');
+  if($('statT')) $('statT').innerHTML='<b>'+tt.legalCount+'</b> of '+tt.size+' cells legal'+(Object.keys(STATE.cellFlips.time||{}).length?' (λ alone admits '+tt.cut+')':'');
 
   const mc=chordMarginals(tc), mv=voiceMarginals(tv), mm=moveMarginals(tm);
   document.querySelectorAll('.axis').forEach(wrap=>{
@@ -5307,10 +5311,10 @@ function renderStats(){
 }
 function renderHandStat(){
   const el=$('handStat'); if(!el) return;
-  const nC=Object.keys(STATE.cellFlips.chord).length, nV=Object.keys(STATE.cellFlips.voice).length, nM=Object.keys(STATE.cellFlips.move).length, nP=Object.keys(STATE.pins).length;
+  const nC=Object.keys(STATE.cellFlips.chord).length, nV=Object.keys(STATE.cellFlips.voice).length, nM=Object.keys(STATE.cellFlips.move).length, nT=Object.keys(STATE.cellFlips.time||{}).length, nP=Object.keys(STATE.pins).length;
   const nE=Object.keys(STATE.noteEnv).length, nA=Object.keys(STATE.anchors).length, nB=Object.keys(STATE.barOverrides).length, nL=STATE.touched.filter(Boolean).length;
   const bits=[];
-  if(nC+nV+nM) bits.push('<b>'+(nC+nV+nM)+'</b> rule cell'+(nC+nV+nM===1?'':'s')+' flipped');
+  if(nC+nV+nM+nT) bits.push('<b>'+(nC+nV+nM+nT)+'</b> rule cell'+(nC+nV+nM+nT===1?'':'s')+' flipped');
   if(nP) bits.push('<b>'+nP+'</b> chord'+(nP===1?'':'s')+' pinned');
   if(nA) bits.push('<b>'+nA+'</b> pitch'+(nA===1?'':'es')+' anchored');
   if(nE) bits.push('<b>'+nE+'</b> note'+(nE===1?'':'s')+' with its own envelope');
@@ -6337,7 +6341,7 @@ function bindControls(){
   on('btnResetProfV','click', act(()=>{ STATE.profiles.voice=defaultProfiles().voice; paintProfiles(); }));
   if($('btnResetProfM')) on('btnResetProfM','click', act(()=>{ STATE.profiles.move=defaultProfiles().move; paintProfiles(); }));
   if($('btnResetProfT')) on('btnResetProfT','click', act(()=>{ STATE.profiles.time=defaultProfiles().time; paintProfiles(); }));
-  on('btnClearCells','click', act(()=>{ STATE.cellFlips={chord:{},voice:{},move:{}}; }));
+  on('btnClearCells','click', act(()=>{ STATE.cellFlips={chord:{},voice:{},move:{},time:{}}; }));
   on('btnClearPins','click', act(()=>{ STATE.pins={}; }));
   on('btnClearAnch','click', act(()=>{ STATE.anchors={}; }));
   on('btnClearEnv','click', act(()=>{ STATE.noteEnv={}; STATE.voiceEnv=[defaultVoiceEnv(0),defaultVoiceEnv(1),defaultVoiceEnv(2)]; }));
