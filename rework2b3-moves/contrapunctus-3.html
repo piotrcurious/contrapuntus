@@ -2516,13 +2516,30 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   const absDp = Math.abs(dp);
   const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
 
-  // 1. Departure Context psi
+  // 1. Departure Context psi (fit class of prevPitch relative to active departure chord)
   const prevPc = prevPitch != null ? ((prevPitch % 12) + 12) % 12 : null;
   let psi = 1;
-  if (boardState.isDissonant) {
-    psi = 0; // Departing from dissonance/NCT
-  } else if (prevPc != null && boardState.intervals.some(i => i === prevPc)) {
-    psi = 2; // Departing from essential chord/guide tone
+  if (prevPc != null) {
+    let prevChordPcs = [];
+    if (options && options.chords) {
+      const stepIdx = (options && options.step != null) ? options.step : (boardState && boardState.stepIndex != null ? boardState.stepIndex : 0);
+      const depSeg = segOfStep(stepIdx);
+      if (options.chords[depSeg] && options.chords[depSeg].tones) {
+        prevChordPcs = options.chords[depSeg].tones.map(pcOf);
+      }
+    } else if (options && options.chordTones) {
+      prevChordPcs = options.chordTones.map(pcOf);
+    }
+
+    const prevScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : [0,2,4,5,7,9,11];
+
+    if (prevChordPcs.length > 0) {
+      if (prevChordPcs.includes(prevPc)) psi = 2; // Departing from Chord / Guide Tone
+      else if (prevScalePcs.includes(prevPc)) psi = 1; // Departing from Diatonic Scale Tone
+      else psi = 0; // Departing from Non-Chord / Chromatic Tone
+    } else {
+      psi = boardState.isDissonant ? 0 : 2;
+    }
   }
 
   // 2. Movement Step Class mu_m (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: res/rec)
