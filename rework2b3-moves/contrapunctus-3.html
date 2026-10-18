@@ -1789,8 +1789,8 @@ function bundleProjection_M_to_V(mCoords) {
   // phi_m (nct, diat, chord/gt) -> voice fit class phi
   const psi = mCoords[0], mu_m = mCoords[1], gamma_m = mCoords[2], sigma_m = mCoords[3], phi_m = mCoords[4];
 
-  // Map step class mu_m (0..4) to voice leap class mu (0..4)
-  const mu_v = mu_m;
+  // Map step class mu_m (0..4) to voice leap class mu (0..4: 0=lg-down, 1=step-down, 2=hold, 3=step-up, 4=lg-up)
+  const mu_v = mu_m === 0 ? 2 : (mu_m === 1 || mu_m === 4 ? 3 : 4);
   // Map phi_m (0..2) to voice fit phi (0..4: 0=chr-f, 1=nct, 2=ext, 3=chd, 4=root)
   const phi_v = phi_m === 2 ? 4 : phi_m === 1 ? 2 : 0;
   // Map gamma_m (0..2) to voice agreement kappa (0..2)
@@ -2497,7 +2497,9 @@ function computeBoardState(voicesPitches, stepIndex) {
   }
 
   const stepsPerBar = STATE.stepsPerBar || 8;
-  const metricPhase = (stepIndex % 2 === 0) ? 0 : 1; // 0 = structural beat, 1 = passing off-beat
+  const beatPeriod = Math.max(1, Math.floor(stepsPerBar / 4));
+  const isStructuralBeat = (stepIndex % beatPeriod === 0);
+  const metricPhase = isStructuralBeat ? 0 : 1; // 0 = structural beat, 1 = passing off-beat
 
   return {
     pitches,
@@ -2516,32 +2518,61 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   const absDp = Math.abs(dp);
   const targetPitch = (prevPitch != null ? prevPitch : (boardState.pitches[voiceIdx] || 60)) + dp;
 
-  // 1. Departure Context psi
+  // 1. Departure Context psi (fit class of prevPitch relative to active departure chord)
   const prevPc = prevPitch != null ? ((prevPitch % 12) + 12) % 12 : null;
   let psi = 1;
-  if (boardState.isDissonant) {
-    psi = 0; // Departing from dissonance/NCT
-  } else if (prevPc != null && boardState.intervals.some(i => i === prevPc)) {
-    psi = 2; // Departing from essential chord/guide tone
+  if (prevPc != null) {
+    let prevChordPcs = [];
+    if (options && options.chords) {
+      const stepIdx = (options && options.step != null) ? options.step : (boardState && boardState.stepIndex != null ? boardState.stepIndex : 0);
+      const depSeg = segOfStep(stepIdx);
+      if (options.chords[depSeg] && options.chords[depSeg].tones) {
+        prevChordPcs = options.chords[depSeg].tones.map(pcOf);
+      }
+    } else if (options && options.chordTones) {
+      prevChordPcs = options.chordTones.map(pcOf);
+    }
+
+    const prevScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : [0,2,4,5,7,9,11];
+
+    if (prevChordPcs.length > 0) {
+      if (prevChordPcs.includes(prevPc)) psi = 2; // Departing from Chord / Guide Tone
+      else if (prevScalePcs.includes(prevPc)) psi = 1; // Departing from Diatonic Scale Tone
+      else psi = 0; // Departing from Non-Chord / Chromatic Tone
+    } else {
+      psi = boardState.isDissonant ? 0 : 2;
+    }
   }
 
   // 2. Movement Step Class mu_m (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: res/rec)
   let mu_m = 0;
-  if (dp === 0) mu_m = 0;
-  else if (absDp <= 2) {
-    if (prevLeapMomentum != null && prevLeapMomentum * dp < 0) mu_m = 4; // Stepwise leap recovery
-    else if (boardState.isDissonant) mu_m = 4; // Stepwise resolution
-    else mu_m = 1; // Normal step
-  } else if (absDp <= 4) mu_m = 2; // Small leap
-  else mu_m = 3; // Large leap
+  if (dp === 0) {
+    mu_m = 0; // Hold
+  } else if (absDp <= 2) {
+    const isPrevLeap = (prevLeapMomentum != null && Math.abs(prevLeapMomentum) >= 3);
+    if (isPrevLeap && (prevLeapMomentum * dp < 0)) {
+      mu_m = 4; // Stepwise leap recovery
+    } else if (boardState.isDissonant) {
+      mu_m = 4; // Stepwise resolution of dissonance
+    } else {
+      mu_m = 1; // Normal step
+    }
+  } else if (absDp <= 4) {
+    mu_m = 2; // Small leap
+  } else {
+    mu_m = 3; // Large leap
+  }
 
-  // 3. Relative Voice Motion gamma_m
+  // 3. Relative Voice Motion gamma_m (0: similar, 1: oblique, 2: contrary)
   let gamma_m = 1;
   if (otherPitches && otherPitches.length) {
-    const otherMove = (otherPitches[0] && typeof otherPitches[0].pitch === 'number' && typeof otherPitches[0].prevPitch === 'number') ? (otherPitches[0].pitch - otherPitches[0].prevPitch) : 0;
-    if (otherMove !== 0 && dp !== 0) {
-      if (dp * otherMove > 0) gamma_m = 0; // Similar
-      else if (dp * otherMove < 0) gamma_m = 2; // Contrary
+    let primaryOther = otherPitches.find(o => o.v === (voiceIdx === 2 ? 0 : 2)) || otherPitches[0];
+    if (primaryOther && typeof primaryOther.pitch === 'number' && typeof primaryOther.prevPitch === 'number') {
+      const otherMove = primaryOther.pitch - primaryOther.prevPitch;
+      if (otherMove !== 0 && dp !== 0) {
+        if (dp * otherMove > 0) gamma_m = 0; // Similar motion
+        else if (dp * otherMove < 0) gamma_m = 2; // Contrary motion
+      }
     }
   }
 
@@ -2559,7 +2590,9 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
     }
   }
 
-  const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : [0,2,4,5,7,9,11];
+  const currentRoot = (STATE && STATE.root != null) ? STATE.root : 0;
+  const currentScaleSteps = (STATE && STATE.scaleName && SCALES[STATE.scaleName]) ? SCALES[STATE.scaleName] : SCALES.Ionian;
+  const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : currentScaleSteps.map(o => (currentRoot + o) % 12);
   const targetPc = ((targetPitch % 12) + 12) % 12;
   const isChordTone = activeChordPcs.length > 0 ? activeChordPcs.includes(targetPc) : boardState.pitches.filter(p => p != null).map(pcOf).includes(targetPc);
   const isScale = activeScalePcs.includes(targetPc);
@@ -2568,6 +2601,14 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   if (isChordTone) phi_m = 2;
   else if (isScale) phi_m = 1;
   else phi_m = 0;
+
+  // Direct / Hidden Fifths & Octaves Constraint
+  if (gamma_m === 0 && absDp >= 3 && boardState.bass != null && voiceIdx === 0) {
+    const intervalAboveBass = ((targetPitch - boardState.bass) % 12 + 12) % 12;
+    if (intervalAboveBass === 0 || intervalAboveBass === 7) {
+      return { valid: false, cost: 960, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Direct 5th / Octave by Soprano leap' };
+    }
+  }
 
   // STRICT SPECIES COUNTERPOINT & VERTICAL CONSONANCE HARD CONSTRAINTS
   // Constraint A: Prohibit entering leaps into non-chord tones
@@ -2674,23 +2715,54 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const tF = tIdx(m_pos, m_sub, d_dur, s_sync);
   const tTbl = timeTable();
 
-  // 3. Voice Rule Space Cell Coordinates (kappa = count of consonant intervals 3, 4, 7, 8, 9, 12 with other voices)
+  // 3. Voice Rule Space Cell Coordinates (kappa = count of consonant intervals with other voices)
   let kappa_v = 0;
   for (let u = 0; u < 3; u++) {
     if (u === voiceIdx || fullPitches[u] == null) continue;
     const ic = ((Math.abs(candPitch - fullPitches[u])) % 12 + 12) % 12;
-    if (ic === 3 || ic === 4 || ic === 7 || ic === 8 || ic === 9 || ic === 0) kappa_v++;
+    const isUpperFourth = (ic === 5 && voiceIdx !== 2 && u !== 2);
+    if (ic === 3 || ic === 4 || ic === 7 || ic === 8 || ic === 9 || ic === 0 || isUpperFourth) {
+      kappa_v++;
+    }
   }
   kappa_v = Math.min(2, kappa_v);
 
-  const phi_v = phi_m === 2 ? 4 : (phi_m === 1 ? 2 : 0);
-  const vF = vIdx(kappa_v, mu_m, phi_v, sigma_m, gamma_m);
+  const targetPc = pcOf(candPitch);
+  let activeChordPcs = [];
+  if (options && options.chordTones && Array.isArray(options.chordTones)) {
+    activeChordPcs = options.chordTones.map(pcOf);
+  } else if (options && options.chords) {
+    const seg = segOfStep(options.step || stepIndex);
+    if (options.chords[seg] && options.chords[seg].tones) {
+      activeChordPcs = options.chords[seg].tones.map(pcOf);
+    }
+  }
+  const currentRoot = (STATE && STATE.root != null) ? STATE.root : 0;
+  const currentScaleSteps = (STATE && STATE.scaleName && SCALES[STATE.scaleName]) ? SCALES[STATE.scaleName] : SCALES.Ionian;
+  const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : currentScaleSteps.map(o => (currentRoot + o) % 12);
+
+  const mu_v = dp <= -3 ? 0 : (dp < 0 ? 1 : (dp === 0 ? 2 : (dp <= 2 ? 3 : 4)));
+  let phi_v = 0;
+  const rootPc = (options && options.rootPc != null) ? options.rootPc : (activeChordPcs.length > 0 ? activeChordPcs[0] : null);
+  if (rootPc != null && (targetPc === rootPc || targetPc === (rootPc + 7) % 12)) {
+    phi_v = 4; // 4: Essential Root & 5th
+  } else if (activeChordPcs.includes(targetPc)) {
+    phi_v = 3; // 3: Consonant 3rd / 7th Chord Tone
+  } else if (activeScalePcs.includes(targetPc)) {
+    phi_v = 2; // 2: Diatonic Scale Passing/Neighbor
+  } else if (rootPc != null && [(rootPc+11)%12, (rootPc+1)%12, (rootPc+6)%12, (rootPc+8)%12].includes(targetPc)) {
+    phi_v = 1; // 1: Chromatic Approach / Leading Tone
+  } else {
+    phi_v = 0; // 0: Foreign Ungrounded
+  }
+
+  const vF = vIdx(kappa_v, mu_v, phi_v, sigma_m, gamma_m);
   const vTbl = voiceTable();
 
   // UNIFIED 4-SPACE RULE TENSOR EVALUATION: R_eff = R_M && R_T && R_V
   const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1) && (tTbl.t[tF % tTbl.size] === 1) && (vTbl.t[vF % vTbl.size] === 1);
 
-  const cls = { kappa: kappa_v, mu: mu_m, phi: phi_v, sigma: sigma_m, gamma: gamma_m, vCell: vF };
+  const cls = { kappa: kappa_v, mu: mu_v, phi: phi_v, sigma: sigma_m, gamma: gamma_m, vCell: vF };
   const moveCls = { psi, mu_m, gamma_m, sigma_m, phi_m, mCell: mF };
   const timeCls = { m_pos, m_sub, d_dur, s_sync, tCell: tF };
 
@@ -4100,7 +4172,7 @@ function drawLattice(){
       return bundle.fiberIntersections[mf % bundle.fiberIntersections.length] || 0;
     } else if (sp.set === 'time') {
       const tCoords = cellList(TIME_DIMS)[f];
-      const sigma_m = tCoords[0] === 0 ? 0 : 1;
+      const sigma_m = (tCoords[0] === 0 || tCoords[0] === 2) ? 0 : 1;
       const psi = tCoords[0] <= 1 ? 2 : 1;
       const mCoords = [psi, 1, 1, sigma_m, 2];
       const mf = mCoords[0]*MOVE_STR.strides[0] + mCoords[1]*MOVE_STR.strides[1] + mCoords[2]*MOVE_STR.strides[2] + mCoords[3]*MOVE_STR.strides[3] + mCoords[4]*MOVE_STR.strides[4];
@@ -5249,12 +5321,14 @@ function renderStats(){
   const br=chordBranching(tc, vocab, STATE.tension);
   const reach=c.reach; let rl=0; for(let i=0;i<tc.t.length;i++) if(reach[i] && tc.t[i]) rl++;
   const flips=Object.keys(STATE.cellFlips.chord).length;
+  const tt=timeTable();
   if($('statC')) $('statC').innerHTML=
     '<b>'+tc.legalCount+'</b> of '+tc.size+' cells legal'+(flips?' (λ alone admits '+tc.cut+')':'')
     +'<br>this vocabulary can ask <b>'+popcount(reach)+'</b> of them, <b>'+rl+'</b> legal'
     +'<br>from a state, <b>'+br.mean.toFixed(1)+'</b> of '+vocab.length+' moves are legal · <b>'+pct(br.forced)+'</b> forced · <b>'+pct(br.dead)+'</b> none';
   if($('statV')) $('statV').innerHTML='<b>'+tv.legalCount+'</b> of '+tv.size+' cells legal'+(Object.keys(STATE.cellFlips.voice).length?' (λ alone admits '+tv.cut+')':'');
   if($('statM')) $('statM').innerHTML='<b>'+tm.legalCount+'</b> of '+tm.size+' cells legal'+(Object.keys(STATE.cellFlips.move).length?' (λ alone admits '+tm.cut+')':'');
+  if($('statT')) $('statT').innerHTML='<b>'+tt.legalCount+'</b> of '+tt.size+' cells legal'+(Object.keys(STATE.cellFlips.time||{}).length?' (λ alone admits '+tt.cut+')':'');
 
   const mc=chordMarginals(tc), mv=voiceMarginals(tv), mm=moveMarginals(tm);
   document.querySelectorAll('.axis').forEach(wrap=>{
@@ -5269,10 +5343,10 @@ function renderStats(){
 }
 function renderHandStat(){
   const el=$('handStat'); if(!el) return;
-  const nC=Object.keys(STATE.cellFlips.chord).length, nV=Object.keys(STATE.cellFlips.voice).length, nM=Object.keys(STATE.cellFlips.move).length, nP=Object.keys(STATE.pins).length;
+  const nC=Object.keys(STATE.cellFlips.chord).length, nV=Object.keys(STATE.cellFlips.voice).length, nM=Object.keys(STATE.cellFlips.move).length, nT=Object.keys(STATE.cellFlips.time||{}).length, nP=Object.keys(STATE.pins).length;
   const nE=Object.keys(STATE.noteEnv).length, nA=Object.keys(STATE.anchors).length, nB=Object.keys(STATE.barOverrides).length, nL=STATE.touched.filter(Boolean).length;
   const bits=[];
-  if(nC+nV+nM) bits.push('<b>'+(nC+nV+nM)+'</b> rule cell'+(nC+nV+nM===1?'':'s')+' flipped');
+  if(nC+nV+nM+nT) bits.push('<b>'+(nC+nV+nM+nT)+'</b> rule cell'+(nC+nV+nM+nT===1?'':'s')+' flipped');
   if(nP) bits.push('<b>'+nP+'</b> chord'+(nP===1?'':'s')+' pinned');
   if(nA) bits.push('<b>'+nA+'</b> pitch'+(nA===1?'':'es')+' anchored');
   if(nE) bits.push('<b>'+nE+'</b> note'+(nE===1?'':'s')+' with its own envelope');
@@ -6299,7 +6373,7 @@ function bindControls(){
   on('btnResetProfV','click', act(()=>{ STATE.profiles.voice=defaultProfiles().voice; paintProfiles(); }));
   if($('btnResetProfM')) on('btnResetProfM','click', act(()=>{ STATE.profiles.move=defaultProfiles().move; paintProfiles(); }));
   if($('btnResetProfT')) on('btnResetProfT','click', act(()=>{ STATE.profiles.time=defaultProfiles().time; paintProfiles(); }));
-  on('btnClearCells','click', act(()=>{ STATE.cellFlips={chord:{},voice:{},move:{}}; }));
+  on('btnClearCells','click', act(()=>{ STATE.cellFlips={chord:{},voice:{},move:{},time:{}}; }));
   on('btnClearPins','click', act(()=>{ STATE.pins={}; }));
   on('btnClearAnch','click', act(()=>{ STATE.anchors={}; }));
   on('btnClearEnv','click', act(()=>{ STATE.noteEnv={}; STATE.voiceEnv=[defaultVoiceEnv(0),defaultVoiceEnv(1),defaultVoiceEnv(2)]; }));
