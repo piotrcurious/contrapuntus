@@ -901,6 +901,7 @@ function annotate(c){
   if(c.applied==='dom') c.roman = 'V7/'+c.of;
   else if(c.applied==='lt') c.roman = 'vii\u00b07/'+c.of;
   else if(c.applied==='subv') c.roman = 'subV7/'+c.of;
+  else if(c.applied==='borrowed') c.roman = c.borrowedRoman || 'borrowed';
   else c.roman = romanNumeral(c.degree, c.quality);
   c.tensionVal = chordTension(c.tones);
   c.key = c.rootPc+':'+c.quality+':'+(c.applied||'-');
@@ -913,7 +914,8 @@ function buildDiatonic(rootPc, steps, size){
     const tones=[];
     for(let k=0;k<size;k++) tones.push((rootPc+steps[(deg+2*k)%n])%12);
     const uniq=[...new Set(tones)];
-    out.push(annotate({degree:deg, rootPc:uniq[0], tones:uniq, ring:0}));
+    const ringVal = uniq.length >= 4 ? 1 : 0; // 0 = triad, 1 = 7th chord
+    out.push(annotate({degree:deg, rootPc:uniq[0], tones:uniq, ring:ringVal}));
   }
   return out;
 }
@@ -923,23 +925,35 @@ function buildExtended(rootPc, steps){
   const add = (c)=>{ if(!seen.has(c.key)){ seen.add(c.key); out.push(c); } };
 
   for(const t of dia){
-    // Music Theory Rule: Applied chords (V7/X, subV7/X, vii°7/X) only target major or minor triads.
-    // Diminished chords (like vii° in major or ii° in minor) or the tonic I itself (where V7/I = V7) are excluded.
     const isDiminishedTarget = (t.tones.length >= 3 && ic(t.tones[1] - t.tones[0]) === 3 && ic(t.tones[2] - t.tones[1]) === 3);
     if(t.degree !== 0 && !isDiminishedTarget){
-      // Secondary Dominant V7/X (root is 5th of target X)
+      // Secondary Dominant V7/X (ring = 2: V7/X)
       const r=(t.rootPc+7)%12;
-      add(annotate({degree:-1, rootPc:r, tones:[r,(r+4)%12,(r+7)%12,(r+10)%12], applied:'dom', of:t.roman, ring:1}));
+      add(annotate({degree:-1, rootPc:r, tones:[r,(r+4)%12,(r+7)%12,(r+10)%12], applied:'dom', of:t.roman, ring:2}));
 
-      // Tritone Substitution bII7/X (Jazz Sub-V7, root is b2 of target X)
+      // Tritone Substitution bII7/X (ring = 3: subV7)
       const tri=(t.rootPc+1)%12;
-      add(annotate({degree:-1, rootPc:tri, tones:[tri,(tri+4)%12,(tri+7)%12,(tri+10)%12], applied:'subv', of:t.roman, ring:1}));
+      add(annotate({degree:-1, rootPc:tri, tones:[tri,(tri+4)%12,(tri+7)%12,(tri+10)%12], applied:'subv', of:t.roman, ring:3}));
 
-      // Secondary Leading-Tone vii°7/X (root is leading tone of target X)
+      // Secondary Leading-Tone vii°7/X (ring = 4: vii°7)
       const l=(t.rootPc+11)%12;
-      add(annotate({degree:-1, rootPc:l, tones:[l,(l+3)%12,(l+6)%12,(l+9)%12], applied:'lt', of:t.roman, ring:2}));
+      add(annotate({degree:-1, rootPc:l, tones:[l,(l+3)%12,(l+6)%12,(l+9)%12], applied:'lt', of:t.roman, ring:4}));
     }
   }
+
+  // Modal Mixture / Borrowed Chords (ring = 5: borrowed)
+  const ivR = (rootPc + 5) % 12;
+  add(annotate({degree:-1, rootPc:ivR, tones:[ivR, (ivR+3)%12, (ivR+7)%12], applied:'borrowed', borrowedRoman:'iv', ring:5}));
+
+  const viR = (rootPc + 8) % 12;
+  add(annotate({degree:-1, rootPc:viR, tones:[viR, (viR+4)%12, (viR+7)%12], applied:'borrowed', borrowedRoman:'\u266dVI', ring:5}));
+
+  const viiR = (rootPc + 10) % 12;
+  add(annotate({degree:-1, rootPc:viiR, tones:[viiR, (viiR+4)%12, (viiR+7)%12], applied:'borrowed', borrowedRoman:'\u266dVII', ring:5}));
+
+  const iiiR = (rootPc + 3) % 12;
+  add(annotate({degree:-1, rootPc:iiiR, tones:[iiiR, (iiiR+4)%12, (iiiR+7)%12], applied:'borrowed', borrowedRoman:'\u266dIII', ring:5}));
+
   out.forEach((c,i)=>{ c.idx=i; if(c.ring==null) c.ring=0; });
   return out;
 }
@@ -1193,7 +1207,7 @@ const DEF_AFF_D = FUNCTIONAL_RANK.map(r=>1-r/7);
 const CHORD_AXES = [
   {key:'d',    n:12, label:'d',   what:'root fall, in semitones', tick:i=>String(i), ringOrder:fifthsPos},
   {key:'tau',  n:5,  label:'\u03c4', what:'tension against the aim', tick:i=>['--','-','0','+','++'][i]},
-  {key:'rho',  n:3,  label:'\u03c1', what:'kind of chord', tick:i=>['dia','V7','vii\u00b0'][i]},
+  {key:'rho',  n:6,  label:'\u03c1', what:'kind of chord (triad -> 7th -> V7/X -> subV7 -> vii°7 -> borrowed)', tick:i=>['triad','7th','V7/X','subV7','vii°7','borrowed'][i]},
   {key:'eta',  n:3,  label:'\u03b7', what:'momentum coming in', tick:i=>['weak','mid','str'][i]},
 ];
 const VOICE_AXES = [
@@ -1225,7 +1239,7 @@ function defaultProfiles(){
     chord:{
       d:    {w:1.00, aff:DEF_AFF_D.slice()},
       tau:  {w:0.45, aff:[0,0.5,1,0.5,0]},
-      rho:  {w:0.45, aff:[1,0.5,0]},
+      rho:  {w:0.65, aff:[1.00, 0.85, 0.70, 0.60, 0.40, 0.50]},
       eta:  {w:0.25, aff:[0.5,1,0.5]},
     },
     voice:{
@@ -1424,8 +1438,9 @@ function cellCost(coords, axes, prof){
     if (gamma === 2 && phi >= 3) interactionPenalty -= 0.4;
   } else if (isChordSpace) {
     // coords: [d, tau, rho, eta]
-    const tau = coords[1], eta = coords[3];
+    const tau = coords[1], rho = coords[2], eta = coords[3];
     if (tau >= 3 && eta === 0) interactionPenalty += 0.8;
+    if ((rho === 3 || rho === 4) && eta === 0) interactionPenalty += 0.6;
   }
 
   return Math.max(0, baseCost + interactionPenalty);
@@ -4372,10 +4387,11 @@ function latticeReadout(f){
     ];
   } else {
     // chord coords: [d, tau, rho, eta]
+    const rhoStr = ['Diatonic Triad', 'Diatonic 7th Chord', 'Secondary Dominant V7/X', 'Tritone Substitution subV7', 'Secondary Leading-Tone vii°7/X', 'Modal Mixture / Borrowed Chord'][coords[2]] || 'Diatonic';
     axisDetails = [
       `<b>Root Fall (d):</b> ${coords[0]}st`,
       `<b>Tension (τ):</b> ${coords[1]}`,
-      `<b>Chord Type (ρ):</b> ${coords[2]}`,
+      `<b>Chord Quality (ρ):</b> ${coords[2]} (${rhoStr})`,
       `<b>Momentum (η):</b> ${coords[3]}`
     ];
   }
