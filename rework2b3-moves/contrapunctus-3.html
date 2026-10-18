@@ -2715,12 +2715,15 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const tF = tIdx(m_pos, m_sub, d_dur, s_sync);
   const tTbl = timeTable();
 
-  // 3. Voice Rule Space Cell Coordinates (kappa = count of consonant intervals 3, 4, 7, 8, 9, 12 with other voices)
+  // 3. Voice Rule Space Cell Coordinates (kappa = count of consonant intervals with other voices)
   let kappa_v = 0;
   for (let u = 0; u < 3; u++) {
     if (u === voiceIdx || fullPitches[u] == null) continue;
     const ic = ((Math.abs(candPitch - fullPitches[u])) % 12 + 12) % 12;
-    if (ic === 3 || ic === 4 || ic === 7 || ic === 8 || ic === 9 || ic === 0) kappa_v++;
+    const isUpperFourth = (ic === 5 && voiceIdx !== 2 && u !== 2);
+    if (ic === 3 || ic === 4 || ic === 7 || ic === 8 || ic === 9 || ic === 0 || isUpperFourth) {
+      kappa_v++;
+    }
   }
   kappa_v = Math.min(2, kappa_v);
 
