@@ -1,0 +1,1648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Contrapunctus</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Spectral:ital,wght@0,400;0,500;1,400&display=swap">
+<style>
+/* A drafting-table instrument: cool paper in light, deep navy in dark. Hue is reserved for data:
+   teal = permitted, red = forbidden, magenta = anything the composer did by hand,
+   orange / green / violet = melody / middle / bass. Blue and yellow only ever mean "the largest
+   and second-largest attractor" on the basin map. Everything else is ink. */
+:root{
+  color-scheme: light;
+
+  --ground:#eceff1;
+  --plate:#f7f9fa;
+  --plate-lift:#ffffff;
+  --gl-bg:#f3f6f7;
+  --rule:#c9d1d6;
+  --rule-soft:#dde3e7;
+  --ink:#14191f;
+  --ink-dim:#4b5663;
+  --ink-faint:#5d6b7a;
+  --ink-grid:#8a97a3;
+
+  --permit:#2b7f95;
+  --forbid:#b8463d;
+  --hand:#b2418f;
+
+  --melody:#d8642f;
+  --mid:#1f8f74;
+  --bass:#5b55c9;
+
+  --att1:#2a78d6;
+  --att2:#eda100;
+  --att3:#9ca2ae;
+  --cls-fixed:#9ca2ae;
+  --cls-loop:#646c7a;
+  --cls-tour:#191c22;
+
+  --sp:8px;
+  --r:3px;
+  --gutter:74px;
+  --serif:'Spectral', 'Iowan Old Style', Georgia, serif;
+  --sans:'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --mono:'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --ground:#101722; --plate:#161e2a; --plate-lift:#1c2634; --gl-bg:#0c121b;
+    --rule:#2a3546; --rule-soft:#1f2836;
+    --ink:#e4e7ec; --ink-dim:#a3adbc; --ink-faint:#8190a5; --ink-grid:#6b788c;
+    --permit:#4fb3c9; --forbid:#d2574e; --hand:#d96ab8;
+    --melody:#d95926; --mid:#199e70; --bass:#9085e9;
+    --att1:#3987e5; --att2:#c98500; --att3:#5a667a;
+    --cls-fixed:#4c586d; --cls-loop:#8190a5; --cls-tour:#e4e7ec;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --ground:#101722; --plate:#161e2a; --plate-lift:#1c2634; --gl-bg:#0c121b;
+  --rule:#2a3546; --rule-soft:#1f2836;
+  --ink:#e4e7ec; --ink-dim:#a3adbc; --ink-faint:#8190a5; --ink-grid:#6b788c;
+  --permit:#4fb3c9; --forbid:#d2574e; --hand:#d96ab8;
+  --melody:#d95926; --mid:#199e70; --bass:#9085e9;
+  --att1:#3987e5; --att2:#c98500; --att3:#5a667a;
+  --cls-fixed:#4c586d; --cls-loop:#8190a5; --cls-tour:#e4e7ec;
+}
+
+*{box-sizing:border-box;}
+[hidden]{display:none!important;}
+html,body{margin:0;padding:0;}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:13px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
+}
+canvas{display:block;width:100%;background:var(--gl-bg);border-radius:2px;}
+h1,h2,h3{text-wrap:balance;}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+
+/* ---------- shell ---------- */
+#app{
+  display:grid;
+  grid-template-columns:316px minmax(0,1fr);
+  grid-template-areas:"head head" "stat stat" "rail stage";
+  min-height:100vh;
+}
+#masthead{
+  grid-area:head;
+  position:sticky;top:env(safe-area-inset-top,0px);z-index:40;
+  display:flex;flex-wrap:wrap;align-items:center;gap:8px 28px;
+  padding:10px 24px;
+  border-bottom:1px solid var(--rule);
+  background:var(--plate);
+}
+#masthead h1{
+  font-family:var(--serif);font-weight:400;font-size:26px;line-height:1.1;
+  margin:0;letter-spacing:-0.012em;
+}
+#masthead .sub{font-family:var(--serif);font-style:italic;font-size:13px;color:var(--ink-dim);margin-top:1px;}
+.transport{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-left:auto;}
+.tempo{display:flex;align-items:center;gap:8px;color:var(--ink-dim);}
+.tempo input[type=range]{width:96px;}
+.histbtns{display:flex;gap:4px;}
+
+#statusline{
+  grid-area:stat;
+  position:sticky;top:var(--hdr,60px);z-index:39;
+  display:flex;flex-wrap:wrap;gap:0 24px;
+  padding:6px 24px;
+  border-bottom:1px solid var(--rule);
+  background:var(--plate-lift);
+  font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;
+  color:var(--ink-dim);
+}
+#statusline b{font-weight:500;color:var(--ink);}
+#statusline .hand{color:var(--hand);}
+
+#rail{
+  grid-area:rail;
+  position:sticky;top:calc(var(--hdr,60px) + var(--stat,28px));
+  align-self:start;
+  max-height:calc(100vh - var(--hdr,60px) - var(--stat,28px));
+  overflow-y:auto;overscroll-behavior:contain;
+  border-right:1px solid var(--rule);
+  background:var(--plate);
+  padding:0 0 40px;
+  min-width:0;
+}
+#stage{grid-area:stage;min-width:0;padding:0 24px 72px;max-width:1180px;}
+
+/* ---------- controls ---------- */
+button{
+  font-family:var(--sans);font-size:12px;font-weight:500;color:var(--ink);
+  background:var(--plate-lift);border:1px solid var(--rule);border-radius:var(--r);
+  padding:6px 11px;cursor:pointer;
+}
+button:hover:not([disabled]){border-color:var(--ink-dim);}
+button:active:not([disabled]){transform:translateY(1px);}
+button[disabled]{opacity:.42;cursor:not-allowed;}
+button.on,button[aria-pressed="true"]{background:var(--ink);color:var(--ground);border-color:var(--ink);}
+button.tiny{padding:3px 8px;font-size:11px;}
+button.primary{min-width:84px;display:inline-flex;align-items:center;justify-content:center;gap:7px;}
+button.hand{border-color:var(--hand);color:var(--hand);}
+button.hand.on{background:var(--hand);color:var(--plate-lift);}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
+select,input[type=number],textarea{
+  font-family:var(--sans);font-size:12px;color:var(--ink);
+  background:var(--plate-lift);border:1px solid var(--rule);border-radius:var(--r);
+  padding:4px 6px;max-width:100%;
+}
+textarea{font-family:var(--mono);font-size:11px;width:100%;resize:vertical;}
+input[type=range]{accent-color:var(--ink);height:18px;}
+label{color:var(--ink-dim);}
+
+.segctl{display:inline-flex;border:1px solid var(--rule);border-radius:var(--r);overflow:hidden;background:var(--plate-lift);}
+.segctl button{border:0;border-radius:0;background:transparent;padding:5px 10px;font-size:11.5px;}
+.segctl button + button{border-left:1px solid var(--rule);}
+.segctl button[aria-pressed="true"]{background:var(--ink);color:var(--ground);}
+.segctl.full{display:flex;width:100%;}
+.segctl.full button{flex:1 1 0;min-width:0;}
+
+/* ---------- rail ---------- */
+/* a group of controls is a disclosure: the title and one line of what it is currently set to stay visible when it is shut */
+details.group{border-bottom:1px solid var(--rule);}
+details.group > summary{
+  list-style:none;cursor:pointer;padding:13px 18px 12px;position:relative;
+  display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:baseline;gap:1px 8px;
+}
+details.group > summary::-webkit-details-marker{display:none;}
+details.group > summary h2{font-family:var(--serif);font-weight:500;font-size:15px;margin:0;letter-spacing:-0.005em;}
+details.group > summary::after{content:"+";font-family:var(--mono);font-size:13px;color:var(--ink-faint);grid-column:2;grid-row:1;}
+details.group[open] > summary::after{content:"\2013";}
+details.group > summary:hover h2{text-decoration:underline;text-decoration-color:var(--ink-faint);text-underline-offset:3px;}
+details.group > summary .sum{grid-column:1 / -1;font-family:var(--mono);font-size:10.5px;line-height:1.45;color:var(--ink-faint);font-variant-numeric:tabular-nums;overflow-wrap:anywhere;}
+details.group > summary .sum:empty{display:none;}
+details.group > summary .sum .hand{color:var(--hand);}
+details.group > .gbody{padding:2px 18px 18px;}
+details.group[open] > summary .sum{display:none;}
+.lbl{font-size:11px;font-weight:500;color:var(--ink-dim);margin:12px 0 5px;}
+.lbl:first-child{margin-top:0;}
+.chips{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;}
+.chips button{padding:4px 0;min-width:37px;flex:0 0 auto;text-align:center;font-family:var(--mono);font-size:11.5px;}
+.chips.wide button{flex:1 1 auto;padding:5px 7px;font-family:var(--sans);font-size:11.5px;min-width:0;}
+.row.tight{margin-bottom:4px;}
+details.sub{margin-top:8px;border-top:1px solid var(--rule-soft);}
+details.sub > summary{cursor:pointer;font-size:11.5px;color:var(--ink-dim);padding:7px 0 3px;list-style:none;}
+details.sub > summary::-webkit-details-marker{display:none;}
+details.sub > summary::before{content:"+ ";font-family:var(--mono);color:var(--ink-faint);}
+details.sub[open] > summary::before{content:"\2013 ";}
+details.sub > .subbody{padding:4px 0 2px;}
+.edits{display:flex;flex-direction:column;gap:3px;}
+.edits .er{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;font-size:12px;color:var(--ink);}
+.edits .er b{font-family:var(--mono);font-weight:500;color:var(--hand);margin-right:5px;}
+.row{display:grid;grid-template-columns:92px minmax(0,1fr);align-items:center;gap:10px;margin-bottom:8px;}
+.row:last-child{margin-bottom:0;}
+.row > label{min-width:0;}
+.row.wide{grid-template-columns:minmax(0,1fr);}
+.row select{width:100%;min-width:0;}
+.row .slide{display:flex;align-items:center;gap:8px;min-width:0;}
+.row .slide input[type=range]{flex:1 1 auto;min-width:40px;}
+.row .three{display:flex;gap:4px;min-width:0;}
+.row .three select{flex:1 1 0;min-width:0;padding:4px 2px;}
+.num{font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;color:var(--ink);min-width:2.9em;text-align:right;}
+.check{display:flex;align-items:flex-start;gap:7px;margin-bottom:9px;}
+.check input{margin-top:2px;accent-color:var(--ink);}
+.check label{color:var(--ink);cursor:pointer;}
+.aside{font-size:11.5px;color:var(--ink-faint);margin:6px 0 0;line-height:1.45;}
+.aside code{font-family:var(--mono);font-size:11px;}
+.btnrow{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+
+/* ---------- plates ---------- */
+.plate{margin:22px 0 0;}
+.plate .figure{background:var(--plate);border:1px solid var(--rule);border-radius:var(--r);padding:12px;position:relative;min-width:0;}
+.plate figcaption{display:block;margin:9px 2px 0;font-family:var(--serif);font-size:13px;line-height:1.55;color:var(--ink-dim);max-width:76ch;}
+.plate figcaption b{color:var(--ink);font-weight:500;}
+.plate .heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px 14px;flex-wrap:wrap;margin:0 2px 8px;}
+.plate .heading h2{font-family:var(--serif);font-weight:500;font-size:17px;margin:0;letter-spacing:-0.006em;}
+.plate .tools{display:flex;gap:6px;flex-wrap:wrap;align-items:center;}
+.split{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(0,1fr);gap:18px;}
+.split > *{min-width:0;}
+
+.cvwrap{position:relative;}
+.overlay{position:absolute;inset:0;pointer-events:none;overflow:hidden;}
+.overlay .tag{
+  position:absolute;font-family:var(--mono);font-size:10px;font-variant-numeric:tabular-nums;
+  white-space:nowrap;transform:translate(-50%,-50%);color:var(--ink);
+}
+.handle{
+  position:absolute;width:30px;height:30px;margin:-15px 0 0 -15px;padding:0;border:0;background:transparent;
+  border-radius:50%;pointer-events:auto;cursor:grab;touch-action:none;
+  display:flex;align-items:center;justify-content:center;
+}
+.handle::before{content:"";width:11px;height:11px;border-radius:50%;background:var(--plate-lift);border:1.6px solid var(--ink);}
+.handle:hover::before,.handle.drag::before{background:var(--ink);}
+.handle span{position:absolute;left:50%;top:-1px;transform:translate(-50%,-100%);font-family:var(--mono);font-size:10px;color:var(--ink);white-space:nowrap;pointer-events:none;}
+.handle.drag{cursor:grabbing;}
+.overlay .seg{
+  position:absolute;top:0;height:18px;font-family:var(--mono);font-size:10.5px;line-height:18px;padding:0 4px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-radius:2px;pointer-events:auto;cursor:pointer;
+  background:transparent;border:0;text-align:left;color:var(--ink);
+}
+.overlay .seg:hover{background:var(--rule-soft);}
+.overlay .seg.sel{background:var(--rule-soft);box-shadow:inset 0 -2px 0 var(--ink);}
+.overlay .seg.now{box-shadow:inset 0 2px 0 var(--ink);}
+.overlay .seg.now.sel{box-shadow:inset 0 2px 0 var(--ink), inset 0 -2px 0 var(--ink);}
+.overlay .seg.pin{color:var(--hand);}
+.overlay .seg.veto::after{content:"";position:absolute;right:3px;top:3px;width:5px;height:5px;border-radius:50%;background:var(--hand);}
+.overlay .seg.ghost{top:18px;pointer-events:none;font-weight:400;color:var(--ink-dim);font-style:italic;cursor:default;height:15px;line-height:15px;}
+.overlay .seg.ghost:hover{background:transparent;}
+.overlay .note{position:absolute;font-family:var(--mono);font-size:10px;color:var(--ink-faint);white-space:nowrap;}
+.playhead{position:absolute;top:0;bottom:0;left:0;width:2px;background:var(--ink);opacity:.8;pointer-events:none;will-change:transform;}
+.rowgrid{display:grid;grid-template-columns:var(--gutter) minmax(0,1fr);}
+.gutter{position:relative;font-family:var(--mono);font-size:10px;color:var(--ink-faint);}
+.gutter .pl{position:absolute;right:7px;transform:translateY(-50%);white-space:nowrap;}
+.gutter .ln{position:absolute;right:0;width:4px;height:1px;background:var(--ink-grid);}
+.gutter .cap{position:absolute;left:0;right:7px;display:flex;align-items:center;justify-content:flex-end;white-space:nowrap;}
+.gutter button.lane{
+  position:absolute;left:0;right:6px;height:26px;padding:0 5px;text-align:left;font-family:var(--sans);font-size:11px;font-weight:500;
+  background:transparent;border:1px solid transparent;color:var(--ink-dim);display:flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden;
+}
+.gutter button.lane i{width:8px;height:8px;border-radius:2px;flex:0 0 auto;}
+.gutter button.lane[aria-pressed="true"]{background:var(--plate-lift);color:var(--ink);border-color:var(--ink-dim);}
+.scroller{overflow-x:auto;overflow-y:hidden;}
+.scroller canvas{min-width:100%;}
+
+.envfields{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;align-items:center;}
+.envfields label{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:11px;color:var(--ink-dim);}
+.envfields input{width:5.4em;font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;padding:3px 4px;}
+.envfields span{color:var(--ink-faint);}
+canvas:focus-visible{outline:2px solid var(--ink);outline-offset:2px;}
+.readout{font-family:var(--mono);font-size:11px;font-variant-numeric:tabular-nums;color:var(--ink-dim);line-height:1.7;}
+.readout b{color:var(--ink);font-weight:500;}
+.readout .hand,.hand{color:var(--hand);}
+.key{display:flex;gap:6px 14px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:var(--ink-dim);}
+.key span{display:flex;align-items:center;gap:5px;}
+.sw{width:10px;height:10px;border-radius:2px;flex:0 0 auto;display:inline-block;}
+.sw.dot{border-radius:50%;}
+.sw.ring{border-radius:50%;background:transparent!important;border:2px solid var(--ink);}
+.sw.ring.dimmer{border-color:var(--ink-dim);border-width:1.5px;}
+.sw.ring.hand{border-color:var(--hand);}
+.sw.ring.thin{border-width:1px;}
+.sw.small{width:5px;height:5px;margin:0 2.5px;}
+.sw.dash{width:16px;height:0;border-top:2px dashed var(--ink-dim);border-radius:0;background:transparent!important;}
+
+/* ---------- cost-surface editors ---------- */
+.axis{margin-bottom:12px;}
+.axis:last-child{margin-bottom:0;}
+.axis .head{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
+.axis .head .name{font-family:var(--mono);font-size:11px;color:var(--ink);min-width:1.1em;}
+.axis .head .what{font-size:11px;color:var(--ink-faint);flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.axis .head input[type=range]{width:58px;flex:0 0 auto;}
+.axis .bars{display:flex;gap:1px;height:34px;align-items:stretch;cursor:ns-resize;touch-action:none;}
+.axis .bars .b{flex:1;background:var(--rule-soft);position:relative;border-radius:1px 1px 0 0;min-width:4px;outline-offset:1px;}
+.axis .bars .b i{position:absolute;left:0;right:0;bottom:0;background:var(--ink-dim);border-radius:1px 1px 0 0;pointer-events:none;}
+.axis .bars .b.edited i{background:var(--hand);}
+.axis .ticks{display:flex;gap:1px;font-family:var(--mono);font-size:9px;color:var(--ink-faint);margin-top:2px;}
+.axis .ticks span{flex:1;text-align:center;min-width:4px;overflow:hidden;}
+.marg{display:flex;gap:1px;height:5px;margin-top:3px;}
+.marg i{flex:1;background:var(--rule-soft);border-radius:1px;}
+.marg i u{display:block;height:100%;background:var(--permit);border-radius:1px;}
+
+/* ---------- dynamics ---------- */
+.sweepbox{position:relative;}
+#sweep{display:flex;gap:2px;height:78px;align-items:flex-end;position:relative;}
+#sweep button.c{
+  flex:1 1 0;min-width:0;padding:0;border:0;border-radius:2px 2px 0 0;background:var(--cls-loop);
+  position:relative;
+}
+#sweep button.c:hover:not([disabled]){border:0;filter:brightness(1.12);}
+#sweep button.c.here{outline:2px solid var(--ink);outline-offset:1px;}
+#sweepLine{position:absolute;left:0;right:0;border-top:1px dashed var(--ink-dim);pointer-events:none;}
+#sweepLine span{position:absolute;right:0;top:-15px;font-family:var(--mono);font-size:9.5px;color:var(--ink-dim);background:var(--plate);padding:0 3px;}
+#memrow{display:flex;gap:2px;height:22px;align-items:flex-end;margin-top:6px;}
+#memrow i{flex:1 1 0;min-width:0;background:var(--ink-faint);opacity:.75;border-radius:1px 1px 0 0;}
+.sweeplab{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin:7px 0 0;}
+.sweepaxis{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--ink-faint);margin-top:3px;}
+.tbl{border-collapse:collapse;font-family:var(--mono);font-size:10.5px;font-variant-numeric:tabular-nums;color:var(--ink-dim);width:100%;}
+.tbl th,.tbl td{padding:2px 8px 2px 0;text-align:right;border-bottom:1px solid var(--rule-soft);white-space:nowrap;}
+.tbl th{font-weight:500;color:var(--ink);}
+.tbl td.nm,.tbl th.nm{text-align:left;white-space:normal;min-width:0;}
+.tbl tr.here td{color:var(--ink);font-weight:500;}
+.viewtable{margin-top:10px;}
+.viewtable summary{cursor:pointer;font-size:11.5px;color:var(--ink-dim);padding:2px 0;list-style:none;}
+.viewtable summary::before{content:"+ ";font-family:var(--mono);color:var(--ink-faint);}
+.viewtable[open] summary::before{content:"\2013 ";}
+.viewtable{border-top:0;margin-top:10px;}
+.viewtable .scroller{max-height:260px;overflow-y:auto;margin-top:6px;}
+
+/* ---------- branches ---------- */
+#branches{display:flex;flex-direction:column;gap:4px;}
+.branch{
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:9px;
+  padding:6px 8px;border:1px solid var(--rule-soft);border-radius:var(--r);
+  background:var(--plate-lift);cursor:pointer;text-align:left;width:100%;font-family:var(--sans);
+}
+.branch:hover{border-color:var(--ink-dim);}
+.branch.taken{border-color:var(--ink);}
+.branch.pinned{border-color:var(--hand);}
+.branch .rn{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--ink);}
+.branch .fut{font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.branch .fut em{font-style:normal;color:var(--ink);font-weight:500;text-decoration:underline;text-decoration-color:var(--ink-faint);text-underline-offset:2px;}
+.branch .cost{font-family:var(--mono);font-size:10px;color:var(--ink-faint);font-variant-numeric:tabular-nums;}
+
+/* ---------- basin ---------- */
+.attr{display:grid;grid-template-columns:12px minmax(0,1fr);align-items:start;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);margin-bottom:4px;line-height:1.45;}
+.attr .sw{margin-top:3px;}
+.attr b{color:var(--ink);font-weight:500;}
+
+/* ---------- life, essay ---------- */
+.lifegrid{display:grid;gap:1px;margin:8px 0;max-width:420px;}
+.lifegrid i{background:var(--rule-soft);aspect-ratio:1;border-radius:1px;}
+.lifegrid i.on{background:var(--ink-dim);}
+details.fold{border-top:1px solid var(--rule);margin-top:26px;}
+details.fold > summary{cursor:pointer;padding:12px 2px;font-family:var(--serif);font-size:15px;color:var(--ink);list-style:none;}
+details.fold > summary::-webkit-details-marker{display:none;}
+details.fold > summary::before{content:"+ ";font-family:var(--mono);color:var(--ink-faint);}
+details.fold[open] > summary::before{content:"\2013 ";}
+.prose{max-width:72ch;font-family:var(--serif);font-size:14.5px;line-height:1.65;color:var(--ink-dim);padding-bottom:22px;}
+.prose h3{font-family:var(--sans);font-size:12px;font-weight:600;color:var(--ink);margin:20px 0 6px;}
+.prose p{margin:0 0 11px;}
+.prose ul{margin:0 0 11px;padding-left:1.25em;}
+.prose li{margin:0 0 6px;}
+.prose code{font-family:var(--mono);font-size:12.5px;color:var(--ink);}
+.prose em{color:var(--ink);}
+.prose table{margin:6px 0 14px;}
+
+/* ---------- tooltip, toast ---------- */
+#tip{
+  position:fixed;left:0;top:0;z-index:100;pointer-events:none;
+  background:var(--ink);color:var(--ground);border-radius:3px;padding:6px 9px;max-width:300px;
+  font-family:var(--mono);font-size:11px;line-height:1.5;display:flex;flex-direction:column;
+  box-shadow:0 2px 10px rgba(0,0,0,.28);
+}
+#tip b{font-weight:500;}
+#tip span{opacity:.86;}
+#toast{
+  position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:90;
+  background:var(--ink);color:var(--ground);border-radius:3px;padding:8px 14px;max-width:min(92vw,480px);
+  font-size:12px;box-shadow:0 2px 12px rgba(0,0,0,.3);
+}
+.keep textarea{margin-top:8px;}
+
+/* ---------- page navigation ---------- */
+#jump{display:flex;flex-wrap:wrap;gap:2px 16px;padding:12px 2px 0;font-size:11.5px;}
+#jump a{color:var(--ink-dim);text-decoration:none;border-bottom:1px solid transparent;padding-bottom:1px;}
+#jump a:hover,#jump a:focus-visible{color:var(--ink);border-bottom-color:var(--ink-faint);}
+.plate.first{margin-top:14px;}
+.plate{scroll-margin-top:calc(var(--hdr,60px) + var(--stat,28px) + 8px);}
+.plate .subhead{display:flex;align-items:center;justify-content:space-between;gap:6px 12px;flex-wrap:wrap;margin:0 0 6px;}
+.plate .subhead h3{font-family:var(--serif);font-weight:500;font-size:15px;margin:0;}
+.plate .subhead .tools{gap:4px;}
+.split.step{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+.split.env{grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);align-items:start;}
+
+/* ---------- the step inspector ---------- */
+.cands{display:flex;flex-direction:column;gap:3px;margin-top:8px;}
+.cand{
+  display:grid;grid-template-columns:minmax(4.6em,auto) minmax(0,1fr) 3em auto;align-items:center;gap:2px 9px;
+  padding:5px 7px 4px;border:1px solid var(--rule-soft);border-radius:var(--r);background:var(--plate-lift);cursor:default;
+}
+.cand:hover,.cand.hov,.cand:focus-within{border-color:var(--ink-dim);}
+.cand.sel{background:var(--plate);box-shadow:inset 3px 0 0 var(--ink-dim);}
+.cand.taken{border-color:var(--ink);}
+.cand.pinned{border-color:var(--hand);}
+.cand .nm{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--ink);white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis;}
+.cand .nm small{font-size:10.5px;font-weight:400;color:var(--ink-faint);margin-left:5px;}
+.cand.vetoed .nm{text-decoration:line-through;text-decoration-color:var(--hand);color:var(--ink-faint);}
+.cand .pbar{position:relative;height:13px;background:var(--rule-soft);border-radius:2px;overflow:hidden;}
+.cand .pbar i{position:absolute;left:0;display:block;}
+.cand .pbar .u{top:0;bottom:0;background:var(--ink-grid);opacity:.30;}
+.cand .pbar .p{top:3px;bottom:3px;background:var(--permit);}
+.cand.out .pbar .p{background:var(--forbid);}
+.cand .pc{font-family:var(--mono);font-size:11px;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums;}
+.cand .pc.zero{color:var(--ink-faint);}
+.cand .acts{display:flex;gap:3px;}
+.cand .acts button{padding:2px 6px;font-size:10.5px;}
+.cand .acts button.hand{border-color:var(--hand);}
+.cand .meta{grid-column:1 / -1;font-family:var(--mono);font-size:10.5px;line-height:1.5;color:var(--ink-faint);display:flex;flex-wrap:wrap;align-items:center;gap:0 10px;min-width:0;}
+.cand .meta b{font-weight:500;color:var(--ink-dim);}
+.cand .meta .hand{color:var(--hand);}
+.cand .meta .fut{color:var(--ink-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;}
+.cand .meta .fut em{font-style:normal;color:var(--ink);font-weight:500;text-decoration:underline;text-decoration-color:var(--ink-faint);text-underline-offset:2px;}
+.meter{display:inline-block;position:relative;width:44px;height:5px;background:var(--rule-soft);border-radius:1px;vertical-align:middle;margin:0 3px;}
+.meter i{position:absolute;display:block;}
+.meter .fillc{left:0;top:0;bottom:0;background:var(--ink-grid);opacity:.7;}
+.meter .cut{top:-2px;bottom:-2px;width:1px;background:var(--ink);}
+.bd{display:grid;grid-template-columns:10.6em minmax(0,1fr) 3.4em;gap:3px 8px;align-items:center;font-family:var(--mono);font-size:10.5px;color:var(--ink-dim);margin-top:6px;}
+.bd .track{display:block;position:relative;height:8px;background:var(--rule-soft);border-radius:1px;}
+.bd .track .zero{position:absolute;left:50%;top:-1px;bottom:-1px;width:1px;background:var(--ink-grid);}
+.bd .track i{position:absolute;top:1px;bottom:1px;background:var(--ink-dim);}
+.bd .track i.neg{background:var(--forbid);}
+.bd .v{text-align:right;color:var(--ink);font-variant-numeric:tabular-nums;}
+.bd .tot{border-top:1px solid var(--rule-soft);padding-top:3px;color:var(--ink);}
+.bd .totv{border-top:1px solid var(--rule-soft);padding-top:3px;}
+#stepNoteDetail{margin-top:8px;}
+#stepNote canvas,#stepChord canvas{border:1px solid var(--rule-soft);}
+
+/* ---------- the envelope bank ---------- */
+.bank{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;}
+.bank.inline{display:flex;flex-wrap:wrap;gap:4px;}
+#rowEnvName{margin-top:8px;}
+.bchip{display:flex;align-items:center;gap:6px;padding:3px 8px 3px 6px;font-size:11px;text-align:left;min-width:0;}
+.bchip svg{width:36px;height:16px;flex:0 0 auto;display:block;}
+.bchip svg path{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round;}
+.bchip .k{font-family:var(--mono);opacity:.65;}
+.bchip .nmx{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}
+.bchip.assigned{border-color:var(--hand);}
+.seqbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;margin:0 2px 9px;}
+.seqbar .grp{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.seqbar .grp > .aside{margin:0;}
+
+/* ---------- narrow screens ---------- */
+@media (max-width:980px){
+  #app{grid-template-columns:minmax(0,1fr);grid-template-areas:"head" "stat" "stage" "rail";}
+  #rail{position:static;max-height:none;overflow:visible;border-right:0;border-top:1px solid var(--rule);}
+  .split,.split.step,.split.env{grid-template-columns:minmax(0,1fr);}
+}
+@media (max-width:640px){
+  :root{--gutter:64px;}
+  #masthead{padding:8px 16px;gap:6px 14px;}
+  #masthead h1{font-size:22px;}
+  #masthead .sub{display:none;}
+  #statusline{padding:5px 16px;flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;gap:0 18px;}
+  #stage{padding:0 16px 56px;}
+  details.group > summary{padding:12px 16px 11px;}
+  details.group > .gbody{padding:2px 16px 16px;}
+  .tempo input[type=range]{width:72px;}
+  .row{grid-template-columns:84px minmax(0,1fr);}
+}
+@media (prefers-reduced-motion:reduce){
+  *{scroll-behavior:auto!important;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header id="masthead">
+    <div class="brand">
+      <h1>Contrapunctus</h1>
+      <div class="sub">a deterministic counterpoint automaton and the rule space it lives in</div>
+    </div>
+    <div class="transport">
+      <div class="histbtns">
+        <button class="tiny" id="btnUndo" disabled title="Undo (Ctrl/Cmd + Z)">Undo</button>
+        <button class="tiny" id="btnRedo" disabled title="Redo (Ctrl/Cmd + Shift + Z)">Redo</button>
+      </div>
+      <div class="tempo">
+        <label for="tempo">Tempo</label>
+        <input type="range" id="tempo" min="40" max="200" value="96">
+        <span class="num" id="tempoNum">96</span>
+      </div>
+      <button id="btnPlay" class="primary" aria-pressed="false" title="Play / stop (Space)"><span id="playIco" aria-hidden="true">&#9654;</span><span id="playLbl">Play</span></button>
+    </div>
+  </header>
+
+  <div id="statusline" role="status"></div>
+
+  <!-- ================= CONSOLE RAIL ================= -->
+  <aside id="rail" aria-label="Controls">
+
+    <details class="group" id="gSpace" open>
+      <summary><h2>Pitch space</h2><span class="sum" id="sumSpace"></span></summary>
+      <div class="gbody">
+        <div class="lbl" id="lblDiv">Steps to the octave</div>
+        <div class="chips" id="divChips" role="group" aria-labelledby="lblDiv"></div>
+        <div class="row tight"><label for="inDiv">Other</label>
+          <div class="slide"><input type="number" id="inDiv" min="12" max="72" step="1" inputmode="numeric" style="width:5em"><button class="tiny" id="btnDiv" type="button">Use</button></div></div>
+        <p class="aside" id="spaceNote"></p>
+        <div class="row"><label for="selRoot">Root</label><select id="selRoot"></select></div>
+        <div class="row"><label for="selScale">Scale</label><select id="selScale"></select></div>
+        <div class="check"><input type="checkbox" id="chkColour"><label for="chkColour">Colour chords<br><span class="aside" id="colourNote" style="margin:0"></span></label></div>
+        <div class="row"><label for="selTimbre">Sound</label><select id="selTimbre"></select></div>
+        <p class="aside" id="timbreNote"></p>
+        <div class="row" id="rowTuning"><label for="selTuning">Temperament</label><select id="selTuning"></select></div>
+        <p class="aside" id="tuningNote"></p>
+        <div class="btnrow"><button class="tiny" id="btnToIntervals" type="button">Hear this division&rsquo;s intervals</button></div>
+      </div>
+    </details>
+
+    <details class="group" id="gForm" open>
+      <summary><h2>Form</h2><span class="sum" id="sumForm"></span></summary>
+      <div class="gbody">
+        <div class="row"><label for="selBars">Bars</label>
+          <select id="selBars"><option>4</option><option selected>8</option><option>12</option><option>16</option></select></div>
+        <div class="row"><label for="selGrid">Grid</label>
+          <select id="selGrid"><option value="4">quarters</option><option value="8" selected>eighths</option><option value="16">sixteenths</option></select></div>
+        <div class="row"><label for="selHarm">Chord change</label>
+          <select id="selHarm"><option value="bar" selected>every bar</option><option value="half">twice a bar</option></select></div>
+        <div class="row"><label for="sTension">Tension aim</label>
+          <div class="slide"><input type="range" id="sTension" min="0" max="100" value="30"><span class="num" id="nTension">.30</span></div></div>
+        <p class="aside" style="margin-top:-2px">How tense the harmony aims to be: 0 calm, 1 as tense as it gets. Click a bar number in the rhythm plate to give one bar its own aim and scale.</p>
+        <div class="check"><input type="checkbox" id="chkExt"><label for="chkExt">Applied chords<br><span class="aside" style="margin:0">Secondary dominants and leading-tone chords join the diatonic seven: about three times as many chords to move between.</span></label></div>
+        <div class="check"><input type="checkbox" id="chkWalk"><label for="chkWalk">Walking bass<br><span class="aside" style="margin:0">One bass note per beat. The last one of each chord leads to the next root by a step.</span></label></div>
+        <div class="row"><label for="selArp">Melody figure</label>
+          <select id="selArp"><option value="none" selected>none</option><option value="up">up</option><option value="down">down</option><option value="updown">up / down</option><option value="downup">down / up</option><option value="scramble">scrambled</option></select></div>
+      </div>
+    </details>
+
+    <details class="group" id="gChoice" open>
+      <summary><h2>How moves are chosen</h2><span class="sum" id="sumChoice"></span></summary>
+      <div class="gbody">
+        <div class="chips wide" id="choicePresets" role="group" aria-label="Taste">
+          <button type="button" data-preset="balanced" aria-pressed="false">Balanced</button>
+          <button type="button" data-preset="smooth" aria-pressed="false">Smooth</button>
+          <button type="button" data-preset="strong" aria-pressed="false">Strong</button>
+          <button type="button" data-preset="bold" aria-pressed="false">Bold</button>
+          <button type="button" data-preset="classic" aria-pressed="false" title="The fixed order of the first two versions: no variety, no tuning-aware taste">Classic</button>
+        </div>
+        <p class="aside" id="choiceNote"></p>
+        <div id="choiceScored">
+          <div class="row"><label for="sVariety">Variety</label>
+            <div class="slide"><input type="range" id="sVariety" min="0" max="100" value="30"><span class="num" id="nVariety">.30</span></div></div>
+          <p class="aside" id="varietyWords" style="margin-top:-2px"></p>
+          <div class="row"><label for="inSeed">Variation</label>
+            <div class="slide"><input type="number" id="inSeed" min="0" max="999999" step="1" inputmode="numeric" style="width:6.4em"><button class="tiny" id="btnReroll" type="button" title="Draw another variation of the same piece">Reroll</button></div></div>
+          <details class="sub" id="fineChoice">
+            <summary>Fine control</summary>
+            <div class="subbody">
+              <div class="lbl">Chords</div>
+              <div class="row"><label for="sCFavour" title="How much the rule's own ranking counts. Negative reads it from the dear end.">Favour the rule</label><div class="slide"><input type="range" id="sCFavour" min="-100" max="150" step="5"><span class="num" id="nCFavour"></span></div></div>
+              <div class="row"><label for="sCSmooth" title="How little the chord tones have to move">Smooth voices</label><div class="slide"><input type="range" id="sCSmooth" min="-100" max="150" step="5"><span class="num" id="nCSmooth"></span></div></div>
+              <div class="check"><input type="checkbox" id="chkStill"><label for="chkStill">Keep the chords moving<br><span class="aside" style="margin:0">Repeating a chord, or going back to the one before, only when nothing else is allowed.</span></label></div>
+              <div class="lbl">Notes</div>
+              <div class="row"><label for="sVFavour" title="How much the rule's own ranking counts">Favour the rule</label><div class="slide"><input type="range" id="sVFavour" min="-100" max="150" step="5"><span class="num" id="nVFavour"></span></div></div>
+              <div class="row"><label for="sVStep" title="Steps over repeats and leaps">Stepwise</label><div class="slide"><input type="range" id="sVStep" min="-100" max="150" step="5"><span class="num" id="nVStep"></span></div></div>
+              <div class="row"><label for="sVShape" title="No trills, a leap answered by a step back, no hugging the edge of the range">Line shape</label><div class="slide"><input type="range" id="sVShape" min="-100" max="150" step="5"><span class="num" id="nVShape"></span></div></div>
+              <div class="row"><label for="sVHarm" title="Chord tones on structural notes; intervals that fuse with the other voices">Harmony</label><div class="slide"><input type="range" id="sVHarm" min="-100" max="150" step="5"><span class="num" id="nVHarm"></span></div></div>
+              <div class="row"><label for="sVContr" title="Moving against the other voices">Contrary motion</label><div class="slide"><input type="range" id="sVContr" min="-100" max="150" step="5"><span class="num" id="nVContr"></span></div></div>
+              <div class="check"><input type="checkbox" id="chkRoot"><label for="chkRoot">Bass takes the root<br><span class="aside" style="margin:0">On the first bass note of a chord, whenever the rule allows it.</span></label></div>
+              <div class="lbl">What the ear counts as a step</div>
+              <div class="row"><label for="inMicro" title="Motions shorter than this are the same note a little out of tune, not a step">Same note under</label><div class="slide"><input type="number" id="inMicro" min="10" max="120" step="5" inputmode="numeric" style="width:5em"><span class="num" style="min-width:0">cents</span></div></div>
+              <div class="row"><label for="inLeap" title="Motions at least this long are leaps">Leap from</label><div class="slide"><input type="number" id="inLeap" min="150" max="500" step="10" inputmode="numeric" style="width:5em"><span class="num" style="min-width:0">cents</span></div></div>
+              <div class="btnrow"><button class="tiny" id="btnChoiceReset" type="button">Back to Balanced</button></div>
+            </div>
+          </details>
+        </div>
+        <div id="classicTake" hidden>
+          <div class="row wide"><label id="lblTake">Of the legal moves, take the</label></div>
+          <div class="segctl full" id="takeCtl" role="group" aria-labelledby="lblTake">
+            <button type="button" data-take="smooth" aria-pressed="false">smoothest</button>
+            <button type="button" data-take="strong" aria-pressed="false">strongest</button>
+            <button type="button" data-take="bold" aria-pressed="true">boldest</button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <details class="group" id="gRule">
+      <summary><h2>The rule</h2><span class="sum" id="sumRule"></span></summary>
+      <div class="gbody">
+        <p class="aside" style="margin-top:0">What is allowed at all. Every move falls in a cell of a table; the cheapest cells are legal, until the fraction &lambda; of the table is.</p>
+        <div class="lbl">Chords</div>
+        <div class="row"><label for="sLamC">Legal fraction &lambda;</label>
+          <div class="slide"><input type="range" id="sLamC" min="0" max="100" value="38"><span class="num" id="nLamC">.38</span></div></div>
+        <div class="readout" id="statC"></div>
+        <details class="sub"><summary>Which values are favoured</summary>
+          <div class="subbody">
+            <div id="profC"></div>
+            <p class="aside">Bars set how much each value of an axis is favoured. The small slider by an axis name sets how much that axis counts at all. The teal strip under each axis shows how many cells with that value are legal.</p>
+            <div class="btnrow"><button class="tiny" id="btnResetProfC">Reset chord profiles</button></div>
+          </div>
+        </details>
+        <div class="lbl" style="margin-top:14px">Notes</div>
+        <div class="row"><label for="sLamV">Legal fraction &lambda;</label>
+          <div class="slide"><input type="range" id="sLamV" min="0" max="100" value="46"><span class="num" id="nLamV">.46</span></div></div>
+        <div class="readout" id="statV"></div>
+        <details class="sub"><summary>Which values are favoured</summary>
+          <div class="subbody">
+            <div id="profV"></div>
+            <div class="btnrow"><button class="tiny" id="btnResetProfV">Reset voice profiles</button></div>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <details class="group" id="gStart">
+      <summary><h2>Start</h2><span class="sum" id="sumStart"></span></summary>
+      <div class="gbody">
+        <div class="row"><label for="selSeedChord">First chord</label><select id="selSeedChord"></select></div>
+        <div class="row"><label for="selSeedEta">Momentum &eta;<sub>0</sub></label><select id="selSeedEta">
+          <option value="0">weak</option><option value="1" selected>neutral</option><option value="2">strong</option></select></div>
+        <div class="row"><label for="selSeedPrev">Two back c<sub>&minus;1</sub></label><select id="selSeedPrev"></select></div>
+        <div class="row"><label>Voices start</label><div class="three" id="seedVoices"></div></div>
+        <p class="aside">The chord walk is a function of this state and the rule. With variety above zero the variation number also enters: the same variation is the same piece. The basin map shows what each starting state leads to.</p>
+      </div>
+    </details>
+
+    <details class="group" id="gEdits" open>
+      <summary><h2>Your edits</h2><span class="sum" id="sumEdits"></span></summary>
+      <div class="gbody">
+        <div id="handStat"></div>
+      </div>
+    </details>
+
+    <details class="group keep" id="gKeep">
+      <summary><h2>Keep</h2><span class="sum">export and restore</span></summary>
+      <div class="gbody">
+        <div class="btnrow" style="margin-top:0">
+          <button id="btnMidi">Save MIDI</button>
+          <button id="btnJson">Save state</button>
+          <button id="btnCopy">Copy code</button>
+          <button id="btnLoad">Load code</button>
+          <button id="btnOpen">Open file</button>
+          <button id="btnResetAll" class="tiny">Start over</button>
+        </div>
+        <input type="file" id="fileState" accept=".json,application/json,text/plain" hidden>
+        <textarea id="codeBox" rows="5" hidden spellcheck="false" aria-label="State code"></textarea>
+        <div class="btnrow" id="codeBtns" hidden>
+          <button class="tiny" id="btnCodeApply">Load this code</button>
+          <button class="tiny" id="btnCodeClose">Close</button>
+        </div>
+        <p class="aside" id="midiInfo"></p>
+        <p class="aside" id="keepNote">The state code holds every setting, seed and hand edit. Pasting it back reproduces the piece exactly. The piece you are working on is also kept in this browser.</p>
+      </div>
+    </details>
+  </aside>
+
+  <!-- ================= STAGE ================= -->
+  <main id="stage">
+
+    <nav id="jump" aria-label="Plates on this page">
+      <a href="#plateScore">Score</a><a href="#plateStep">At this step</a><a href="#plateSeq">Rhythm</a><a href="#plateEnv">Envelopes</a><a href="#plateRule">Rule space</a><a href="#plateSpace">Intervals</a><a href="#plateDyn">Dynamics</a><a href="#plateBasin">Basins</a><a href="#plateEssay">How it works</a>
+    </nav>
+
+    <!-- Plate: score -->
+    <section class="plate first" id="plateScore" aria-labelledby="hScore">
+      <div class="heading">
+        <h2 id="hScore">Score</h2>
+        <div class="tools">
+          <button class="tiny" id="btnAnchor" aria-pressed="false" title="Click an empty place in the melody register to fix the pitch there">Anchor pitches</button>
+          <button class="tiny" id="btnAnchorAny" aria-pressed="false" title="Anchor on any step of the division, not only the notes of the scale">any step</button>
+          <button class="tiny" id="btnShowTails" aria-pressed="true">Release tails</button>
+          <button class="tiny" id="btnShowGhost" aria-pressed="true">Roads not taken</button>
+          <button class="tiny" id="btnShowSounding" aria-pressed="false">What is sounding</button>
+        </div>
+      </div>
+      <div class="figure">
+        <div class="rowgrid">
+          <div class="gutter" id="rollGutter" aria-hidden="true"></div>
+          <div class="cvwrap" id="rollWrap">
+            <canvas id="rollCanvas" style="height:340px" tabindex="0" role="application" aria-label="Piano-roll score of the three voices. Arrow keys move between notes."></canvas>
+            <div class="overlay" id="rollLabels"></div>
+            <div class="playhead" id="rollHead" hidden></div>
+          </div>
+        </div>
+      </div>
+      <div class="readout" id="rollRead" aria-live="polite" style="margin-top:8px;min-height:3.4em">&nbsp;</div>
+      <div class="key" id="rollKey"></div>
+      <figcaption>Bar length is the gate: how long the key is held, which need not match the distance to the next note. The fading trail after a bar is the release, still sounding. Click a chord name or a note to see, just below, what else the rule could have played there.</figcaption>
+    </section>
+
+    <!-- Plate: the step inspector -->
+    <section class="plate" id="plateStep" aria-labelledby="hStep">
+      <div class="heading">
+        <h2 id="hStep">At this step</h2>
+        <div class="tools"><span class="readout" id="stepWhere"></span></div>
+      </div>
+      <div class="split step">
+        <div class="figure" id="stepChord">
+          <div class="subhead"><h3>The chord</h3><div class="tools"><button class="tiny" id="btnChordAll" type="button" aria-pressed="false">Show every chord</button><button class="tiny" id="btnChordClear" type="button">Clear my edits here</button></div></div>
+          <div class="readout" id="stepChordHead" aria-live="polite"></div>
+          <div id="stepChordList" class="cands" role="list"></div>
+          <p class="aside" id="stepChordHint"></p>
+          <div id="stepChordDetail"></div>
+        </div>
+        <div class="figure" id="stepNote">
+          <div class="subhead"><h3>The note</h3>
+            <div class="tools">
+              <div class="segctl" id="noteTabs" role="group" aria-label="Voice">
+                <button type="button" data-v="0" aria-pressed="false">melody</button>
+                <button type="button" data-v="1" aria-pressed="false">middle</button>
+                <button type="button" data-v="2" aria-pressed="false">bass</button>
+              </div>
+              <button class="tiny" id="btnNotePrev" type="button" title="Previous note of this voice" aria-label="Previous note of this voice">&#9664;</button>
+              <button class="tiny" id="btnNoteNext" type="button" title="Next note of this voice" aria-label="Next note of this voice">&#9654;</button>
+            </div>
+          </div>
+          <div class="readout" id="stepNoteHead" aria-live="polite"></div>
+          <div class="cvwrap"><canvas id="noteCanvas" style="height:250px" tabindex="0" role="application" aria-label="Every pitch this voice could take at this step, left to right by pitch. Left and right arrows move between pitches (with Shift, five at a time), Enter plays the pitch, Delete rules it out."></canvas></div>
+          <div class="key" id="noteKey"></div>
+          <div id="stepNoteList" class="cands" role="list"></div>
+          <div class="readout" id="stepNoteDetail"></div>
+        </div>
+      </div>
+      <figcaption>Each candidate is a move the rule could make here. Its bar is the chance it has of being played (the weighted taste of the chosen preset, then the dice of the variation), the fainter bar behind it is the taste alone. <b>Play</b> holds the piece to that move, even outside what the rule allows. <b>Rule out</b> takes it off the table, and the next best is played. Both are marked in magenta wherever they show up.</figcaption>
+    </section>
+
+    <!-- Plate: sequencer -->
+    <section class="plate" id="plateSeq" aria-labelledby="hSeq">
+      <div class="heading">
+        <h2 id="hSeq">Rhythm</h2>
+        <div class="tools" id="seqTools"></div>
+      </div>
+      <div class="seqbar" id="seqBar"></div>
+      <div class="figure">
+        <div class="rowgrid">
+          <div class="gutter" id="seqGutter"></div>
+          <div class="cvwrap" id="seqInner">
+            <canvas id="seqCanvas" style="height:158px" tabindex="0" role="application" aria-label="Step sequencer: three lanes of onsets, wrapped into rows of bars. Arrow keys move, Enter switches a step, E edits the envelope of the note. Space plays and stops."></canvas>
+            <div class="playhead" id="seqHead" hidden></div>
+          </div>
+        </div>
+      </div>
+      <div class="readout" id="seqRead" aria-live="polite" style="margin-top:8px;min-height:1.7em"></div>
+      <figcaption>The upper strip of each lane switches a note on or off; drag across it to paint with a mouse or pen. A new note takes the envelope picked under <b>new notes take</b>. The thin strip under it belongs to that note&rsquo;s envelope: click it to edit. Its bar shows the gate against the distance to the next note, and a mark at its end means the gate runs into the next note. Click a bar number to give that bar its own scale or tension aim.</figcaption>
+    </section>
+
+    <!-- Plate: envelope -->
+    <section class="plate" id="plateEnv" aria-labelledby="hEnv">
+      <div class="heading">
+        <h2 id="hEnv">Envelopes</h2>
+        <div class="tools">
+          <div class="segctl" id="envMode" role="group" aria-label="What the editor edits">
+            <button type="button" data-mode="note" aria-pressed="true">This note</button>
+            <button type="button" data-mode="bank" aria-pressed="false">The six presets</button>
+          </div>
+        </div>
+      </div>
+      <div class="split env">
+        <div>
+          <div class="figure">
+            <canvas id="envCanvas" style="height:210px;touch-action:none" role="img" aria-label="The envelope being edited. The exact values are in the fields below."></canvas>
+          </div>
+          <div class="envfields" role="group" aria-label="Exact envelope values">
+            <label>A <input type="number" id="envA" min="1" max="2000" step="1" inputmode="numeric" disabled><span>ms</span></label>
+            <label>D <input type="number" id="envD" min="1" max="3000" step="1" inputmode="numeric" disabled><span>ms</span></label>
+            <label>S <input type="number" id="envS" min="0" max="1" step="0.01" inputmode="decimal" disabled></label>
+            <label id="lblEnvGate">note-off <input type="number" id="envGate" min="0.03" max="64" step="0.05" inputmode="decimal" disabled><span id="envGateUnit">steps</span></label>
+            <label>R <input type="number" id="envR" min="5" max="8000" step="5" inputmode="numeric" disabled><span>ms</span></label>
+          </div>
+        </div>
+        <div>
+          <div class="lbl" id="lblBank">Presets</div>
+          <div class="bank" id="envBank" role="group" aria-labelledby="lblBank"></div>
+          <div class="row tight" id="rowEnvName" hidden><label for="envName">Name</label><input type="text" id="envName" maxlength="14" style="width:100%;min-width:0;box-sizing:border-box" spellcheck="false" autocomplete="off"></div>
+          <div class="btnrow" id="envTools"></div>
+          <p class="aside" id="envBankNote"></p>
+        </div>
+      </div>
+      <div class="readout" id="envRead" aria-live="polite" style="margin-top:8px;min-height:5em"></div>
+      <figcaption>Drag the handles. The upright line is <b>note-off</b>, and everything to its right is a release you still control: it can ring into the next harmony or stop well before it. A dashed handle marks where a stage would have ended if the key had stayed down. A preset is shared: change it, and every note that has it changes with it.</figcaption>
+    </section>
+
+    <!-- Plate: rule lattice -->
+    <section class="plate" id="plateRule" aria-labelledby="hRule">
+      <div class="heading">
+        <h2 id="hRule">Rule space</h2>
+        <div class="tools">
+          <div class="segctl" id="setCtl" role="group" aria-label="Rule table">
+            <button type="button" id="btnSetChord" aria-pressed="true">Chord table</button>
+            <button type="button" id="btnSetVoice" aria-pressed="false">Voice table</button>
+          </div>
+          <div class="segctl" id="projCtl" role="group" aria-label="Projection">
+            <button type="button" id="btnProjGrid" aria-pressed="false">Flat grid</button>
+            <button type="button" id="btnProjCycle" aria-pressed="false">Fifths ring</button>
+            <button type="button" id="btnProjHyper" aria-pressed="false">Oblique</button>
+            <button type="button" id="btnProjPot" aria-pressed="false">By cost</button>
+          </div>
+        </div>
+      </div>
+      <div class="split">
+        <div>
+          <div class="figure">
+            <div class="cvwrap" id="latWrap">
+              <canvas id="latticeCanvas" style="height:420px" tabindex="0" role="application" aria-label="The rule table, one mark per cell, projected to two dimensions. Arrow keys move between cells, Enter flips the cell."></canvas>
+              <div class="overlay" id="latticeLabels"></div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="readout" id="latticeRead" aria-live="polite" style="min-height:3.4em">&nbsp;</div>
+          <div id="axisModes" style="margin-top:8px"></div>
+          <div class="key" id="latKey"></div>
+        </div>
+      </div>
+      <figcaption>Each mark is one cell of the rule table, placed by the projection you choose. Teal marks are legal at the current &lambda;; small red marks are not. A heavy ring is a cell the piece used, joined to the next in the order it used them. A light ring is a cell whose flip would change the opening chords. The open rings are the moves the rule is weighing at the step selected above, larger for a likelier move. Click a cell to flip it by hand. Drag a handle to turn the projection.</figcaption>
+    </section>
+
+    <!-- Plate: the intervals of this division -->
+    <section class="plate" id="plateSpace" aria-labelledby="hSpace">
+      <div class="heading">
+        <h2 id="hSpace">Intervals of this division</h2>
+        <div class="tools"><span class="readout" id="spaceHead"></span></div>
+      </div>
+      <div class="split">
+        <div>
+          <div class="figure">
+            <canvas id="intervalCanvas" style="height:225px" tabindex="0" role="application" aria-label="Every interval of the division, by size in cents, against how well it fuses and how rough it is. Left and right arrows move between steps, Enter plays the interval."></canvas>
+          </div>
+          <div class="readout" id="intervalRead" aria-live="polite" style="margin-top:8px;min-height:3.4em">&nbsp;</div>
+          <div class="key" id="intervalKey"></div>
+        </div>
+        <div>
+          <div class="lbl">Listen</div>
+          <div class="btnrow" id="auditionBtns" style="margin-top:4px"></div>
+          <div class="lbl" style="margin-top:14px">How close the steps come to the simple ratios</div>
+          <div id="targetTable"></div>
+        </div>
+      </div>
+      <figcaption>The shaded area is how well an interval fuses into one sound (the closer to a simple ratio, the better); the line is how much it beats at the register of the middle voice. A tall tick is a step the division counts as a consonance. Where twelve notes can only offer 100&cent; steps, a finer division offers an interval within a few cents of a ratio that twelve misses by 30 or 50. The sound is generated with a few harmonics and no detune, so a flat third is heard flat.</figcaption>
+    </section>
+
+    <!-- Plate: dynamics -->
+    <section class="plate" id="plateDyn" aria-labelledby="hDyn">
+      <div class="heading"><h2 id="hDyn">Where this rule sits</h2></div>
+      <div class="figure">
+        <div class="sweepbox">
+          <div id="sweep" role="group" aria-label="Orbit period at each value of lambda"></div>
+          <div id="memrow" aria-hidden="true"></div>
+          <div class="sweeplab"><span>seed memory</span><span style="opacity:.8">how often changing the seed changes the cycle</span></div>
+        </div>
+        <div class="sweepaxis"><span>&lambda; 0</span><span>.25</span><span>.5</span><span>.75</span><span>1</span></div>
+        <div class="key" id="sweepKey"></div>
+        <div class="readout" id="dynRead" style="margin-top:10px"></div>
+        <details class="viewtable"><summary>Table of the sweep</summary><div class="scroller" id="sweepTable"></div></details>
+      </div>
+      <figcaption>Each bar is one value of &lambda;. Its height is the period of the cycle that the seed falls into, and its shade says how that period compares with the length of the piece. The two ends are the same rule: nothing legal and everything legal both fall back to the same unconstrained move. The analysis describes the rule&rsquo;s own walk; a variation above zero plays one of the moves the rule allows, so it is a statement about the skeleton the variation hangs on.</figcaption>
+    </section>
+
+    <!-- Plate: basins -->
+    <section class="plate" id="plateBasin" aria-labelledby="hBasin">
+      <div class="heading">
+        <h2 id="hBasin">Which seeds go where</h2>
+        <div class="tools"><span class="readout" id="basinStat"></span></div>
+      </div>
+      <div class="split">
+        <div class="figure" id="basinWrap">
+          <canvas id="basinCanvas" style="height:240px" role="img" aria-label="Map of every starting state coloured by the cycle it ends in"></canvas>
+        </div>
+        <div>
+          <div class="readout" id="basinLegend"></div>
+          <p class="aside" style="margin-top:10px">Each column is a starting chord, split into three strips for the three incoming momenta. Each row is the chord two back, and the top row is none. Colour is the cycle the state ends in. A lighter cell wanders longer before it gets there, and a dot marks a cell that is already on the cycle. Click a cell to start the piece there.</p>
+        </div>
+      </div>
+      <figcaption>The chord automaton is a map on a finite set of states, so every state runs into some cycle. This is that map, drawn whole.</figcaption>
+    </section>
+
+    <details class="fold" id="plateEssay">
+      <summary>How it works</summary>
+      <div class="prose" id="essay"></div>
+    </details>
+
+    <details class="fold">
+      <summary>Conway&rsquo;s Life, for comparison</summary>
+      <div class="prose">
+        <p>Kept so the structural parallel stays concrete. It drives nothing here.</p>
+        <div class="lifegrid" id="life"></div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <button class="tiny" id="btnLifeStep">Step</button>
+          <button class="tiny" id="btnLifeSeed">Reseed</button>
+          <span class="readout" id="lifePop"></span>
+        </div>
+      </div>
+    </details>
+
+  </main>
+</div>
+<div id="toast" role="status" hidden></div>
+<script>
+(function(){
+"use strict";
+/* =====================================================================
+   0 · WHAT THE EAR DOES WITH AN INTERVAL
+   ---------------------------------------------------------------------
+   Carrying the twelve-tone rules over to another tuning is arithmetic;
+   whether the result sounds good is not. Two things decide that, and they
+   are different things:
+
+   FUSION. Two tones whose frequencies stand in a simple ratio share
+   partials and are heard as one sound with one pitch (a virtual
+   fundamental). The ear is tolerant of this: a few cents either way and the
+   fifth is still a fifth, which is why equal temperament works at all, but
+   the tolerance is finite and the *simpler* the ratio the better the fusion.
+   psyFusion(c) is how close an interval of c cents is to a simple ratio,
+   weighted by how simple the ratio is (a Gaussian of 14 cents around each;
+   7 cents around the unison and octave, which tolerate far less: two tones
+   22 cents apart do not fuse, they beat).
+
+   ROUGHNESS. Partials that fall within a critical band of each other beat,
+   and beating faster than about 15 Hz is heard as roughness (Plomp and
+   Levelt; the form below is Sethares's fit). A critical band is *wider in
+   Hz* at low pitch, so the same interval is rougher low down: a third that
+   is clean at C4 is mud at C2. psyRough(f, c) is the roughness that two
+   harmonic tones add when one sits c cents above the other at f Hz, over
+   what one such tone has by itself.
+
+   Neither is enough alone. Roughness cannot tell a minor seventh from a
+   minor third, and fusion cannot tell a third at C2 from one at C5. Here
+   they are used for what each one knows: fusion says which intervals are
+   consonances in whatever tuning is in force; roughness says whether a
+   consonance can be used where the voices actually are.
+
+   The scale of fusion is anchored to the twelve-tone table the first two
+   versions used (unison 1, fifth .9, major third .75, minor third .65,
+   second .25, tritone .15, semitone .05): psyCons(c) maps fusion onto that
+   scale through the twelve twelve-tone interval classes, so in twelve-tone
+   equal temperament it returns exactly those numbers and everywhere else
+   it returns what the same ear would say.
+   ===================================================================== */
+
+// ratios [n, d, q]: q is how consonant the interval is when exactly in tune. An interval and its inversion share q,
+// with one deliberate exception: the harmonic seventh 7/4 (.62: in 4:5:6:7 it is the seventh partial, and the chord
+// fuses as one tone) and its inversion the septimal tone 8/7 (.30: two voices a whole tone apart, which is a second and
+// grates like one). The table of interval classes (S.cons) folds every interval to the smaller of the pair, so it reads
+// the septimal tone's .30; a chord that holds a 7/4 above its root is judged by 7/4's own .62 (see the colour chords in 10-core.js).
+const PSY_RATIOS = [
+  [3,2,.95],[4,3,.95], [5,4,.85],[8,5,.85], [6,5,.80],[5,3,.80],
+  [7,4,.62],[8,7,.30], [7,6,.62],[12,7,.62], [9,7,.60],[14,9,.60], [11,9,.58],[18,11,.58], [11,8,.55],[16,11,.55],
+  [7,5,.42],[10,7,.42], [9,8,.30],[16,9,.30], [10,9,.28],[9,5,.28], [45,32,.20],[64,45,.20], [16,15,.10],[15,8,.10],
+];
+const PSY_SIGMA = 14, PSY_SIGMA_UNISON = 7;
+const PSY_PEAKS = (()=>{
+  const o=[{c:0,q:1,s:PSY_SIGMA_UNISON},{c:1200,q:1,s:PSY_SIGMA_UNISON}];
+  for(const [n,d,q] of PSY_RATIOS) o.push({c:1200*Math.log2(n/d), q, s:PSY_SIGMA, n, d});
+  return o;
+})();
+function psyFusion(c){
+  c=((c%1200)+1200)%1200;
+  let best=0;
+  for(const p of PSY_PEAKS){
+    const z=(c-p.c)/p.s; if(z>4||z<-4) continue;
+    const v=p.q*Math.exp(-0.5*z*z); if(v>best) best=v;
+  }
+  return best;
+}
+// the nearest listed ratio to c cents, and how far off it is
+function psyNearest(c){
+  c=((c%1200)+1200)%1200; let best=null, bd=1e9;
+  for(const p of PSY_PEAKS){ if(p.n===undefined) continue; const d=Math.abs(c-p.c); if(d<bd){ bd=d; best=p; } }
+  return {ratio:best.n+'/'+best.d, err:c-best.c};
+}
+
+const PSY_OLD = [1.0,0.05,0.25,0.65,0.75,0.9,0.15];          // the twelve-tone table, by interval class
+const PSY_KNOTS = (()=>{
+  const k=[]; for(let i=0;i<=6;i++) k.push([psyFusion(100*i), PSY_OLD[i]]);
+  k.sort((a,b)=>a[0]-b[0]); return k;
+})();
+function psyScale(h){                                         // fusion -> the scale of the old table, monotone
+  const K=PSY_KNOTS;
+  if(h<=K[0][0]) return K[0][1]*h/K[0][0];
+  for(let i=1;i<K.length;i++){
+    if(h<=K[i][0]+1e-12){
+      const [x0,y0]=K[i-1], [x1,y1]=K[i];
+      if(Math.abs(h-x1)<1e-12) return y1;
+      if(Math.abs(h-x0)<1e-12) return y0;
+      return y0+(y1-y0)*(h-x0)/(x1-x0);
+    }
+  }
+  return 1;
+}
+function psyCons(c){ return psyScale(psyFusion(c)); }
+const PSY_YES = 0.5;                                           // a consonance is an interval that scores at least this
+
+/* ---- roughness ---------------------------------------------------------------------------- */
+const PSY_PARTIALS = 6, PSY_DECAY = 0.88;                      // the generic harmonic tone the model assumes
+const PSY_ROUGH_GATE = 0.40;                                   // rougher than this, a consonance does not count as one
+function psyPair(f1,a1,f2,a2){
+  const fm=Math.min(f1,f2), df=Math.abs(f2-f1), s=0.24/(0.0207*fm+18.96);
+  return a1*a2*(Math.exp(-3.51*s*df)-Math.exp(-5.75*s*df));
+}
+function psyRoughRaw(f, c){
+  const r=Math.pow(2,c/1200); let sum=0;
+  for(let i=1;i<=PSY_PARTIALS;i++) for(let j=1;j<=PSY_PARTIALS;j++)
+    sum+=psyPair(f*i, Math.pow(PSY_DECAY,i-1), f*r*j, Math.pow(PSY_DECAY,j-1));
+  return sum;
+}
+const PSY_BASE_CACHE = new Map();
+function psyRough(f, c){
+  const key=Math.round(f*4);
+  let b=PSY_BASE_CACHE.get(key); if(b===undefined){ b=psyRoughRaw(key/4, 0); PSY_BASE_CACHE.set(key,b); }
+  return Math.max(0, psyRoughRaw(f,c)-b);
+}
+// melodic motion smaller than this is heard as the same note a little out of tune, not as a step
+const PSY_MICRO_CENTS = 45;
+// a motion at least this long is a leap, not a step
+const PSY_LEAP_CENTS = 250;
+
+/* =====================================================================
+   0 · HOW A LEGAL MOVE IS CHOSEN
+   ---------------------------------------------------------------------
+   The rule says which moves are allowed. Something still has to pick one of
+   them, and in the first two versions that was a fixed sort: anything but
+   standing still first; then the cost ranking read from one end (the "take");
+   then the smallest voice-leading distance, counted in steps of the division;
+   then the lowest root number or pitch. Measured, that sort had four faults:
+
+     - it was one answer. Whatever the rule, the seed was the only source of
+       variety, so every piece was a loop of three to seven chords, and the same
+       loop in every division (I IV ii V in the strongest take, in 12 and in 53);
+     - the melody took the nearest legal note, which is a trill (E F E F E F...),
+       or, in the bold take, the dearest, which is a leap of more than a fourth
+       in two moves out of three;
+     - its last two keys, "lowest root number" and "lowest pitch", are artefacts
+       of numbering. They mean something in no division, and in 53 they decide
+       the move whenever the cost ties, which is often;
+     - a motion under 45 cents was a repeat and one over a step: a constant that
+       happens to fall between the quarter tone of 24 and the diesis of 31.
+
+   Here a choice is made in three layers, each of them a handle:
+
+     UTILITY  every candidate gets a number from a few features that mean the same
+              in every division, because they are measured in cents, in fusion and in
+              roughness (09-psy.js) and never in steps or pitch classes: how much the
+              rule favours the cell it falls in, how far the voices have to move
+              (chords) or the melodic shape it makes (notes), how well it fuses with
+              the others. The weights are the composer's.
+     VARIETY  with variety v the candidate chosen is the one with the highest
+              utility + T(v) * G, where G is Gumbel noise. That is exactly a draw
+              from the softmax of the utilities at temperature T (the Luce choice
+              rule), so "variety" is a temperature with a plain reading: every
+              candidate has a probability, and the inspector can show it. The
+              noise is not random: it is a hash of (seed, situation, candidate).
+              For the chords the situation is the automaton's state, so the map
+              from state to next state is still a function, still has cycles and
+              basins, and the analysis plates stay exact; the seed picks which
+              function. For the notes it is the voice and the step, so the
+              same piece comes back from the same code and a repeat of the chords
+              is not a repeat of the melody.
+     TIE      candidates that are still level are ordered by the hash, never by
+              a number they happen to carry.
+
+   "Classic" is the fixed sort of the first two versions, kept so that a state
+   code written then plays the same piece now.
+   ===================================================================== */
+
+/* ---- the hash: every pseudo-random number in the engine comes from here ------------------ */
+function mix32(h, x){
+  h = (h ^ x) >>> 0;
+  h = Math.imul(h ^ (h >>> 16), 0x85ebca6b);
+  h = Math.imul(h ^ (h >>> 13), 0xc2b2ae35);
+  return (h ^ (h >>> 16)) >>> 0;
+}
+function hash4(a, b, c, d){ return mix32(mix32(mix32(mix32(0x9e3779b9, a|0), b|0), c|0), d|0); }
+function strHash(s){ let h=0x811c9dc5; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193); } return h>>>0; }
+function unitOf(h){ return (h+0.5)/4294967296; }                  // strictly inside (0,1)
+function gumbelOf(h){ return -Math.log(-Math.log(unitOf(h))); }
+
+/* ---- the policy -------------------------------------------------------------------------------- */
+const CHOICE_LIMITS = { w:[-1,1.5], variety:[0,1], seed:[0,999999], micro:[10,120], leap:[150,500] };
+// Weights, by what they mean. Chords: favour = how much the rule's own cost ranking counts (negative reads it from the
+// dear end), smooth = how little the voices have to move. Notes: favour as for chords; step = a melodic step is better than a
+// repeat or a leap; shape = no trills, a leap answered by a step the other way, no hugging the edge of the register;
+// harm = chord tone on a structural note, and fusing with the voices that sound with it; contrary = moving against them.
+const CHOICE_PRESETS = {
+  balanced:{ label:'Balanced', chord:{favour:0.55, smooth:0.55}, voice:{favour:0.50, step:1.00, shape:0.80, harm:0.80, contrary:0.30} },
+  smooth:  { label:'Smooth',   chord:{favour:0.15, smooth:1.00}, voice:{favour:0.20, step:1.40, shape:0.60, harm:0.70, contrary:0.10} },
+  strong:  { label:'Strong',   chord:{favour:1.00, smooth:0.15}, voice:{favour:1.00, step:0.70, shape:0.60, harm:0.80, contrary:0.30} },
+  bold:    { label:'Bold',     chord:{favour:-0.80, smooth:0.15}, voice:{favour:-0.50, step:0.30, shape:0.40, harm:0.50, contrary:0.60} },
+};
+const CHOICE_ORDER = ['balanced','smooth','strong','bold'];
+const CHORD_WEIGHTS = ['favour','smooth'], VOICE_WEIGHTS = ['favour','step','shape','harm','contrary'];
+function defaultChoice(){
+  const p=CHOICE_PRESETS.balanced;
+  return { mode:'scored', preset:'balanced',
+    chord:Object.assign({still:true}, p.chord), voice:Object.assign({root:true}, p.voice),
+    variety:0.30, seed:1, micro:PSY_MICRO_CENTS, leap:PSY_LEAP_CENTS };
+}
+// the older fixed sort, for a state written before there was a choice
+function classicChoice(){
+  const c=defaultChoice(); c.mode='classic'; c.preset='classic'; c.variety=0; return c;
+}
+
+// Variety is a temperature, and it is measured against the weights: the same variety means the same thing whether the composer
+// has set the weights to a half or to one and a quarter. Calibrated on real pieces (the median chord state has ten legal
+// moves, the median note nine): at variety 0.3 the best move is played about three times in five, at 1 nearly every legal
+// move is as likely as any other, and below 0.1 the best move is played nearly always.
+const TEMP_CHORD = 0.70, TEMP_NOTE = 0.78;
+function tempOf(variety, scale, wsum){ return variety<=0 ? 0 : scale*variety*variety*Math.max(wsum, 0.25); }
+function absSum(o, keys){ let s=0; for(const k of keys) s+=Math.abs(o[k]); return s; }
+
+// A compiled, numeric view of STATE.choice: the engine never reads the state object in a loop.
+function choicePlan(ch){
+  ch = ch || STATE.choice;
+  const classic = ch.mode==='classic';
+  return {
+    mode:ch.mode, take:STATE.take,
+    wF:ch.chord.favour, wS:ch.chord.smooth, still:ch.chord.still!==false,
+    Tc: classic?0:tempOf(ch.variety, TEMP_CHORD, absSum(ch.chord, CHORD_WEIGHTS)), Tv: classic?0:tempOf(ch.variety, TEMP_NOTE, absSum(ch.voice, VOICE_WEIGHTS)),
+    seed:ch.seed|0, micro:ch.micro, leap:ch.leap,
+    vw:ch.voice, root:ch.voice.root!==false,
+  };
+}
+// everything that decides the chord automaton, as text, for the cache keys of the analyses
+function chordChoiceSig(ch){
+  ch = ch || STATE.choice;
+  if(ch.mode==='classic') return 'classic:'+STATE.take;
+  return ['scored', ch.chord.favour.toFixed(3), ch.chord.smooth.toFixed(3), ch.chord.still!==false?1:0, ch.variety.toFixed(3), ch.seed|0].join(':');
+}
+function choiceSig(ch){
+  ch = ch || STATE.choice;
+  return chordChoiceSig(ch)+'|'+[ch.mode==='classic'?'':VOICE_WEIGHTS.map(k=>ch.voice[k].toFixed(3)).join(','), ch.voice.root!==false?1:0, ch.micro, ch.leap].join('|');
+}
+// a short name for the status line and the file name
+function choiceLabel(ch){
+  ch = ch || STATE.choice;
+  if(ch.mode==='classic') return 'classic '+STATE.take;
+  const name = ch.preset==='custom' ? 'custom' : (CHOICE_PRESETS[ch.preset]||CHOICE_PRESETS.balanced).label.toLowerCase();
+  return name+(ch.variety>0 ? ' · variety '+ch.variety.toFixed(2)+' · seed '+(ch.seed|0) : '');
+}
+// the weights of a preset, copied into a choice (the flags and the thresholds are left as they are)
+function applyPreset(ch, name){
+  const p=CHOICE_PRESETS[name]; if(!p) return false;
+  ch.mode='scored'; ch.preset=name;
+  for(const k of CHORD_WEIGHTS) ch.chord[k]=p.chord[k];
+  for(const k of VOICE_WEIGHTS) ch.voice[k]=p.voice[k];
+  return true;
+}
+// does the choice still match the preset it says it came from? (the weights were edited if not)
+function presetMatches(ch, name){
+  const p=CHOICE_PRESETS[name]; if(!p) return false;
+  return CHORD_WEIGHTS.every(k=>Math.abs(ch.chord[k]-p.chord[k])<1e-9) && VOICE_WEIGHTS.every(k=>Math.abs(ch.voice[k]-p.voice[k])<1e-9);
+}
+
+/* ---- features of a note, in cents -------------------------------------------------------------- */
+// How good a melodic motion of `a` cents is as a motion. A repeat is allowed but not the best; a motion shorter than `micro` is the
+// same note a little out of tune; a step is best; and the preference falls away smoothly as the leap grows.
+const PROX_KNOTS = [[0,0.80],[100,1],[220,1],[320,0.78],[420,0.56],[520,0.38],[720,0.20],[920,0.10],[1250,0.05],[2400,0]];
+function proxOf(a, micro){
+  if(a===0) return 0.5;
+  if(a<micro) return 0.2;
+  const K=PROX_KNOTS;
+  for(let i=1;i<K.length;i++) if(a<=K[i][0]){ const [x0,y0]=K[i-1], [x1,y1]=K[i]; return y0+(y1-y0)*(a-x0)/(x1-x0); }
+  return 0;
+}
+// the melodic shape a candidate makes with the notes before it
+function shapeOf(m, ctx, plan){
+  const f=1200/NN; let s=0;
+  const prev=ctx.prevPitch, reg=ctx.reg;
+  let e=0;                                                                                                       // how far out in its register, 0 at the middle, 1 at the edge
+  if(reg){ const c=(reg.lo+reg.hi)/2, h=Math.max(1,(reg.hi-reg.lo)/2); e=Math.abs(m-c)/h; }
+  if(prev!=null){
+    const d=m-prev, a=Math.abs(d)*f, sg=d>0?1:d<0?-1:0;
+    if(ctx.prev2Pitch!=null && ctx.prev2Pitch!==prev && Math.abs(m-ctx.prev2Pitch)*f<plan.micro) s-=1;       // back to where it just was: a trill
+    if(ctx.lastLeap){
+      if(sg!==0 && sg===-ctx.lastDir && a<=plan.leap) s+=0.8;                                                 // a leap is answered by a step the other way
+      else if(sg===ctx.lastDir && a>plan.leap) s-=0.8;                                                        // and not by another leap the same way
+    }
+    if(ctx.run>=4 && sg===ctx.lastDir) s-=0.4;                                                                // a long run turns
+  } else if(reg) s+=0.8*(1-Math.min(1,e));                                                                    // a line begins near the middle of its register
+  if(reg) s-=Math.max(0,(e-0.55)/0.45);                                                                       // and does not hug the edge of it
+  return s<-1.5?-1.5:s>1?1:s;
+}
+// how well a note suits its place in the harmony: chord tone on a structural note, and how well it fuses with the voices it sounds with
+function harmOf(m, cell, ctx){
+  const tone = ctx.structural ? [0,0.35,1][cell.phi] : [0.1,0.8,0.7][cell.phi];
+  let fuse=0.5, n=0, s=0;
+  for(const o of ctx.others){
+    if(o.pitch==null) continue;
+    const d=m>o.pitch?m-o.pitch:o.pitch-m;
+    let q=CONSONANCE_BY_IC[ic(d)];
+    if(d){ const r=SP.rough(m<o.pitch?m:o.pitch, d); q-=0.5*Math.min(1,Math.max(0,(r-0.25)/0.5)); }
+    s+=q>0?q:0; n++;
+  }
+  if(n) fuse=s/n;
+  return 0.55*tone+0.45*fuse;
+}
+const CONTRARY_OF = [0,0.5,1];                    // gamma: moves with the others, they hold, moves against them
+
+/* =====================================================================
+   1 · THEORY CORE: PITCH SPACES
+   ---------------------------------------------------------------------
+   A pitch is a whole number of steps of an equal division of the octave,
+   counted from the bottom of the MIDI range: NN steps to the octave (12 by
+   default), C4 at 5*NN. Everything the rules see is a count of steps, so the
+   same automaton runs in any division; what changes with the division is
+   what a step *is*, and therefore which intervals are consonances, which
+   notes make a scale, which chords exist and how the circle of fifths closes.
+   Those are not transposed from the twelve-tone case but derived from the
+   ear: see 09-psy.js. A space therefore carries
+     g        the step nearest a pure fifth (the generator of the circle of fifths)
+     K(j)     the note j fifths above the tonic, folded into one octave
+     cons[]   how well each interval class fuses (the old twelve-tone table, in 12)
+     M3, m3   the thirds chords are built from: the ones the circle of fifths gives
+              (a Pythagorean third in 53 divisions, a poor one) unless a step within
+              45 cents fuses clearly better (the pure third, 17 steps in 53)
+     colour   chord types the division can play well and twelve cannot: the harmonic
+              seventh 4:5:6:7, the subminor 6:7:9 and the neutral 18:22:27 triads
+   The sounding pitch of a step is 12*p/NN semitones, so the synthesiser and the
+   MIDI writer, which think in fractional semitones, are unchanged.
+   ===================================================================== */
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const MIN_DIV = 12, MAX_DIV = 72;
+const TIMBRES = ['classic','soft','pure'];
+const DIV_CHOICES = [12,17,19,22,24,31,41,53,72];
+
+// The twelve-tone definitions: the reference every other space is built to agree with at 12.
+const SCALES = {
+  Ionian:[0,2,4,5,7,9,11], Dorian:[0,2,3,5,7,9,10], Phrygian:[0,1,3,5,7,8,10],
+  Lydian:[0,2,4,6,7,9,11], Mixolydian:[0,2,4,5,7,9,10], Aeolian:[0,2,3,5,7,8,10],
+  Locrian:[0,1,3,5,6,8,10], HarmonicMinor:[0,2,3,5,7,8,11], MelodicMinor:[0,2,3,5,7,9,11],
+  WholeTone:[0,2,4,6,8,10], OctatonicHW:[0,1,3,4,6,7,9,10], OctatonicWH:[0,2,3,5,6,8,9,11],
+  MajorPentatonic:[0,2,4,7,9], MinorPentatonic:[0,3,5,7,10], Blues:[0,3,5,6,7,10],
+};
+// ...and how each one is built from the circle of fifths, so that it exists in every division:
+// a mode is a run of seven fifths (the tonic's position in the run is what makes it Dorian or Lydian),
+// the minors swap one note of the run for the raised seventh, and the symmetric scales are divided
+// equally, or placed by cents where nothing else fixes them.
+const SCALE_DEF = {
+  Lydian:{chain:[0,6]}, Ionian:{chain:[-1,5]}, Mixolydian:{chain:[-2,4]}, Dorian:{chain:[-3,3]}, Aeolian:{chain:[-4,2]},
+  Phrygian:{chain:[-5,1]}, Locrian:{chain:[-6,0]},
+  HarmonicMinor:{chain:[-4,2], swap:[[-2,5]]}, MelodicMinor:{chain:[-3,3], swap:[[-2,5]]},
+  MajorPentatonic:{chain:[0,4]}, MinorPentatonic:{chain:[-3,1]}, Blues:{chain:[-3,1], add:[6]},
+  WholeTone:{equal:6}, OctatonicHW:{map:true}, OctatonicWH:{map:true},
+};
+// Scales that only some divisions have: given as ratios, and offered where every degree lands within
+// 20 cents of a step. Neutral thirds and sevenths (Rast), and the three-quarter tone (Bayati).
+const SCALE_JUST = {
+  Rast:  [[1,1],[9,8],[11,9],[4,3],[3,2],[27,16],[11,6]],
+  Bayati:[[1,1],[12,11],[6,5],[4,3],[3,2],[8,5],[9,5]],
+};
+const SCALE_LABELS = {
+  Ionian:'Ionian (major)', Dorian:'Dorian', Phrygian:'Phrygian', Lydian:'Lydian',
+  Mixolydian:'Mixolydian', Aeolian:'Aeolian (minor)', Locrian:'Locrian',
+  HarmonicMinor:'Harmonic minor', MelodicMinor:'Melodic minor', WholeTone:'Whole tone',
+  OctatonicHW:'Octatonic (H–W)', OctatonicWH:'Octatonic (W–H)',
+  MajorPentatonic:'Major pentatonic', MinorPentatonic:'Minor pentatonic', Blues:'Blues',
+  Rast:'Rast (neutral third)', Bayati:'Bayati (three-quarter tone)',
+};
+const SCALE_ORDER = Object.keys(SCALES);            // the fifteen every division has
+const MICRO_SCALES = Object.keys(SCALE_JUST);
+
+const CHORD_TEMPLATES = {
+  '0':'1','0,7':'5','0,4,7':'maj','0,3,7':'min','0,3,6':'dim','0,4,8':'aug',
+  '0,2,7':'sus2','0,5,7':'sus4','0,4,7,11':'maj7','0,4,7,10':'dom7','0,3,7,10':'min7',
+  '0,3,6,10':'m7b5','0,3,6,9':'dim7','0,3,7,11':'minMaj7','0,4,8,10':'aug7','0,4,8,11':'augMaj7',
+  '0,2,4,7':'add9',
+};
+const ROMAN = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII'];
+
+function midiToFreq(m){ return 440*Math.pow(2,(m-69)/12); }
+function clamp01(x){ return x<0?0:x>1?1:x; }
+
+/* ---- the space in force -------------------------------------------------------------- */
+let NN = 12;                       // steps to the octave
+let SP = null;                     // the space of NN steps: see buildSpace
+let CONSONANCE_BY_IC = [1.0,0.05,0.25,0.65,0.75,0.9,0.15];
+let CONSONANT_ICS = new Set([0,3,4,5]);
+
+function pcOf(x){ return ((Math.round(x)%NN)+NN)%NN; }
+function ic(x){ const s=((Math.round(x)%NN)+NN)%NN; return Math.min(s,NN-s); }
+// the name of a pitch, with its octave (the function keeps the name it had when a step was always a semitone)
+function midiName(p){ return SP.pitchName(Math.round(p)); }
+
+/* ---- building a space ---------------------------------------------------------------- */
+function nearestStep(N, cents){ return Math.round(cents*N/1200); }
+const PURE = { fifth:[3,2], fourth:[4,3], M3:[5,4], m3:[6,5], h7:[7,4], sub:[7,6], neutral:[11,9], M2:[9,8], p11:[11,8], s9:[9,7], tt:[7,5] };
+
+// a chain third (the third four fifths up, or three fifths down) stays, unless a step within 45 cents of it
+// fuses clearly better
+function pickThird(N, chain){
+  const base=psyFusion(chain*1200/N); let best=chain, bf=base;
+  const reach=Math.ceil(45*N/1200)+1;
+  for(let s=chain-reach; s<=chain+reach; s++){
+    if(Math.abs(s-chain)*1200/N>45) continue;
+    const f=psyFusion(s*1200/N); if(f>bf+1e-9){ bf=f; best=s; }
+  }
+  best=((best%N)+N)%N;
+  return (bf>=base+0.15 && bf>=0.5) ? best : chain;
+}
+// position of each root fall round the circle of fifths. Where the fifth does not generate every step
+// (24 divisions: it stays on the even ones) the cosets are interleaved, so every step still has a place.
+function ringPositions(N, g){
+  let h=g, b=N; while(b){ const t=h%b; h=b; b=t; }       // gcd(g, N)
+  const pos=new Array(N).fill(-1);
+  for(let r=0;r<h;r++) for(let j=0;j<N/h;j++) pos[(r+g*j)%N]=j*h+r;
+  return pos;
+}
+// Names. Up to 31 divisions the circle of fifths gives the letters (F C G D A E B) and sharps and flats run
+// outward from them, as in meantone notation; a step the circle does not reach is the nearest name below with an
+// arrow up. Beyond that the circle runs out of room, and a step is its nearest twelve-tone name and a count of steps
+// (E-1, C#+2), which is also what you would play it as.
+function buildNames(S){
+  const N=S.N; if(N===12) return {pc:NOTE_NAMES.slice(), pitch:(p)=>NOTE_NAMES[((p%12)+12)%12]+(Math.floor(p/12)-1)};
+  const pc=new Array(N).fill(null);
+  if(N<=31){
+    const letter={'-1':'F','0':'C','1':'G','2':'D','3':'A','4':'E','5':'B'};
+    const order=[-1,0,1,2,3,4,5];
+    for(let k=1;k<=8;k++){ order.push(5+k); order.push(-1-k); }
+    for(const j of order){
+      const x=S.K(j); if(pc[x]!==null) continue;
+      let nm;
+      if(j>=-1&&j<=5) nm=letter[j];
+      else if(j>5){ const m=Math.ceil((j-5)/7); nm=letter[j-7*m]+'#'.repeat(m); }
+      else { const m=Math.ceil((-1-j)/7); nm=letter[j+7*m]+'b'.repeat(m); }
+      pc[x]=nm;
+    }
+    for(let x=0;x<N;x++) if(pc[x]===null){
+      let k=x, n=0; do{ k=(k-1+N)%N; n++; }while(pc[k]===null && n<N);
+      pc[x]=(pc[k]||'?')+'\u2191'.repeat(n);
+    }
+    return {pc, pitch:(p)=>pc[((p%N)+N)%N]+(Math.floor(p/N)-1)};
+  }
+  const sg=(n)=>n>0?'+'+n:n<0?'-'+(-n):'';
+  const parts=(x)=>{ let k=Math.round(12*x/N), oct=0; if(k===12){ k=0; oct=1; } return {k, oct, off:x-(k===0&&oct?N:Math.round(k*N/12))}; };
+  for(let x=0;x<N;x++){ const q=parts(x); pc[x]=NOTE_NAMES[q.k]+sg(q.off); }
+  return {pc, pitch:(p)=>{ const x=((p%N)+N)%N, q=parts(x), o=Math.floor(p/N)-1+q.oct; return NOTE_NAMES[q.k]+o+sg(q.off); }};
+}
+// The twelve-tone interval class a step stands for: the one the circle of fifths gives it (the note j fifths
+// up, within six, is class 7j mod 12), or failing that the one it is within 40 cents of. A step that is neither
+// (a neutral third, which is 50 cents from both) belongs to none.
+function shadow12(S, step){
+  for(let t=0;t<=6;t++) for(const j of (t?[t,-t]:[0])) if(S.K(j)===step) return (((7*j)%12)+12)%12;
+  const c=step*1200/S.N, k=Math.round(c/100), e=Math.abs(c-100*k);
+  return e<=40 ? ((k%12)+12)%12 : null;
+}
+
+function buildSpace(N){
+  const S={N, step:1200/N, scales:new Map(), roughMemo:new Map()};
+  const g=Math.round(N*Math.log2(1.5)); S.g=g;
+  S.K=(j)=>(((j*g)%N)+N)%N;
+  S.cents=(k)=>k*1200/N;
+  const half=N>>1;
+  S.cons=[]; S.consSet=new Set();
+  for(let i=0;i<=half;i++){ S.cons.push(psyCons(i*1200/N)); if(S.cons[i]>=PSY_YES) S.consSet.add(i); }
+  S.rough=(low,delta)=>{ const k=low*1024+delta; let v=S.roughMemo.get(k); if(v===undefined){ v=psyRough(midiToFreq(12*low/N), delta*1200/N); S.roughMemo.set(k,v); } return v; };
+  S.ringPos=ringPositions(N,g);
+  S.M3c=S.K(4); S.m3c=S.K(-3);
+  S.M3=pickThird(N,S.M3c); S.m3=pickThird(N,S.m3c);
+  S.P5=g; S.P4=N-g; S.d5=S.K(-6); S.m7=(g+S.m3)%N; S.M7=(g+S.M3)%N;
+  { const nm=buildNames(S); S.names=nm.pc; S.name=(pc)=>nm.pc[pc]; S.pitchName=nm.pitch; }
+  // the best step for each simple ratio, and how far off it is: this is the quality of the division
+  S.targets=Object.keys(PURE).map(k=>{
+    const [n,d]=PURE[k], c=1200*Math.log2(n/d), s=nearestStep(N,c);
+    return {key:k, label:n+'/'+d, cents:c, step:s%N, steps:s, err:s*1200/N-c, fusion:psyFusion(s*1200/N)};
+  });
+  // colour chords: each is on offer when every interval in it fuses (>= .5) and lies within 15 cents of its ratio
+  S.colour=[];
+  const T=(k)=>S.targets.find(t=>t.key===k);
+  const ok=(...ks)=>ks.every(k=>T(k).fusion>=0.5 && Math.abs(T(k).err)<=15);   // fuses, and is the ratio it is named for
+  if(ok('M3','fifth','h7') && T('h7').steps%N!==S.m7 ) S.colour.push({q:'h7', offs:[0,T('M3').steps%N,g,T('h7').steps%N]});
+  if(ok('sub','fifth') && T('sub').steps%N!==S.m3) S.colour.push({q:'sub', offs:[0,T('sub').steps%N,g]});
+  if(ok('neutral','fifth') && T('neutral').steps%N!==S.M3 && T('neutral').steps%N!==S.m3) S.colour.push({q:'neu', offs:[0,T('neutral').steps%N,g]});
+  // the default root-fall profile: the twelve-tone ranking, carried to wherever each of its intervals lands here,
+  // and fading with distance from it (35 cents) so a step beside a strong root motion is not itself one
+  const named=[[0,0],[1,S.K(-5)],[2,S.K(2)],[3,S.m3],[4,S.M3],[5,S.K(-1)],[6,S.K(6)],[6,S.K(-6)],[7,S.K(1)],[8,S.K(-4)],[9,S.K(3)],[10,S.K(-2)],[11,S.K(5)]];
+  S.affD=new Array(N).fill(0).map((_,d)=>{
+    let best=0;
+    for(const [cls,st] of named){
+      let dc=Math.abs(d-st)*1200/N; dc=Math.min(dc,1200-dc);
+      const a=DEF_AFF_D[cls]*(dc<1e-9 ? 1 : Math.exp(-(dc/35)*(dc/35)));
+      if(a>best) best=a;
+    }
+    return best;
+  });
+  return S;
+}
+const SPACES=new Map();
+function spaceFor(N){ N=Math.round(N); let S=SPACES.get(N); if(!S){ S=buildSpace(N); SPACES.set(N,S); } return S; }
+
+/* ---- scales in a space ---------------------------------------------------------------- */
+function buildScale(S, name){
+  const N=S.N, uniq=(a)=>[...new Set(a.map(x=>((x%N)+N)%N))].sort((x,y)=>x-y);
+  if(SCALE_JUST[name]){
+    const steps=[]; for(const [n,d] of SCALE_JUST[name]){ const c=1200*Math.log2(n/d), s=nearestStep(N,c); if(Math.abs(s*1200/N-c)>20) return null; steps.push(s); }
+    const u=uniq(steps); return u.length===SCALE_JUST[name].length ? u : null;
+  }
+  const def=SCALE_DEF[name]; if(!def) return null;
+  let steps, want;
+  if(def.chain){
+    let js=[]; for(let j=def.chain[0]; j<=def.chain[1]; j++) js.push(j);
+    for(const [a,b] of (def.swap||[])) js=js.map(j=>j===a?b:j);
+    for(const j of (def.add||[])) js.push(j);
+    steps=js.map(j=>S.K(j)); want=js.length;
+  } else if(def.equal){ steps=[]; for(let k=0;k<def.equal;k++) steps.push(Math.round(k*N/def.equal)); want=def.equal; }
+  else { steps=SCALES[name].map(s=>Math.round(s*N/12)); want=SCALES[name].length; }
+  const u=uniq(steps);
+  return (u.length===want && u[0]===0) ? u : null;
+}
+function scaleStepsIn(S, name){
+  let v=S.scales.get(name); if(v===undefined){ v=buildScale(S,name); S.scales.set(name,v); }
+  return v;
+}
+function scaleSteps(name){ return scaleStepsIn(SP, name) || scaleStepsIn(SP,'Ionian'); }
+function scaleNamesIn(S){ return SCALE_ORDER.concat(MICRO_SCALES).filter(n=>scaleStepsIn(S,n)); }
+function scaleNames(){ return scaleNamesIn(SP); }
+function scaleAvailable(name){ return !!scaleStepsIn(SP,name); }
+
+/* ---- chords ---------------------------------------------------------------------------- */
+function chordTension(tones){
+  const pcs=[...new Set(tones.map(pcOf))];
+  if(pcs.length<2) return 0;
+  let sum=0,n=0;
+  for(let i=0;i<pcs.length;i++) for(let j=i+1;j<pcs.length;j++){ sum += 1-CONSONANCE_BY_IC[ic(pcs[j]-pcs[i])]; n++; }
+  return sum/n;
+}
+// What a chord is called is read from the twelve-tone interval each of its notes stands for (see shadow12);
+// a chord with a note that stands for none (a neutral third) is 'other' unless its builder named it.
+function chordQuality(tones){
+  const root=tones[0], iv=[];
+  for(const t of tones){
+    const s=shadow12(SP, (((t-root)%NN)+NN)%NN);
+    if(s===null) return 'other';
+    iv.push(s);
+  }
+  const u=[...new Set(iv)].sort((a,b)=>a-b);
+  return CHORD_TEMPLATES[u.join(',')] || 'other';
+}
+function romanNumeral(degree, quality){
+  if(degree<0) return '?';
+  const b = ROMAN[degree] || ('d'+degree);
+  switch(quality){
+    case 'dim': return b.toLowerCase()+'°';
+    case 'dim7': return b.toLowerCase()+'°7';
+    case 'm7b5': return b.toLowerCase()+'ø7';
+    case 'min': return b.toLowerCase();
+    case 'min7': return b.toLowerCase()+'7';
+    case 'minMaj7': return b.toLowerCase()+'△7';
+    case 'maj7': return b+'△7';
+    case 'dom7': return b+'7';
+    case 'aug': case 'aug7': case 'augMaj7': return b+'+';
+    case 'sus2': return b+'sus2';
+    case 'sus4': return b+'sus4';
+    case '5': return b+'5';
+    case '1': return b;
+    case 'h7': return b+'h7';                 // harmonic seventh, 4:5:6:7
+    case 'sub': return b.toLowerCase()+'↓'; // subminor, 6:7:9
+    case 'neu': return b+'~';                 // neutral third, 18:22:27
+    default: return b+'*';
+  }
+}
+function annotate(c, quality){
+  c.quality = quality || chordQuality(c.tones);
+  if(c.applied==='dom') c.roman = 'V7/'+c.of;
+  else if(c.applied==='lt') c.roman = 'vii°7/'+c.of;
+  else c.roman = romanNumeral(c.degree, c.quality);
+  c.tensionVal = chordTension(c.tones);
+  c.key = c.rootPc+':'+c.quality+':'+(c.applied||'-');
+  return c;
+}
+// the third, and the seventh above the fifth, that a chord is built from: the circle of fifths gives a
+// Pythagorean third that some divisions replace with a better one (see pickThird); a chord uses the
+// replacement wherever the scale would have used the circle's own
+function adaptOffsets(offs){
+  const S=SP, N=NN, out=offs.slice();
+  const third=(x)=> x===S.M3c ? S.M3 : x===S.m3c ? S.m3 : x;
+  if(out.length>1) out[1]=third(out[1]);
+  if(out.length>3 && offs[3]!==0){ const t=((offs[3]-offs[2])%N+N)%N, r=third(t); if(r!==t) out[3]=(out[2]+r)%N; }
+  return out;
+}
+function buildDiatonic(rootPc, steps, size){
+  size = size||4;
+  const n=steps.length, N=NN, out=[];
+  for(let deg=0;deg<n;deg++){
+    const r=(rootPc+steps[deg])%N;
+    const offs=[]; for(let k=0;k<size;k++) offs.push((((steps[(deg+2*k)%n]-steps[deg])%N)+N)%N);
+    const chain=offs.map(o=>(r+o)%N), q=chordQuality(chain);
+    const tones=adaptOffsets(offs).map(o=>(r+o)%N);
+    const uniq=[...new Set(tones)];
+    out.push(annotate({degree:deg, rootPc:uniq[0], tones:uniq, ring:0}, q));
+  }
+  return out;
+}
+function buildExtended(rootPc, steps){
+  const S=SP, N=NN, dia = buildDiatonic(rootPc, steps);
+  const out = dia.slice(), seen = new Set(dia.map(c=>c.key));
+  const add = (c)=>{ if(!seen.has(c.key)){ seen.add(c.key); out.push(c); } };
+  const dom=(r)=>[r,(r+S.M3)%N,(r+S.P5)%N,(r+S.P5+S.m3)%N];
+  const lt =(l)=>[l,(l+S.m3)%N,(l+S.d5)%N,(l+S.d5+S.m3)%N];
+  for(const t of dia){
+    if(t.degree!==0){
+      const r=(t.rootPc+S.P5)%N;
+      add(annotate({degree:-1, rootPc:r, tones:dom(r), applied:'dom', of:t.roman, ring:1}, 'dom7'));
+    }
+    const l=(t.rootPc+S.K(5))%N;
+    add(annotate({degree:-1, rootPc:l, tones:lt(l), applied:'lt', of:t.roman, ring:2}, 'dim7'));
+  }
+  out.forEach((c,i)=>{ c.idx=i; if(c.ring==null) c.ring=0; });
+  return out;
+}
+// The colour chords of the space (ring 3). The harmonic seventh stands where the scale has a major triad on a
+// degree (it is the dominant seventh as the ear would tune it), the subminor triad where it has a minor one;
+// the neutral triad can go on any degree.
+function addColour(vocab, rootPc, steps){
+  const S=SP, N=NN, seen=new Set(vocab.map(c=>c.key));
+  const dia=vocab.filter(c=>c.degree>=0&&!c.applied&&c.ring===0);
+  const third=(t)=>(((t.tones[1]-t.tones[0])%N)+N)%N;
+  for(const col of S.colour) for(const t of dia){
+    if(col.q==='h7' && third(t)!==S.M3) continue;
+    if(col.q==='sub' && third(t)!==S.m3) continue;
+    const tones=col.offs.map(o=>(t.rootPc+o)%N);
+    const c=annotate({degree:t.degree, rootPc:t.rootPc, tones, ring:3}, col.q);
+    if(seen.has(c.key)) continue; seen.add(c.key); vocab.push(c);
+  }
+  vocab.forEach((c,i)=>{ c.idx=i; });
+  return vocab;
+}
+const VOCAB_CACHE = new Map();
+function vocabularyFor(rootPc, steps, extended, colour){
+  const k = NN+'/'+rootPc+':'+steps.join(',')+':'+(extended?1:0)+':'+(colour&&SP.colour.length?1:0);
+  let v = VOCAB_CACHE.get(k);
+  if(!v){
+    v = extended ? buildExtended(rootPc, steps) : buildDiatonic(rootPc, steps);
+    v.forEach((c,i)=>{ c.idx=i; });
+    if(colour && SP.colour.length) addColour(v, rootPc, steps);
+    VOCAB_CACHE.set(k,v);
+  }
+  return v;
+}
+// the vocabulary of a scale under the controls as they stand
+function vocabFor(scaleName){ return vocabularyFor(STATE.root, scaleSteps(scaleName), STATE.extended, STATE.colour); }
+
+// distance between two chords: the steps each note of one must move to reach the nearest note of the other
+function voiceLeadingDistance(a, b){
+  const A=[...new Set(a.map(pcOf))], B=[...new Set(b.map(pcOf))];
+  let t=0;
+  for(const x of A){ let best=NN; for(const y of B){ const d=ic(x-y); if(d<best) best=d; } t+=best; }
+  return t;
+}
+// How far the root falls going from chord A to chord B, in steps of the space.
+// The fifth is the classic descending fifth (V-I, ii-V), the minor third is I-vi, the step above a fourth is a step up (IV-V).
+// (The first version called this "directed fifths" and labelled it "in fifths"; it never was.)
+function rootFall(rootA, rootB){ return ((rootA-rootB)+NN)%NN; }
+// Position of a root-fall value around the circle of fifths: consecutive positions differ
+// by a fifth, so a ring laid out in this order really is the circle of fifths.
+function fifthsPos(d){ return SP.ringPos[d]; }
+
+/* ---- tunings ---------------------------------------------------------------
+   Twelve divisions only. A tuning says how far each of the twelve pitch classes sits from its
+   equal-tempered pitch, in cents, so a note is a whole number (what the rules see) plus a small offset
+   (what you hear). Offsets that are measured from the root follow the root around; a well temperament
+   is fixed to C, because the unevenness between keys is the point of one. In any other division the
+   step *is* the tuning, and there is no layer on top of it. The sounding pitch of a note is therefore
+   fractional, which is what the audio engine plays and what the MIDI export has to encode (as pitch bend). */
+function ratioCents(n,d){ return 1200*Math.log2(n/d); }
+function fifthChain(fifth){            // twelve notes from a chain of equal fifths, wolf above the sixth step
+  const o=[];
+  for(let k=0;k<12;k++){
+    let j=(7*k)%12; if(j>8) j-=12;     // position on the chain, -3 .. 8 fifths from the root
+    const c=((j*fifth)%1200+1200)%1200;
+    o.push(c-100*k);
+  }
+  return o.map(x=>Math.abs(x)>600 ? x-1200*Math.sign(x) : x);
+}
+const TUNINGS = {
+  equal:       {label:'Equal temperament',            fixed:false, cents:new Array(12).fill(0)},
+  just:        {label:'Just intonation, 5-limit',     fixed:false,
+                cents:[[1,1],[16,15],[9,8],[6,5],[5,4],[4,3],[45,32],[3,2],[8,5],[5,3],[9,5],[15,8]].map((r,k)=>ratioCents(r[0],r[1])-100*k)},
+  pythagorean: {label:'Pythagorean',                  fixed:false, cents:fifthChain(ratioCents(3,2))},
+  meantone:    {label:'Quarter-comma meantone',       fixed:false, cents:fifthChain(1200*Math.log2(5)/4)},
+  werckmeister:{label:'Werckmeister III (from C)',    fixed:true,
+                cents:[0,90.225,192.18,294.135,390.225,498.045,588.27,696.09,792.18,888.27,996.09,1092.18].map((c,k)=>c-100*k)},
+};
+const TUNING_ORDER = ['equal','just','pythagorean','meantone','werckmeister'];
+// the offset, in cents, of a pitch class under the tuning in force (the root matters for the relative ones)
+function tuningCents(pc, tuning, root){
+  const T=TUNINGS[tuning==null?STATE.tuning:tuning]||TUNINGS.equal, r=root==null?STATE.root:root;
+  return T.fixed ? T.cents[((pc%12)+12)%12] : T.cents[(((pc-r)%12)+12)%12];
+}
+// the pitch a whole-number note actually sounds at, as a fractional MIDI note number
+function soundingPitch(p){ return NN===12 ? p + tuningCents(pcOf(p))/100 : 12*p/NN; }
+// where a pitch is on a keyboard of semitones (no tuning layer): what the piano roll draws
+function semis(p){ return 12*p/NN; }
+
+/* =====================================================================
+   2 · STATE
+   ===================================================================== */
+const REGISTERS = [{lo:60,hi:84},{lo:48,hi:72},{lo:36,hi:60}];
+const VOICE_NAMES = ['melody','middle','bass'];
+
+// Cost surfaces are separable: cost(cell) = sum over axes of w * (1 - affinity[value]).
+// Defaults reproduce the classical ranking the first version hard-coded, but every
+// number here is now a handle rather than a constant.
+const FUNCTIONAL_RANK = [3,7,6,1,1,4,7,0,5,5,2,7]; // by root fall d (semitones), 0 = strongest
+const DEF_AFF_D = FUNCTIONAL_RANK.map(r=>1-r/7);
+
+const CHORD_AXES = [
+  {key:'d',    n:12, label:'d',   what:'root fall, in steps of the octave', tick:i=>String(i), ringOrder:d=>SP.ringPos[d]},
+  {key:'tau',  n:5,  label:'τ', what:'tension against the aim', tick:i=>['--','-','0','+','++'][i]},
+  {key:'rho',  n:3,  label:'ρ', what:'kind of chord', tick:i=>['dia','V7','vii°'][i]},
+  {key:'eta',  n:3,  label:'η', what:'momentum coming in', tick:i=>['weak','mid','str'][i]},
+];
+const VOICE_AXES = [
+  {key:'kappa',n:3, label:'κ', what:'voices it agrees with', tick:i=>String(i)},
+  {key:'mu',   n:5, label:'μ', what:'its own leap or step',  tick:i=>['↓↓','↓','=','↑','↑↑'][i]},
+  {key:'phi',  n:3, label:'φ', what:'chromatic / scale / chord tone', tick:i=>['chr','scl','chd'][i]},
+  {key:'sigma',n:2, label:'σ', what:'structural or passing', tick:i=>['struct','pass'][i]},
+  {key:'gamma',n:3, label:'γ', what:'against the other voices', tick:i=>['sim','obl','con'][i]},
+];
+function axisDims(axes){ return axes.map(a=>a.n); }
+// the dimensions of the chord table in a given space: the root-fall axis has one value per step, and the kind-of-chord axis a fourth when the space has colour chords
+function chordDimsFor(S){ return [S.N, 5, S.colour.length?4:3, 3]; }
+function axisStrides(dims){
+  const s=new Array(dims.length); let acc=1;
+  for(let i=dims.length-1;i>=0;i--){ s[i]=acc; acc*=dims[i]; }
+  return {strides:s, size:acc};
+}
+const CHORD_DIMS = axisDims(CHORD_AXES), CHORD_STR = axisStrides(CHORD_DIMS);
+const VOICE_DIMS = axisDims(VOICE_AXES), VOICE_STR = axisStrides(VOICE_DIMS);
+
+// How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
+// direction (a basis vector) that you can drag, and a cell sits at the sum of its coordinates'
+// vectors; an axis can also be wrapped into a ring. 'cycle' and 'cost' are not linear: the first
+// puts the root fall d on a circle of fifths with tension as the radius, the second puts every
+// cell at its cost, so the legal set is everything left of a vertical line.
+// The grid presets nest the axes like digits of a number, so no two cells ever coincide; the
+// oblique ones were found by search for the arrangement that keeps all cells apart while giving
+// every axis also 
