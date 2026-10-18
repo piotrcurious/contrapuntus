@@ -1789,8 +1789,8 @@ function bundleProjection_M_to_V(mCoords) {
   // phi_m (nct, diat, chord/gt) -> voice fit class phi
   const psi = mCoords[0], mu_m = mCoords[1], gamma_m = mCoords[2], sigma_m = mCoords[3], phi_m = mCoords[4];
 
-  // Map step class mu_m (0..4) to voice leap class mu (0..4)
-  const mu_v = mu_m;
+  // Map step class mu_m (0..4) to voice leap class mu (0..4: 0=lg-down, 1=step-down, 2=hold, 3=step-up, 4=lg-up)
+  const mu_v = mu_m === 0 ? 2 : (mu_m === 1 || mu_m === 4 ? 3 : 4);
   // Map phi_m (0..2) to voice fit phi (0..4: 0=chr-f, 1=nct, 2=ext, 3=chd, 4=root)
   const phi_v = phi_m === 2 ? 4 : phi_m === 1 ? 2 : 0;
   // Map gamma_m (0..2) to voice agreement kappa (0..2)
@@ -2544,13 +2544,22 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
 
   // 2. Movement Step Class mu_m (0: hold, 1: step, 2: sm-leap, 3: lg-leap, 4: res/rec)
   let mu_m = 0;
-  if (dp === 0) mu_m = 0;
-  else if (absDp <= 2) {
-    if (prevLeapMomentum != null && prevLeapMomentum * dp < 0) mu_m = 4; // Stepwise leap recovery
-    else if (boardState.isDissonant) mu_m = 4; // Stepwise resolution
-    else mu_m = 1; // Normal step
-  } else if (absDp <= 4) mu_m = 2; // Small leap
-  else mu_m = 3; // Large leap
+  if (dp === 0) {
+    mu_m = 0; // Hold
+  } else if (absDp <= 2) {
+    const isPrevLeap = (prevLeapMomentum != null && Math.abs(prevLeapMomentum) >= 3);
+    if (isPrevLeap && (prevLeapMomentum * dp < 0)) {
+      mu_m = 4; // Stepwise leap recovery
+    } else if (boardState.isDissonant) {
+      mu_m = 4; // Stepwise resolution of dissonance
+    } else {
+      mu_m = 1; // Normal step
+    }
+  } else if (absDp <= 4) {
+    mu_m = 2; // Small leap
+  } else {
+    mu_m = 3; // Large leap
+  }
 
   // 3. Relative Voice Motion gamma_m
   let gamma_m = 1;
@@ -2700,8 +2709,9 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   }
   kappa_v = Math.min(2, kappa_v);
 
+  const mu_v = dp <= -3 ? 0 : (dp < 0 ? 1 : (dp === 0 ? 2 : (dp <= 2 ? 3 : 4)));
   const phi_v = phi_m === 2 ? 4 : (phi_m === 1 ? 2 : 0);
-  const vF = vIdx(kappa_v, mu_m, phi_v, sigma_m, gamma_m);
+  const vF = vIdx(kappa_v, mu_v, phi_v, sigma_m, gamma_m);
   const vTbl = voiceTable();
 
   // UNIFIED 4-SPACE RULE TENSOR EVALUATION: R_eff = R_M && R_T && R_V
