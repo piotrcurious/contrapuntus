@@ -2665,19 +2665,22 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   if (boardState.isDissonant && mu_m === 4) kineticInertia -= 0.8;
   if (prevLeapMomentum != null && prevLeapMomentum * dp < 0 && absDp <= 2) kineticInertia -= 0.6;
 
-  // Fusion/Jazz Guide-Tone Resolution Chain: 3rd -> 7th or 7th -> 3rd stepwise motion (1 or 2 semitones)
-  if (prevPc != null) {
+  // Fusion/Jazz Guide-Tone Resolution Chain & Supervisory Guidance
+  const supCtx = (options && options.supCtx) ? options.supCtx : evaluateSupervisorySpace(boardState.stepIndex || 0, (STATE.bars || 8) * (STATE.stepsPerBar || 8));
+  const gtWeight = supCtx.guideToneWeight != null ? supCtx.guideToneWeight : 1.0;
+
+  if (prevPc != null && gtWeight > 0) {
     const scaleRootPc = (STATE && STATE.root != null) ? STATE.root : 0;
     const prevDegree = (prevPc - scaleRootPc + 12) % 12;
     const targetDegree = (targetPc - scaleRootPc + 12) % 12;
 
     // 7th degree (11 semitones) resolving stepwise to 3rd degree (3/4 semitones) or tonic (0 semitones)
     if (prevDegree === 11 && (targetDegree === 0 || targetDegree === 3 || targetDegree === 4)) {
-      kineticInertia -= 0.9; // Guide-tone resolution attractor
+      kineticInertia -= 0.9 * gtWeight; // Guide-tone resolution attractor
     }
     // 3rd degree (3 or 4 semitones) resolving to 7th degree (10/11 semitones) in dominant chains
     if ((prevDegree === 3 || prevDegree === 4) && (targetDegree === 10 || targetDegree === 11) && absDp <= 2) {
-      kineticInertia -= 0.7; // Voice-leading guide-tone chain attractor
+      kineticInertia -= 0.7 * gtWeight; // Voice-leading guide-tone chain attractor
     }
   }
 
@@ -2716,10 +2719,11 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
 
   const flowEval = evaluateTangentMovementVector(boardState, dp, voiceIdx, prevLeapMomentum, prevPitch, prev2Pitch, prev3Pitch, otherPitches, options);
 
-  // 1. Movement Rule Space Cell Coordinates
+  // 1. Movement Rule Space Cell Coordinates & Supervisory Dynamic Lambda Modulation
+  const supCtx = (options && options.supCtx) ? options.supCtx : evaluateSupervisorySpace(stepIndex, (STATE.bars || 8) * (STATE.stepsPerBar || 8));
   const [psi, mu_m, gamma_m, sigma_m, phi_m] = flowEval.coords;
   const mF = psi*MS[0] + mu_m*MS[1] + gamma_m*MS[2] + sigma_m*MS[3] + phi_m*MS[4];
-  const mTbl = moveTable();
+  const mTbl = moveTable(supCtx.modLamM);
 
   // 2. Temporal Rule Space Cell Coordinates
   const stepsPerBar = STATE.stepsPerBar || 8;
