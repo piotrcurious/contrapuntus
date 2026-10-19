@@ -2724,9 +2724,27 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   // 2. Temporal Rule Space Cell Coordinates
   const stepsPerBar = STATE.stepsPerBar || 8;
   const m_pos = Math.floor((stepIndex % stepsPerBar) / Math.max(1, stepsPerBar / 4)) % 4;
-  const m_sub = (stepIndex % 2 === 0) ? 0 : 1;
-  const d_dur = 1;
-  const s_sync = (stepIndex % 2 === 1) ? 1 : 0;
+  let m_sub = 0;
+  if (stepsPerBar === 16) {
+    const rem = stepIndex % 4;
+    m_sub = (rem === 0) ? 0 : (rem === 2 ? 1 : 2);
+  } else if (stepsPerBar === 8) {
+    m_sub = (stepIndex % 2 === 0) ? 0 : 1;
+  } else {
+    m_sub = 0;
+  }
+  let d_dur = 1;
+  let gateRatio = 0.9;
+  if (options && options.gateRatio != null) {
+    gateRatio = options.gateRatio;
+  } else if (STATE && STATE.voiceEnv && STATE.voiceEnv[voiceIdx]) {
+    gateRatio = STATE.voiceEnv[voiceIdx].gateRatio || 0.9;
+  }
+  if (gateRatio < 0.6) d_dur = 0;
+  else if (gateRatio > 1.1) d_dur = 2;
+  else d_dur = 1;
+
+  const s_sync = (m_sub >= 1 && (m_pos === 1 || m_pos === 3)) ? 1 : 0;
   const tF = tIdx(m_pos, m_sub, d_dur, s_sync);
   const tTbl = timeTable();
 
