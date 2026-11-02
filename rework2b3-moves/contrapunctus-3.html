@@ -962,6 +962,7 @@ function vocabularyFor(rootPc, steps, extended){
   const k = rootPc+':'+steps.join(',')+':'+(extended?1:0);
   let v = VOCAB_CACHE.get(k);
   if(!v){
+    if (VOCAB_CACHE.size > 32) VOCAB_CACHE.clear();
     v = extended ? buildExtended(rootPc, steps) : buildDiatonic(rootPc, steps);
     v.forEach((c,i)=>{ c.idx=i; });
     VOCAB_CACHE.set(k,v);
@@ -1844,9 +1845,10 @@ let BUNDLE_CACHE_KEY = '';
 
 function evaluateFiberBundleIntersection(ruleOpts) {
   const key = [
-    STATE.lamC, STATE.lamV, STATE.lamM,
+    STATE.lamC, STATE.lamV, STATE.lamM, STATE.lamT != null ? STATE.lamT : 0.50,
+    STATE.root, STATE.scaleName, STATE.extended ? 1 : 0,
     ruleOpts ? ruleOpts.op : '', ruleOpts ? ruleOpts.ruleA : '', ruleOpts ? ruleOpts.ruleB : '',
-    STATE.supervisor ? STATE.supervisor.syntaxMode : ''
+    STATE.supervisor ? STATE.supervisor.syntaxMode + ':' + STATE.supervisor.climaxPos + ':' + STATE.supervisor.entropyGradient : ''
   ].join('|');
 
   if (BUNDLE_CACHE && BUNDLE_CACHE_KEY === key) return BUNDLE_CACHE;
@@ -5604,8 +5606,8 @@ function stopSound(){
   AUD.run=null; clearTimeout(R.timer); cancelAnimationFrame(AUD.raf);
   const ctx=AUD.ctx, now=ctx.currentTime;
   for(const g of R.bus){ g.gain.cancelScheduledValues(now); g.gain.setTargetAtTime(0, now, 0.012); }
-  AUD.ret.gain.cancelScheduledValues(now); AUD.ret.gain.setTargetAtTime(0, now, 0.03);
-  for(const rec of R.active){ try{ rec.o1.stop(now+0.08); rec.o2.stop(now+0.08); }catch(e){} }
+  if (AUD.ret && AUD.ret.gain) { AUD.ret.gain.cancelScheduledValues(now); AUD.ret.gain.setTargetAtTime(0, now, 0.03); }
+  for(const rec of R.active){ try{ rec.o1.stop(now+0.08); rec.o2.stop(now+0.08); if (rec.o1.disconnect) rec.o1.disconnect(); if (rec.o2.disconnect) rec.o2.disconnect(); if (rec.env && rec.env.disconnect) rec.env.disconnect(); }catch(e){} }
   setTimeout(()=>{ for(const g of R.bus){ try{ g.disconnect(); }catch(e){} } R.active.clear(); }, 160);
 }
 function stop(){
