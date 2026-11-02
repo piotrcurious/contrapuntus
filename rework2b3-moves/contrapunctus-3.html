@@ -1212,18 +1212,18 @@ const CHORD_AXES = [
   {key:'eta',  n:3,  label:'\u03b7', what:'momentum coming in', tick:i=>['weak','mid','str'][i]},
 ];
 const VOICE_AXES = [
-  {key:'kappa',n:3, label:'\u03ba', what:'voices it agrees with', tick:i=>String(i)},
+  {key:'kappa',n:3, label:'\u03ba', what:'voices it agrees with (0, 1, or 2 consonances)', tick:i=>String(i)},
   {key:'mu',   n:5, label:'\u03bc', what:'its own leap or step',  tick:i=>['\u2193\u2193','\u2193','=','\u2191','\u2191\u2191'][i]},
-  {key:'phi',  n:5, label:'\u03c6', what:'fit taxonomy (chromatic-foreign -> root)', tick:i=>['chr-f','nct','ext','chd','root'][i]},
+  {key:'phi',  n:5, label:'\u03c6', what:'jazz/fusion fit taxonomy: 0=avoid/foreign, 1=scale/passing, 2=color extension/tension (9,#11,13), 3=guide tone (3rd/7th), 4=foundation (root/5th)', tick:i=>['avoid','scale','tension','guide','root'][i]},
   {key:'sigma',n:2, label:'\u03c3', what:'structural or passing', tick:i=>['struct','pass'][i]},
   {key:'gamma',n:3, label:'\u03b3', what:'against the other voices', tick:i=>['sim','obl','con'][i]},
 ];
 const MOVE_AXES = [
-  {key:'psi',     n:3, label:'\u03c8',   what:'departure tone context (nct/chromatic -> diatonic scale -> chord/guide tone)', tick:i=>['nct/chrom','diat/ext','chord/gt'][i]},
+  {key:'psi',     n:3, label:'\u03c8',   what:'departure context (0=avoid/foreign, 1=scale/passing, 2=harmonic target: root/guide/extension)', tick:i=>['avoid/out','scale/pass','harm/gt'][i]},
   {key:'mu_m',   n:5, label:'\u03bc_m', what:'movement step class (hold, step, sm-leap, lg-leap, resolution/recovery)', tick:i=>['hold','step','sm-leap','lg-leap','res/rec'][i]},
   {key:'gamma_m',n:3, label:'\u03b3_m', what:'relative voice motion (similar, oblique, contrary)', tick:i=>['sim','obl','con'][i]},
   {key:'sigma_m',n:2, label:'\u03c3_m', what:'metric accent (structural vs passing)', tick:i=>['struct','pass'][i]},
-  {key:'phi_m',  n:3, label:'\u03c6_m', what:'target tone fit (nct/chromatic -> diatonic scale -> chord/guide tone)', tick:i=>['nct/chrom','diat/ext','chord/gt'][i]},
+  {key:'phi_m',  n:3, label:'\u03c6_m', what:'target fit: 0=avoid/foreign, 1=scale/passing, 2=harmonic target (root, guide tone, color tension)', tick:i=>['avoid/out','scale/pass','harm/gt'][i]},
 ];
 function axisDims(axes){ return axes.map(a=>a.n); }
 function axisStrides(dims){
@@ -1246,7 +1246,7 @@ function defaultProfiles(){
     voice:{
       kappa:{w:0.80, aff:[0.10, 0.70, 1.00]},
       mu:   {w:0.85, aff:[0.10, 0.85, 0.95, 0.85, 0.10]},
-      phi:  {w:1.00, aff:[0.05, 0.35, 0.75, 0.95, 1.00]},
+      phi:  {w:1.00, aff:[0.05, 0.40, 0.85, 0.98, 1.00]},
       sigma:{w:0.50, aff:[1.00, 0.60]},
       gamma:{w:0.85, aff:[0.20, 0.70, 1.00]},
     },
@@ -1255,7 +1255,7 @@ function defaultProfiles(){
       mu_m:   {w:1.00, aff:[0.35, 1.00, 0.55, 0.15, 0.98]},
       gamma_m:{w:0.90, aff:[0.20, 0.75, 1.00]},
       sigma_m:{w:0.60, aff:[1.00, 0.60]},
-      phi_m:  {w:1.00, aff:[0.10, 0.75, 1.00]},
+      phi_m:  {w:1.00, aff:[0.05, 0.70, 1.00]},
     },
     time:{
       m_pos:  {w:1.00, aff:[1.00, 0.80, 0.50, 0.70]},
@@ -1337,6 +1337,8 @@ window.moveTable = moveTable;
 window.timeTable = timeTable;
 window.latticeSpec = latticeSpec;
 window.tIdx = tIdx;
+window.fitClass = fitClass;
+window.compose = compose;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
 // direction (a basis vector) that you can drag, and a cell sits at the sum of its coordinates'
@@ -2398,12 +2400,67 @@ function forkFrom(walk, segIdx, alt, horizon){
 
 /* ---- voices ---- */
 function motionClass(delta){ return delta<=-5?0 : delta<=-1?1 : delta===0?2 : delta<=4?3 : 4; }
-function fitClass(pc, chordPCs, scalePCs, rootPc){
-  if (rootPc != null && (pc === rootPc || pc === (rootPc + 7) % 12)) return 4;  // 4: Essential Root & 5th
-  if (chordPCs && chordPCs.includes(pc)) return 3;                             // 3: Consonant 3rd & Diatonic Extensions
-  if (scalePCs && scalePCs.includes(pc)) return 2;                             // 2: Diatonic Scale Passing/Neighbor
-  if (rootPc != null && [(rootPc+11)%12, (rootPc+1)%12, (rootPc+6)%12, (rootPc+8)%12].includes(pc)) return 1; // 1: Chromatic Approach
-  return 0;                                                                     // 0: Foreign Ungrounded
+function fitClass(pc, chordPCs, scalePCs, rootPc, chordQualityVal){
+  pc = ((pc % 12) + 12) % 12;
+  const chord = chordPCs ? chordPCs.map(pcOf) : [];
+  const scale = scalePCs ? scalePCs.map(pcOf) : [];
+  if (rootPc == null && chord.length > 0) rootPc = chord[0];
+
+  // 1. Tier 4: Foundation (Acoustic Root & Structural Fifth)
+  if (rootPc != null) {
+    const iv = ((pc - rootPc) % 12 + 12) % 12;
+    if (iv === 0) return 4; // Root
+    if (iv === 7 && (!chord.length || chord.some(t => ((t - rootPc) % 12 + 12) % 12 === 7))) return 4; // Perfect 5th
+    if ((iv === 6 || iv === 8) && chord.some(t => ((t - rootPc) % 12 + 12) % 12 === iv)) return 4; // Altered 5th in chord (dim/aug)
+  }
+
+  // 2. Tier 3: Guide Tones & Essential Chord Tones (3rd & 7th, defining harmonic quality)
+  if (chord.includes(pc)) {
+    return 3;
+  }
+
+  // If no root context, fallback to scale or foreign
+  if (rootPc == null) {
+    return scale.includes(pc) ? 1 : 0;
+  }
+
+  const iv = ((pc - rootPc) % 12 + 12) % 12;
+  const chordIntervals = chord.map(t => ((t - rootPc) % 12 + 12) % 12);
+  const hasMaj3 = chordIntervals.includes(4);
+  const hasMin3 = chordIntervals.includes(3);
+  const hasMin7 = chordIntervals.includes(10);
+  const isDominant = hasMaj3 && hasMin7;
+
+  // 3. Avoid Tone Identification -> Tier 0
+  // Natural 11th (iv = 5) against Major 3rd (harsh minor 9th clash in classical/jazz)
+  if (hasMaj3 && iv === 5) return 0;
+  // Abrasive minor 9th clash above root (iv = 1) on major/minor triads (unless dominant/altered/subV7)
+  if (iv === 1 && !isDominant && chordQualityVal !== 'dom7' && chordQualityVal !== 'subv' && chordQualityVal !== 'dim7') return 0;
+
+  // 4. Tier 2: Available Tensions & Color Extensions (Jazz/Fusion)
+  // - 9th (iv = 2): universally available tension on major, minor, dominant, half-diminished
+  if (iv === 2) return 2;
+  // - ♯11th (iv = 6): Lydian color on maj7, #11 tension on dom7 (Lydian Dominant)
+  if (iv === 6) return 2;
+  // - 13th / 6th (iv = 9): available tension on maj, min, dom (when not dim7)
+  if (iv === 9 && !chordIntervals.includes(9)) return 2;
+  // - 11th (iv = 5): available tension on minor chords (consonant 4th over min3)
+  if (hasMin3 && iv === 5) return 2;
+  // - Altered Dominant Tensions on dominant / subV7 chords: ♭9 (1), ♯9 (3), ♭13 (8)
+  if (isDominant || chordQualityVal === 'dom7' || chordQualityVal === 'subv') {
+    if (iv === 1 || iv === 3 || iv === 8) return 2;
+  }
+
+  // 5. Tier 1: Melodic Scale & Passing / Chromatic Approach Tones
+  if (scale.includes(pc)) return 1;
+  const isApproach = chord.some(ct => {
+    const d = Math.abs(((pc - ct + 6) % 12 + 12) % 12 - 6);
+    return d === 1;
+  });
+  if (isApproach) return 1;
+
+  // 6. Tier 0: Foreign Outlier / Avoid Tone
+  return 0;
 }
 function consonanceCount(m, others){
   let n=0;
@@ -2539,23 +2596,29 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   const prevPc = prevPitch != null ? ((prevPitch % 12) + 12) % 12 : null;
   let psi = 1;
   if (prevPc != null) {
-    let prevChordPcs = [];
+    let depChordPcs = [];
+    let depRootPc = null;
+    let depQuality = null;
     if (options && options.chords) {
       const stepIdx = (options && options.step != null) ? options.step : (boardState && boardState.stepIndex != null ? boardState.stepIndex : 0);
       const depSeg = segOfStep(stepIdx);
-      if (options.chords[depSeg] && options.chords[depSeg].tones) {
-        prevChordPcs = options.chords[depSeg].tones.map(pcOf);
+      if (options.chords[depSeg]) {
+        if (options.chords[depSeg].tones) depChordPcs = options.chords[depSeg].tones.map(pcOf);
+        depRootPc = options.chords[depSeg].rootPc;
+        depQuality = options.chords[depSeg].quality;
       }
     } else if (options && options.chordTones) {
-      prevChordPcs = options.chordTones.map(pcOf);
+      depChordPcs = options.chordTones.map(pcOf);
+      depRootPc = options.rootPc != null ? options.rootPc : depChordPcs[0];
     }
 
     const prevScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : [0,2,4,5,7,9,11];
 
-    if (prevChordPcs.length > 0) {
-      if (prevChordPcs.includes(prevPc)) psi = 2; // Departing from Chord / Guide Tone
-      else if (prevScalePcs.includes(prevPc)) psi = 1; // Departing from Diatonic Scale Tone
-      else psi = 0; // Departing from Non-Chord / Chromatic Tone
+    if (depChordPcs.length > 0) {
+      const depFit = fitClass(prevPc, depChordPcs, prevScalePcs, depRootPc, depQuality);
+      if (depFit >= 2) psi = 2;      // Departing from Harmonic Tone (Root, 5th, Guide Tone, or Available Extension)
+      else if (depFit === 1) psi = 1; // Departing from Melodic Scale / Passing Tone
+      else psi = 0;                  // Departing from Non-Chord / Avoid / Outlier Tone
     } else {
       psi = boardState.isDissonant ? 0 : 2;
     }
@@ -2596,14 +2659,19 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   // 4. Metric Accent sigma_m
   const sigma_m = boardState.metricPhase;
 
-  // 5. Target Fit Class phi_m evaluated against HARMONIC CHORD TONES
+  // 5. Target Fit Class phi_m evaluated against Jazz / Fusion / Counterpoint Taxonomy
   let activeChordPcs = [];
+  let chordRootPc = null;
+  let chordQualityVal = null;
   if (options && options.chordTones && Array.isArray(options.chordTones)) {
     activeChordPcs = options.chordTones.map(pcOf);
+    chordRootPc = options.rootPc != null ? options.rootPc : activeChordPcs[0];
   } else if (options && options.chords) {
-    const seg = segOfStep(options.step || 0);
-    if (options.chords[seg] && options.chords[seg].tones) {
-      activeChordPcs = options.chords[seg].tones.map(pcOf);
+    const seg = segOfStep(options.step || (boardState && boardState.stepIndex != null ? boardState.stepIndex : 0));
+    if (options.chords[seg]) {
+      if (options.chords[seg].tones) activeChordPcs = options.chords[seg].tones.map(pcOf);
+      chordRootPc = options.chords[seg].rootPc;
+      chordQualityVal = options.chords[seg].quality;
     }
   }
 
@@ -2611,13 +2679,12 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   const currentScaleSteps = (STATE && STATE.scaleName && SCALES[STATE.scaleName]) ? SCALES[STATE.scaleName] : SCALES.Ionian;
   const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : currentScaleSteps.map(o => (currentRoot + o) % 12);
   const targetPc = ((targetPitch % 12) + 12) % 12;
-  const isChordTone = activeChordPcs.length > 0 ? activeChordPcs.includes(targetPc) : boardState.pitches.filter(p => p != null).map(pcOf).includes(targetPc);
-  const isScale = activeScalePcs.includes(targetPc);
 
+  const targetFit = fitClass(targetPc, activeChordPcs, activeScalePcs, chordRootPc, chordQualityVal);
   let phi_m = 0;
-  if (isChordTone) phi_m = 2;
-  else if (isScale) phi_m = 1;
-  else phi_m = 0;
+  if (targetFit >= 2) phi_m = 2;      // 2: Harmonic Target (Root, 5th, Guide Tone, Available Extension/Tension)
+  else if (targetFit === 1) phi_m = 1; // 1: Melodic Scale / Passing / Approach Connector
+  else phi_m = 0;                     // 0: Avoid Tone / Foreign Outlier
 
   // Direct / Hidden Fifths & Octaves Constraint
   if (gamma_m === 0 && absDp >= 3 && boardState.bass != null && voiceIdx === 0) {
@@ -2628,8 +2695,8 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
   }
 
   // STRICT SPECIES COUNTERPOINT & VERTICAL CONSONANCE HARD CONSTRAINTS
-  // Constraint A: Prohibit entering leaps into non-chord tones
-  if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to NCT' };
+  // Constraint A: Prohibit entering leaps into Tier 0 avoid tones / foreign ungrounded outliers (absDp > 2)
+  if (phi_m === 0 && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Entering leap to Avoid/Foreign NCT' };
 
   // Constraint B: Prohibit leaping from active dissonances V(s) > 0 (Dissonance Resolution Gradient)
   if (boardState.isDissonant && absDp > 2) return { valid: false, cost: 999, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Leap from Dissonance' };
@@ -2639,17 +2706,19 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
     return { valid: false, cost: 888, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Unrecovered Leap Momentum' };
   }
 
-  // Constraint D: Structural beat vertical consonance above bass (3rds, 5ths, 6ths, 8ves required for upper voices)
+  // Constraint D: Structural beat vertical consonance above bass
+  // Upper voices must form consonant intervals (3rds, 5ths, 6ths, 8ves) or valid harmonic color extensions (9ths, #11ths) above the bass
   if (sigma_m === 0) {
     if (boardState.bass != null && voiceIdx !== 2) {
       const intervalAboveBass = ((targetPitch - boardState.bass) % 12 + 12) % 12;
-      const isConsonantVertical = (intervalAboveBass === 0 || intervalAboveBass === 3 || intervalAboveBass === 4 || intervalAboveBass === 7 || intervalAboveBass === 8 || intervalAboveBass === 9);
+      const isConsonantVertical = (intervalAboveBass === 0 || intervalAboveBass === 3 || intervalAboveBass === 4 || intervalAboveBass === 7 || intervalAboveBass === 8 || intervalAboveBass === 9 || (targetFit >= 2 && (intervalAboveBass === 2 || intervalAboveBass === 6)));
       if (!isConsonantVertical && psi !== 2) {
         return { valid: false, cost: 990, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Structural Beat Dissonance above Bass' };
       }
     }
-    if (voiceIdx === 2 && phi_m < 2) {
-      return { valid: false, cost: 980, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Bass Non-Chord Tone on Structural Beat' };
+    // Bass must anchor on structural root/5th/3rd (Tier >= 3) or guide tone on structural downbeats
+    if (voiceIdx === 2 && targetFit < 3) {
+      return { valid: false, cost: 980, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Bass Non-Chord Anchor on Structural Beat' };
     }
   }
 
@@ -2781,19 +2850,13 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const activeScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : currentScaleSteps.map(o => (currentRoot + o) % 12);
 
   const mu_v = dp <= -3 ? 0 : (dp < 0 ? 1 : (dp === 0 ? 2 : (dp <= 2 ? 3 : 4)));
-  let phi_v = 0;
-  const rootPc = (options && options.rootPc != null) ? options.rootPc : (activeChordPcs.length > 0 ? activeChordPcs[0] : null);
-  if (rootPc != null && (targetPc === rootPc || targetPc === (rootPc + 7) % 12)) {
-    phi_v = 4; // 4: Essential Root & 5th
-  } else if (activeChordPcs.includes(targetPc)) {
-    phi_v = 3; // 3: Consonant 3rd / 7th Chord Tone
-  } else if (activeScalePcs.includes(targetPc)) {
-    phi_v = 2; // 2: Diatonic Scale Passing/Neighbor
-  } else if (rootPc != null && [(rootPc+11)%12, (rootPc+1)%12, (rootPc+6)%12, (rootPc+8)%12].includes(targetPc)) {
-    phi_v = 1; // 1: Chromatic Approach / Leading Tone
-  } else {
-    phi_v = 0; // 0: Foreign Ungrounded
+  let chordQualityValForV = null;
+  if (options && options.chords) {
+    const seg = segOfStep(options.step || stepIndex);
+    if (options.chords[seg]) chordQualityValForV = options.chords[seg].quality;
   }
+  const rootPc = (options && options.rootPc != null) ? options.rootPc : (activeChordPcs.length > 0 ? activeChordPcs[0] : null);
+  const phi_v = fitClass(targetPc, activeChordPcs, activeScalePcs, rootPc, chordQualityValForV);
 
   const vF = vIdx(kappa_v, mu_v, phi_v, sigma_m, gamma_m);
   const vTbl = voiceTable();
@@ -2849,11 +2912,19 @@ function evaluateLookaheadMove(candPitch, voiceIdx, stepIndex, totalSteps, chord
 
   const targetPc = pcOf(candPitch);
   const currentSeg = segOfStep(stepIndex);
-  const currentChordPcs = (chords[currentSeg] && chords[currentSeg].tones) ? chords[currentSeg].tones.map(pcOf) : [];
-  const isNCT = currentChordPcs.length > 0 && !currentChordPcs.includes(targetPc);
+  const currentChord = chords[currentSeg];
+  const currentChordPcs = (currentChord && currentChord.tones) ? currentChord.tones.map(pcOf) : [];
+  const currentScaleSteps = (STATE && STATE.scaleName && SCALES[STATE.scaleName]) ? SCALES[STATE.scaleName] : SCALES.Ionian;
+  const currentScalePcs = currentScaleSteps.map(o => (((STATE && STATE.root != null ? STATE.root : 0) + o) % 12));
+  const currentFit = fitClass(targetPc, currentChordPcs, currentScalePcs, currentChord ? currentChord.rootPc : null, currentChord ? currentChord.quality : null);
+
+  // In jazz/fusion & counterpoint: Tiers 2, 3, 4 are harmonic targets (tensions, guide tones, roots/5ths)
+  // Only Tiers 0 and 1 (passing/avoid/outliers) require stepwise resolution into a chord tone at t+1
+  const isNCT = currentFit < 2;
   const isLargeLeap = absDp >= 5;
 
   const nextChordPcs = nextChord.tones.map(pcOf);
+  const nextScalePcs = currentScalePcs;
 
   for (let k = 0; k < candsNext.length; k++) {
     const nextP = candsNext[k];
@@ -2867,9 +2938,10 @@ function evaluateLookaheadMove(candPitch, voiceIdx, stepIndex, totalSteps, chord
       if (evalNext.combinedCost < minNextCost) minNextCost = evalNext.combinedCost;
 
       const nextPc = pcOf(nextP);
-      const isNextChordTone = nextChordPcs.includes(nextPc);
+      const nextFit = fitClass(nextPc, nextChordPcs, nextScalePcs, nextChord.rootPc, nextChord.quality);
+      const isNextHarmonicTone = nextFit >= 2;
 
-      if (absNextDp <= 2 && isNextChordTone) {
+      if (absNextDp <= 2 && isNextHarmonicTone) {
         hasStepwiseChordResolution = true;
       }
 
@@ -4374,11 +4446,11 @@ function latticeReadout(f){
   let axisDetails = [];
   if (set === 'move') {
     // coords: [psi, mu_m, gamma_m, sigma_m, phi_m]
-    const psiStr = ['NCT / Chromatic Approach', 'Diatonic Scale Extension', 'Essential Chord / Guide Tone'][coords[0]] || 'Diatonic';
+    const psiStr = ['Avoid / Foreign Outlier', 'Melodic Scale / Passing', 'Harmonic Target (Root/Guide/Extension)'][coords[0]] || 'Diatonic';
     const muStr  = ['Hold (0st)', 'Stepwise (1-2st)', 'Small Leap (3-4st)', 'Large Leap (>=5st)', 'Leap Recovery / Resolution'][coords[1]] || 'Step';
     const gammaStr = ['Similar Parallel Motion', 'Oblique Motion', 'Contrary Motion'][coords[2]] || 'Oblique';
     const sigmaStr = ['Structural Beat (1,3,5,7)', 'Passing Beat (2,4,6,8)'][coords[3]] || 'Beat';
-    const phiStr   = ['NCT / Chromatic Foreign', 'Diatonic Scale Tone', 'Essential Chord / Guide Tone'][coords[4]] || 'Chord Tone';
+    const phiStr   = ['Avoid Tone / Foreign Outlier', 'Melodic Scale / Passing', 'Harmonic Target (Root/Guide/Tension)'][coords[4]] || 'Chord Tone';
 
     axisDetails = [
       `<b>Departure Context (ψ):</b> ${coords[0]} (${psiStr})`,
@@ -4402,12 +4474,13 @@ function latticeReadout(f){
     ];
   } else if (set === 'voice') {
     // coords: [kappa, mu, phi, sigma, gamma]
+    const phiVoiceStr = ['Avoid Tone / Foreign', 'Melodic Scale / Passing', 'Color Extension / Tension (9,#11,13)', 'Guide Tone (3rd/7th)', 'Foundation (Root/5th)'][coords[2]] || 'Fit';
     axisDetails = [
-      `<b>Voice Agreement (κ):</b> ${coords[0]}`,
+      `<b>Voice Agreement (κ):</b> ${coords[0]} (${coords[0]} consonances)`,
       `<b>Leap Class (μ):</b> ${coords[1]}`,
-      `<b>Fit Taxonomy (φ):</b> ${coords[2]}`,
-      `<b>Metric Accent (σ):</b> ${coords[3]}`,
-      `<b>Relative Motion (γ):</b> ${coords[4]}`
+      `<b>Fit Taxonomy (φ):</b> ${coords[2]} (${phiVoiceStr})`,
+      `<b>Metric Accent (σ):</b> ${coords[3]} (${coords[3] === 0 ? 'Structural' : 'Passing'})`,
+      `<b>Relative Motion (γ):</b> ${coords[4]} (${coords[4] === 0 ? 'Similar' : coords[4] === 1 ? 'Oblique' : 'Contrary'})`
     ];
   } else {
     // chord coords: [d, tau, rho, eta]
@@ -4708,7 +4781,7 @@ function rollNoteAt(mx,my){
 const VOICE_WORDS = {
   kappa:['agrees with neither of the others','agrees with one','agrees with both'],
   mu:['a leap down','a step down','repeats','a step up','a leap up'],
-  phi:['foreign chromatic','non-chord diatonic','extended/borrowed tone','diatonic chord tone','essential chord root'],
+  phi:['avoid tone / foreign ungrounded','melodic scale / chromatic passing tone','available color extension / tension (9, ♯11, 13)','guide tone / essential chord tone (3rd, 7th)','foundation (acoustic root / fifth)'],
   sigma:['structural','passing'],
   gamma:['moves with the others','others hold','moves against the others'],
 };
