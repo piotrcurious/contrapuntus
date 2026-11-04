@@ -1,68 +1,72 @@
-# Contrapunctus Rework 2B3-Moves: 5D Movement Phase Rule Space Architecture
+# Contrapunctus Rework 2B3-Moves: 5D Movement Phase Rule Space & Neurocognitive Dynamic Rule Transmutation
 
 ## Overview
 `rework2b3-moves/contrapunctus-3.html` implements a major paradigm shift in the Contrapunctus cellular automaton composition engine:
-Transitioning from **static tone filtering** ("which notes are allowed in abstract?") to an endogenous **Movement Phase Rule Space** ("how recent board situations influence the next possible contrapuntal movements").
+Transitioning from **static tone filtering** ("which notes are allowed in abstract?") to an endogenous **Movement Phase Rule Space governed by Neurocognitive Dynamic Rule Transmutation** ("how recent board situations, multi-step expectations, and auditory scene dynamics influence the next possible contrapuntal movements by dynamically transmuting the rule manifolds").
 
 ---
 
 ## Core Innovations & Subsystems
 
 ### 1. 5D Movement Phase Rule Space (`MOVE_AXES`)
-The movement rule space maps Voice-Leading Movement Phase across a 5D discrete lattice containing 270 cells ($3 \times 5 \times 3 \times 2 \times 3$):
+The movement rule space maps Voice-Leading Movement Phase across a 5D discrete hypercube lattice $\mathcal{M} = \psi \times \mu_m \times \gamma_m \times \sigma_m \times \phi_m$ (3 × 5 × 3 × 2 × 3 = 270 cells):
+- **$\psi$ (Departure Context / Direction, 3 values):**
+  - `0`: Avoid / foreign departure
+  - `1`: Scale tone / passing motion
+  - `2`: Harmonic target departure (root, guide tone, color tension)
+- **$\mu_m$ (Movement Step Class, 5 values):**
+  - `0`: Hold / unison repetition ($0\text{ st}$)
+  - `1`: Half-step motion ($1\text{ st}$)
+  - `2`: Whole-step motion ($2\text{ st}$)
+  - `3`: Small leap / skip ($3\text{--}4\text{ st}$)
+  - `4`: Large leap ($>4\text{ st}$) requiring resolution/recovery
+- **$\gamma_m$ (Relative Voice Motion, 3 values):**
+  - `0`: Similar motion
+  - `1`: Oblique motion (one voice holds, other moves)
+  - `2`: Contrary motion (classical ideal)
+- **$\sigma_m$ (Metric Beat Accent, 2 values):**
+  - `0`: Structural metric downbeat (accented)
+  - `1`: Passing metric offbeat (unaccented)
+- **$\phi_m$ (Target Fit Class, 3 values):**
+  - `0`: Avoid / foreign tone
+  - `1`: Scale tone / passing tone
+  - `2`: Harmonic target (root, 3rd/7th guide tone, 9th/11th/13th color tension)
 
-$$\mathcal{M} = \psi \times \mu_m \times \gamma_m \times \sigma_m \times \phi_m$$
+### 2. 4D Temporal Rule Space (`TIME_AXES`)
+The temporal rule space captures rhythmic duration and subdivision $\mathcal{T} = m_\text{pos} \times m_\text{sub} \times d_\text{dur} \times s_\text{sync}$ (4 × 3 × 3 × 2 = 72 cells):
+- **$m_\text{pos}$ (Metric Bar Position, 4 values):** Quarter-bar division ($1\text{st}, 2\text{nd}, 3\text{rd}, 4\text{th}$ beat).
+- **$m_\text{sub}$ (Subdivision Level, 3 values):** On-beat (0), eighth subdivision (1), sixteenth subdivision (2).
+- **$d_\text{dur}$ (Duration Class, 3 values):** Staccato short (0), normal sustained (1), legato extended (2).
+- **$s_\text{sync}$ (Syncopation State, 2 values):** Straight (0) vs syncopated offbeat onset (1).
 
-- **$\psi$ (Departure Context):** `0`: NCT/Chromatic, `1`: Diatonic Extension, `2`: Chord/Guide Tone.
-- **$\mu_m$ (Movement Step Class):** `0`: Hold ($0\text{st}$), `1`: Step ($1\text{--}2\text{st}$), `2`: Small Leap ($3\text{--}4\text{st}$), `3`: Large Leap ($\ge 5\text{st}$), `4`: Resolution/Recovery.
-- **$\gamma_m$ (Relative Voice Motion):** `0`: Similar, `1`: Oblique, `2`: Contrary.
-- **$\sigma_m$ (Metric Accent):** `0`: Structural Beat ($1, 3, 5, 7$), `1`: Passing Off-Beat ($2, 4, 6, 8$).
-- **$\phi_m$ (Target Fit Class):** `0`: Foreign/Chromatic, `1`: Diatonic Extension, `2`: Essential Harmonic Chord/Guide Tone.
+### 3. Neurocognitive Predictive Coding & Dynamic Rule Transmutation (`CognitiveStateTracker`)
+Rather than relying on static filters or ad-hoc sorting fudge factors, the composition engine models the cognitive listening and expectation process across multiple steps:
+- **Melodic Expectation Gradients ($E_v$):** Implements Narmour's Implication-Realization model. Small stepwise motions ($1\text{--}2\text{ st}$) build directional continuation momentum ($E_v \to \pm 1$), while large leaps ($>4\text{ st}$) trigger reversal expectations ($E_v \to \mp 0.8$).
+- **Trans-Step Gap-Fill Debt ($G_v$):** When a voice takes a large leap, a multi-step gap-fill obligation $G_v$ is registered with a required reverse direction and remaining semitone debt. Subsequent steps prioritize stepwise filling of the octave/fifth gap.
+- **Trans-Step Dissonance Resolution Obligations ($O_v$):** Dissonant passing or suspension tones obligate stepwise resolution to a consonant interval on the subsequent beat.
+- **Rule Transmutation Operator (`transmuteRuleSpace`):** On every decision step, the base Movement and Voice rule spaces are dynamically transformed ($T_M, T_V$). Allowed cell manifolds expand or contract in response to $E_v, G_v, O_v$, making expectation fulfillment and gap resolution intrinsic to the rule space rather than an external check.
 
-### 2. Non-Linear $L_p$ Norm Cost Surface ($p=3.0$) & Cross-Axis Coupling
-Rule space costs (`cellCost`) utilize a non-linear $L_p$ p-norm ($p=3.0$) combined with cross-axis coupling penalties:
+### 4. Non-Linear $L_p$ Metric Tensor Cost Surfaces & Coupling
+Cell costs in Movement Space are evaluated via a non-linear $p$-norm ($p=3.0$) with cross-axis penalty coupling:
+$$C(c) = \left( \sum_{i} w_i |x_i - x_i^\text{ideal}|^p + \text{coupling}(c) \right)^{1/p}$$
+- Leaps into dissonant unaccented targets incur exponential compound penalties.
+- Accented structural contrary motion into guide tones achieves minimal cost.
 
-$$C(\mathbf{c}) = \left( \sum_{i} \Big( w_i \cdot (1 - \text{aff}[c_i]) \Big)^p \right)^{1/p} + P_{\text{coupling}}(\mathbf{c})$$
+### 5. Multi-Step Lookahead Simulation (`evaluateLookaheadMove`)
+Candidate moves in `pickNote` and `pickEnhancedBassNote` evaluate a step $t+1$ lookahead projection:
+- Simulates subsequent step $t+1$ under incoming chord changes.
+- Identifies dead-end paths that would force inevitable parallel octaves/fifths or voice collisions.
+- Integrates path lookahead cost into the unified candidate evaluation:
+  $$C_\text{total} = C_\text{flow} + C_M + 0.8 C_V + 0.4 C_T + C_\text{lookahead}$$
 
-This prevents single-axis failures (e.g. leaping from a non-chord tone or landing on a downbeat dissonance) from leaking into early $\lambda$ sublevel sets, guaranteeing that only well-balanced, species-compliant moves unlock first.
-
-### 3. Multi-Step Lookahead Pathfinding (`evaluateLookaheadMove`) & Dead-End Pruning
-Voice walks (`runVoiceWalk`, `pickNote`, `pickEnhancedBassNote`) incorporate a multi-step lookahead engine that simulates step $t+1$ for every candidate move at step $t$:
-- **Dead-End Pruning:** Candidates at step $t$ that lead to 0 legal moves or species counterpoint singularities at step $t+1$ are discarded.
-- **Temporal Resolution Enforcement:** Passing/neighbor non-chord tones ($\phi_m < 2$) at step $t$ are discarded unless step $t+1$ has a valid stepwise resolution to a chord tone ($\phi_{m, t+1} \ge 2$).
-- **Leap Recovery Enforcement:** Large leaps ($\ge 5\text{st}$) at step $t$ are discarded unless step $t+1$ has a valid stepwise recovery in the opposite direction.
-
-### 4. Strict Structural Beat Vertical Consonance Rules
-On structural downbeats ($\sigma_m = 0$):
-- **Bass Voice:** Required to land on essential chord tones or roots ($\phi_m \ge 2$).
-- **Upper Voices:** Required to form consonant vertical intervals above the bass ($3\text{rds}, 5\text{ths}, 6\text{ths}, 8\text{ves}$) unless prepared as a suspension ($\psi = 2$). Second, fourth (above bass), seventh, and tritone dissonances on downbeats are strictly prohibited.
-
-### 5. Supervisory Macro-Governance Engine (`evaluateSupervisorySpace`)
-Supervises macro-phrase trajectories over exposition, development, climax, and resolution stages:
-- **Paradigms:** `Classical`, `Jazz`, `Hybrid`.
-- **Guide-Tone & Enclosure Guidance:** Enforces 3rd $\leftrightarrow$ 7th voice-leading resolution vectors and chromatic enclosures.
-- **Dynamic Parameter Modulation:** Dynamically modulates legal rule fractions ($\lambda_C, \lambda_V, \lambda_M$) along the phrase arc.
-
-### 6. Topological Fiber Bundle & Voice-Leading Orbifold Intersections
-Implements formal cross-space fiber bundle projections and voice-leading orbifold geodesic distance metrics ($D_\text{orb}$):
-
-$$\pi_{\mathcal{M} \to \mathcal{V}}: \mathcal{M}(\psi, \mu_m, \gamma_m, \sigma_m, \phi_m) \longrightarrow \mathcal{V}(\kappa, \mu, \phi, \sigma, \gamma)$$
-$$\pi_{\mathcal{V} \to \mathcal{C}}: \mathcal{V}(\kappa, \mu, \phi, \sigma, \gamma) \longrightarrow \mathcal{C}(d, \tau, \rho, \eta)$$
-
-Computes pullback Kronecker tensor intersections in real-time, rendered as 3D geodesic trajectory vectors and fiber bundle density overlays on `#latticeCanvas` and `#ringCanvas`.
-
-### 7. Algebraic Rule Rings (`evaluateAlgebraicRuleRing`)
-Combines rule generators ($R_\text{cpt}, R_\text{modal}, R_\text{saddle}, R_\text{topo}$) via composable ring operators over $\mathbb{F}_2^N$:
-- **Cadential Intersection ($\land$)**
-- **Harmonic Symmetry Union ($\lor$)**
-- **Non-Commutative Product ($\circ$)**
-- **Fusion Synthesis ($\odot$)**
+### 6. Strict Vertical Consonance Option A & Extended Jazz/Modal Vocabulary
+- **Option A Consonance:** Structural beats require strict vertical consonance against the bass (3rds, 5ths, 6ths, 8ves, and consonant color extensions 9ths/#11ths), yielding 0.0% unconditioned vertical dissonances.
+- **Circle of Fifths Progression:** Repairs algebraic rule ring product operators to ensure natural, functional harmonic movement across modal interchange and secondary dominants (`Imaj7 -> IVmaj7 -> ii7 -> V7`).
+- **Melodic Arch Balance:** Combines Huron's pitch proximity model with Narmour's implication-realization to produce singable, smooth contrapuntal contours (over 80% steps/thirds).
 
 ---
 
-## Visualization Dashboards
-- **`#latticeCanvas` (Three.js / WebGL / 2D Canvas Fallback):** 3D Rule Hypercube, Cost Cuts, Fiber Trajectories, Hover & Link Highlights.
-- **`#ringCanvas`:** Live Algebraic Ring Closures & Fiber Bundle Pullback Density Bars.
-- **`#supCanvas`:** Macro Energy Arc, Formal Phrase Stages, and Dynamic $\lambda_M$ Curves.
-- **`#rollCanvas` & `#seqCanvas`:** Piano Roll Score and Multi-Voice Sequencer Lanes.
-- **`#envCanvas` & `#basinCanvas`:** Interactive ADSR Envelope Editor and Starting State Basin Map.
+## Interactive Controls & UI
+- **4-Space Selector (`#selSpace`):** Toggle active editing across `CHORD`, `VOICE`, `MOVE`, and `TIME` spaces.
+- **Density & Profile Sliders (`#sLamM`, `#sLamT`, `#profM`, `#profT`):** Adjust rule space threshold densities and preset profile weightings in real-time.
+- **Live 3D & 2D Lattice Projections:** Real-time visual feedback of active rule space cells, multi-space trajectory paths, and dynamic rule-space transmutations.

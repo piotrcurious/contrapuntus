@@ -1641,6 +1641,213 @@ function evaluateEndogenousRule(segIdx, totalSegments, recentChords, baseTable) 
 }
 
 /* =========================================================================
+   2B. NEUROCOGNITIVE PREDICTIVE CODING & DYNAMIC RULE-SPACE TRANSMUTATION
+   =========================================================================
+   Shifts the paradigm from "filtering possible tones" to:
+   "how recent board situation and multi-step expectations causally influence
+    the next possible movements by dynamically transmuting the rule manifolds."
+   ========================================================================= */
+
+class CognitiveStateTracker {
+  constructor() {
+    this.reset();
+  }
+
+  reset() {
+    // Per-voice dynamic state:
+    // E_v: Melodic expectation gradient / directional momentum (-1 to +1)
+    // G_v: Gap-fill debt / unfulfilled leap obligation { pending: bool, targetDir: number, remainingDist: number, stepsActive: number }
+    // O_v: Trans-step dissonance obligation { type: 'suspension'|'passing'|'neighbor'|null, prepPitch: null, resDir: 0 }
+    // history: rolling moves
+    this.voices = [
+      { E: 0, G: { pending: false, targetDir: 0, remainingDist: 0, stepsActive: 0 }, O: null, history: [] },
+      { E: 0, G: { pending: false, targetDir: 0, remainingDist: 0, stepsActive: 0 }, O: null, history: [] },
+      { E: 0, G: { pending: false, targetDir: 0, remainingDist: 0, stepsActive: 0 }, O: null, history: [] }
+    ];
+    this.pitchPriors = new Array(12).fill(1 / 12);
+  }
+
+  recordMove(voiceIdx, fromPitch, toPitch, isConsonantWithBass) {
+    const v = this.voices[voiceIdx];
+    if (!v) return;
+
+    if (fromPitch != null && toPitch != null) {
+      const dp = toPitch - fromPitch;
+      const absDp = Math.abs(dp);
+
+      // 1. Update Directional Expectation Gradient (Narmour Implication-Realization)
+      if (absDp <= 2 && absDp > 0) {
+        // Stepwise motion implies continuation in same direction (process)
+        v.E = 0.7 * v.E + 0.3 * Math.sign(dp);
+      } else if (absDp >= 4) {
+        // Large leap implies reversal (reversal expectation)
+        v.E = -0.8 * Math.sign(dp);
+        // Incur gap-fill debt
+        v.G = {
+          pending: true,
+          targetDir: -Math.sign(dp),
+          remainingDist: absDp - 1,
+          stepsActive: 0
+        };
+      } else {
+        // Lateral or unison motion dampens directional expectation
+        v.E *= 0.5;
+      }
+
+      // 2. Trans-step Gap-Fill Debt Service
+      if (v.G && v.G.pending) {
+        v.G.stepsActive++;
+        if (Math.sign(dp) === v.G.targetDir && absDp > 0) {
+          v.G.remainingDist -= absDp;
+          if (v.G.remainingDist <= 0 || v.G.stepsActive >= 4) {
+            v.G.pending = false; // Debt satisfied
+          }
+        } else if (v.G.stepsActive >= 4) {
+          v.G.pending = false; // Decayed obligation
+        }
+      }
+
+      // 3. Trans-step Dissonance Resolution Obligation
+      if (!isConsonantWithBass) {
+        // Voice is currently a non-harmonic tone: obligates stepwise resolution
+        v.O = {
+          type: 'dissonance',
+          prepPitch: fromPitch,
+          dissPitch: toPitch,
+          resDir: dp !== 0 ? Math.sign(dp) : -1 // default step downward resolution
+        };
+      } else if (v.O) {
+        // Was dissonant; did it resolve stepwise?
+        if (absDp <= 2 && absDp > 0) {
+          v.O = null; // Obligation resolved
+        } else {
+          v.O = null;
+        }
+      }
+
+      v.history.push({ from: fromPitch, to: toPitch, dp });
+      if (v.history.length > 8) v.history.shift();
+
+      // Bayesian Prior update
+      const pc = pcOf(toPitch);
+      const lr = 0.12;
+      for (let i = 0; i < 12; i++) {
+        this.pitchPriors[i] = (i === pc) ? (1 - lr) * this.pitchPriors[i] + lr : (1 - lr) * this.pitchPriors[i];
+      }
+    }
+  }
+
+  evaluateExpectationSurprise(toPitch) {
+    const pc = pcOf(toPitch);
+    const prob = Math.max(0.005, this.pitchPriors[pc] || 0.083);
+    return -Math.log2(prob); // Information surprise in bits
+  }
+}
+
+const GLOBAL_COGNITIVE_TRACKER = new CognitiveStateTracker();
+
+/**
+ * Transmutes a Rule Space Table (Move or Voice) dynamically based on the current
+ * neurocognitive state, shifting the manifold of allowed cells.
+ *
+ * @param {Object} baseTable - The base rule table
+ * @param {string} spaceType - 'move' | 'voice'
+ * @param {CognitiveStateTracker} tracker - Current cognitive tracker
+ * @param {number} voiceIdx - Active voice index (0, 1, 2)
+ * @param {number} step - Step index
+ * @returns {Object} Transmuted table with dynamic legality bitmask and adapted costs
+ */
+function transmuteRuleSpace(baseTable, spaceType, tracker, voiceIdx, step) {
+  if (!baseTable || !tracker) return baseTable;
+  const vState = tracker.voices[voiceIdx] || { E: 0, G: { pending: false }, O: null };
+  const size = baseTable.size;
+  const newT = new Uint8Array(baseTable.t);
+  const newCosts = new Float32Array(baseTable.costs);
+
+  if (spaceType === 'move') {
+    // Movement Space coordinates: [psi (3), mu_m (5), gamma_m (3), sigma_m (3), phi_m (2)] = 270 cells
+    // psi: 0=desc, 1=lateral, 2=asc
+    // mu_m: 0=hold, 1=halfstep, 2=wholestep, 3=skip, 4=leap
+    const cellCoords = cellList(axisDims(MOVE_AXES));
+    for (let f = 0; f < size; f++) {
+      const [psi, mu_m, gamma_m, sigma_m, phi_m] = cellCoords[f];
+      let cognitiveFriction = 0.0;
+      let forceAllow = false;
+      let forceDeny = false;
+
+      // Rule Transmutation 1: Gap-fill debt obligates stepwise motion in reverse direction
+      if (vState.G && vState.G.pending) {
+        const expectedPsi = vState.G.targetDir > 0 ? 2 : 0;
+        if (psi === expectedPsi && (mu_m === 1 || mu_m === 2)) {
+          cognitiveFriction -= 1.8;
+          forceAllow = true;
+        } else if (mu_m >= 4 || psi === (expectedPsi === 2 ? 0 : 2)) {
+          cognitiveFriction += 2.5;
+          forceDeny = true;
+        }
+      }
+
+      // Rule Transmutation 2: Directional Expectation (Narmour process vs reversal)
+      if (Math.abs(vState.E) > 0.3) {
+        const favoredPsi = vState.E > 0 ? 2 : 0;
+        if (psi === favoredPsi && (mu_m === 1 || mu_m === 2)) {
+          cognitiveFriction -= 0.6;
+        } else if (psi === (favoredPsi === 2 ? 0 : 2) && mu_m >= 3) {
+          cognitiveFriction += 0.8;
+        }
+      }
+
+      // Rule Transmutation 3: Trans-step Dissonance Resolution
+      if (vState.O) {
+        if (mu_m === 1 || mu_m === 2) {
+          cognitiveFriction -= 1.5;
+          forceAllow = true;
+        } else if (mu_m === 0 || mu_m >= 3) {
+          cognitiveFriction += 4.0;
+          forceDeny = true;
+        }
+      }
+
+      newCosts[f] = Math.max(0, newCosts[f] + cognitiveFriction);
+      if (forceAllow) newT[f] = 1;
+      else if (forceDeny) newT[f] = 0;
+    }
+  } else if (spaceType === 'voice') {
+    // Voice Space coordinates: [kappa (3), mu (5), phi (5), sigma (3), gamma (2)] = 450 cells
+    // kappa: consonance level (0=dissonant, 1=consonant, 2=highly consonant)
+    // phi: 4=root/5th, 3=essential, 2=tension, 1=passing, 0=avoid
+    const cellCoords = cellList(axisDims(VOICE_AXES));
+    for (let f = 0; f < size; f++) {
+      const [kappa, mu, phi, sigma, gamma] = cellCoords[f];
+      let vFriction = 0.0;
+
+      if (vState.O) {
+        if (kappa >= 1 && phi >= 3) {
+          vFriction -= 1.5;
+          newT[f] = 1;
+        } else if (kappa === 0) {
+          vFriction += 3.0;
+          newT[f] = 0;
+        }
+      }
+      newCosts[f] = Math.max(0, newCosts[f] + vFriction);
+    }
+  }
+
+  let legalCount = 0;
+  for (let f = 0; f < size; f++) legalCount += newT[f];
+
+  return Object.assign({}, baseTable, {
+    t: newT,
+    costs: newCosts,
+    legalCount,
+    transmuted: true
+  });
+}
+window.GLOBAL_COGNITIVE_TRACKER = GLOBAL_COGNITIVE_TRACKER;
+window.transmuteRuleSpace = transmuteRuleSpace;
+
+/* =========================================================================
    1. ALGEBRAIC RULE RINGS (TRUE COMPOSITIONALITY)
    ========================================================================= */
 
@@ -2832,7 +3039,7 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const supCtx = (options && options.supCtx) ? options.supCtx : evaluateSupervisorySpace(stepIndex, (STATE.bars || 8) * (STATE.stepsPerBar || 8));
   const [psi, mu_m, gamma_m, sigma_m, phi_m] = flowEval.coords;
   const mF = psi*MS[0] + mu_m*MS[1] + gamma_m*MS[2] + sigma_m*MS[3] + phi_m*MS[4];
-  const mTbl = moveTable(supCtx.modLamM);
+  const mTbl = (options && options.transmutedMoveTbl) ? options.transmutedMoveTbl : moveTable(supCtx.modLamM);
 
   // 2. Temporal Rule Space Cell Coordinates
   const stepsPerBar = STATE.stepsPerBar || 8;
@@ -2897,7 +3104,7 @@ function evalCandidateMove(prevPitch, candPitch, voiceIdx, stepIndex, otherPitch
   const phi_v = fitClass(targetPc, activeChordPcs, activeScalePcs, rootPc, chordQualityValForV);
 
   const vF = vIdx(kappa_v, mu_v, phi_v, sigma_m, gamma_m);
-  const vTbl = voiceTable();
+  const vTbl = (options && options.transmutedVoiceTbl) ? options.transmutedVoiceTbl : ((options && options.tblVoice) ? options.tblVoice : voiceTable());
 
   // UNIFIED 4-SPACE RULE TENSOR EVALUATION: R_eff = R_M && R_T && R_V
   const isMoveLegal = flowEval.valid && (mTbl.t[mF % mTbl.size] === 1) && (tTbl.t[tF % tTbl.size] === 1) && (vTbl.t[vF % vTbl.size] === 1);
@@ -3019,8 +3226,13 @@ function pickNote(cands, ctx){
   const prev2P = ctx.prev2Pitch;
   const prev3P = ctx.prev3Pitch;
 
+  const cogTracker = (ctx && ctx.cognitiveTracker) || GLOBAL_COGNITIVE_TRACKER;
+  const tM_trans = (ctx && ctx.tblMove) ? transmuteRuleSpace(ctx.tblMove, 'move', cogTracker, vIdx, stepIdx) : null;
+  const tV_trans = (ctx && ctx.tblVoice) ? transmuteRuleSpace(ctx.tblVoice, 'voice', cogTracker, vIdx, stepIdx) : null;
+  const evalCtx = Object.assign({}, ctx, { transmutedMoveTbl: tM_trans, transmutedVoiceTbl: tV_trans });
+
   const evaluated = cands.map(m => {
-    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, ctx);
+    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, evalCtx);
     const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
     base.lookahead = look;
     base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
@@ -3128,8 +3340,13 @@ function pickEnhancedBassNote(cands, ctx) {
   const prev3P = ctx.prev3Pitch;
   const { preferredPcs, approachPc, isEnclosure } = ctx;
 
+  const cogTracker = (ctx && ctx.cognitiveTracker) || GLOBAL_COGNITIVE_TRACKER;
+  const tM_trans = (ctx && ctx.tblMove) ? transmuteRuleSpace(ctx.tblMove, 'move', cogTracker, vIdx, stepIdx) : null;
+  const tV_trans = (ctx && ctx.tblVoice) ? transmuteRuleSpace(ctx.tblVoice, 'voice', cogTracker, vIdx, stepIdx) : null;
+  const evalCtx = Object.assign({}, ctx, { transmutedMoveTbl: tM_trans, transmutedVoiceTbl: tV_trans });
+
   const evaluated = cands.map(m => {
-    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, ctx);
+    const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, evalCtx);
     const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
     base.lookahead = look;
     base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
@@ -3237,6 +3454,7 @@ function runVoiceWalk(chords){
   BASS_STATE.lastDirection = 0;
   BASS_STATE.dirCount = 0;
   BASS_STATE.activeDissonance = null;
+  GLOBAL_COGNITIVE_TRACKER.reset();
 
   const tV = voiceTable();
   const tM = moveTable();
@@ -3276,6 +3494,9 @@ function runVoiceWalk(chords){
         prev2Pitch[v]=held[v];
       }
       prevPhi[v]=r.cls.phi;
+      const bassPitch = (v === 2) ? r.pitch : (pitches[2] != null ? pitches[2] : held[2]);
+      const isConsonantWithBass = (v === 2) ? true : (bassPitch != null ? (r.cls && r.cls.kappa >= 1) : true);
+      GLOBAL_COGNITIVE_TRACKER.recordMove(v, held[v], r.pitch, isConsonantWithBass);
       held[v]=r.pitch;
     };
 
@@ -3320,6 +3541,7 @@ function runVoiceWalk(chords){
         tblVoice: tV,
         tblMove: tM,
         supCtx,
+        cognitiveTracker: GLOBAL_COGNITIVE_TRACKER,
         preferredPcs,
         structural: first,
         approachPc: approachTargetPc,
