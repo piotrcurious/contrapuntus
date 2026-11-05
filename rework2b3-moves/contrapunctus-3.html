@@ -4281,8 +4281,35 @@ function audibleRelease(e, L0){
   return Math.max(0.005,e.r) * Math.log(thr/g0)/Math.log(ENV_FLOOR/g0);
 }
 
-function resolveEnv(base, over, span, sps){
-  const e={a:base.a, d:base.d, s:base.s, r:base.r, gate:span*base.gateRatio, custom:false};
+function resolveEnv(base, over, span, sps, figMode, v){
+  let gateRatio = base.gateRatio;
+  let sLevel = base.s;
+  let rTime = base.r;
+  let aTime = base.a;
+  let dTime = base.d;
+
+  // Figure Attractor Envelope Shaping for melody voice (v === 0)
+  if (v === 0 && figMode && figMode !== 'auto') {
+    if (figMode === 'susp' || figMode === 'pedal') {
+      // Suspension and pedal figures hold note-off into next boundary, sustained ringing
+      gateRatio = Math.max(gateRatio, 1.35);
+      sLevel = Math.max(sLevel, 0.75);
+      rTime = Math.max(rTime, 0.45);
+    } else if (figMode === 'arp_up' || figMode === 'arp_dn') {
+      // Arpeggios attract crisp articulation and rapid decay for clarity
+      gateRatio = Math.min(gateRatio, 0.85);
+      dTime = Math.min(dTime, 0.075);
+      rTime = Math.min(rTime, 0.20);
+    } else if (figMode === 'chrom') {
+      // Chromatic passing tones are articulate
+      gateRatio = Math.min(gateRatio, 0.88);
+    } else if (figMode === 'cpt') {
+      // Counterpoint maintains pure legato
+      gateRatio = 0.98;
+    }
+  }
+
+  const e={a:aTime, d:dTime, s:sLevel, r:rTime, gate:span*gateRatio, custom:false};
   if(over) for(const k of ['a','d','s','r','gate']) if(over[k]!=null){ e[k]=over[k]; e.custom=true; }
   e.gate=Math.max(0.03, e.gate);
   e.gateSec=e.gate*sps;
@@ -4302,7 +4329,8 @@ function buildNotes(c){
     for(let s=0;s<total;s++){
       const p=c.pitches[v][s]; if(p==null) continue;
       const span=Math.max(1, nextOn[s]-s);
-      const e=resolveEnv(base, STATE.noteEnv[v+':'+s], span, sps);
+      const fMode = (v === 0 && STATE.melodyFigures) ? STATE.melodyFigures[s] : 'auto';
+      const e=resolveEnv(base, STATE.noteEnv[v+':'+s], span, sps, fMode, v);
       const cents=tuningCents(pcOf(p));
       notes[v].push({v, step:s, pitch:p, cents, fpitch:p+cents/100, e, span, tailSteps:e.tail/sps,
         deco:c.deco[v][s], fell:c.fell[v][s], anchored: v===0 && STATE.anchors[s]!=null});
@@ -5141,6 +5169,15 @@ const MOTION_COLORS = { auto:'#64748b', step:'#3b82f6', leap:'#8b5cf6', hold:'#1
 const FIGURE_MODES = ['auto', 'cpt', 'arp_up', 'arp_dn', 'susp', 'chrom', 'pedal'];
 const FIGURE_LABELS = { auto:'AUT', cpt:'CPT', arp_up:'A▲', arp_dn:'A▼', susp:'SUS', chrom:'CHR', pedal:'PED' };
 const FIGURE_COLORS = { auto:'#475569', cpt:'#0284c7', arp_up:'#16a34a', arp_dn:'#d97706', susp:'#dc2626', chrom:'#9333ea', pedal:'#0d9488' };
+const FIGURE_DESCRIPTIONS = {
+  auto: 'Default counterpoint flow',
+  cpt: 'Strict species contrary/oblique counterpoint',
+  arp_up: 'Ascending chord-tone arpeggio figure with crisp onsets',
+  arp_dn: 'Descending chord-tone arpeggio figure with crisp onsets',
+  susp: 'Suspension figure holding tone over chord change and resolving down by step',
+  chrom: 'Chromatic approach and neighbor passing tone run',
+  pedal: 'Pedal point holding tonic/dominant with sustained ringing envelope'
+};
 
 
 function seqLayout(){
@@ -5296,6 +5333,60 @@ function applyRhythm(fn){
     if(fn===null){ STATE.touched[v]=false; continue; }          // back to following the chord rhythm
     STATE.onsets[v]=fn(total); STATE.touched[v]=true;
     for(let s=0;s<total;s++) if(!STATE.onsets[v][s]){ delete STATE.noteEnv[v+':'+s]; if(v===0) delete STATE.anchors[s]; }
+  }
+}
+
+/**
+ * Applies Melody Figure Guidance attractor dynamics to the rhythmic onsets and envelopes.
+ * Figure attractors actively shape the texture:
+ * - arp_up / arp_dn: Attracts rhythmic subdivisions on the melody lane (onsets on subdivision beats)
+ * - susp: Attracts preparation & suspension onsets and long sustained gate ratio across chord changes
+ * - chrom: Attracts stepwise passing motion onsets
+ * - pedal: Holds pedal anchor tones across bars
+ */
+function applyFigureAttractorToRhythmAndEnvelopes(){
+  const total = STATE.bars * STATE.stepsPerBar;
+  const spb = STATE.stepsPerBar;
+  if (!STATE.melodyFigures || STATE.melodyFigures.length !== total) return;
+  if (!STATE.onsets || !STATE.onsets[0]) return;
+
+  const harmRhythmSteps = STATE.harmonic === 'bar' ? spb : Math.max(1, Math.floor(spb / 2));
+
+  for (let s = 0; s < total; s++) {
+    const fMode = STATE.melodyFigures[s] || 'auto';
+    if (fMode === 'auto') continue;
+
+    const isHarmonicBoundary = (s % harmRhythmSteps === 0);
+    const isBeatAccented = (s % Math.max(1, Math.floor(spb / 4)) === 0);
+
+    if (fMode === 'arp_up' || fMode === 'arp_dn') {
+      // Arpeggio figures attract denser subdivision onsets for melodic runs
+      const subPeriod = Math.max(1, Math.floor(spb / 4));
+      if (s % subPeriod === 0) {
+        STATE.onsets[0][s] = true;
+      }
+    } else if (fMode === 'susp') {
+      // Suspension figure attracts an onset leading into/on the harmonic boundary
+      if (isHarmonicBoundary || ((s + 1) % harmRhythmSteps === 0)) {
+        STATE.onsets[0][s] = true;
+      }
+    } else if (fMode === 'chrom') {
+      // Chromatic passing figures attract passing onsets
+      const halfBeat = Math.max(1, Math.floor(spb / 4));
+      if (s % halfBeat === 0) {
+        STATE.onsets[0][s] = true;
+      }
+    } else if (fMode === 'pedal') {
+      // Pedal figures attract onsets on primary bar beats
+      if (s % spb === 0) {
+        STATE.onsets[0][s] = true;
+      }
+    } else if (fMode === 'cpt') {
+      // Counterpoint attractor ensures rhythmic movement against bass
+      if (s % Math.max(1, Math.floor(spb / 2)) === 0) {
+        STATE.onsets[0][s] = true;
+      }
+    }
   }
 }
 
@@ -5784,16 +5875,49 @@ function renderSeqTools(){
     host.appendChild(mb);
   }
 
-  const fLab=mk('span','aside','figure attractor:'); fLab.style.margin='0 2px 0 8px'; host.appendChild(fLab);
+  const curFigBrush = STATE.activeFigureMode || 'arp_up';
+  const fLab=mk('span','aside','figure brush:'); fLab.style.margin='0 2px 0 8px'; host.appendChild(fLab);
   for(const fMode of FIGURE_MODES){
-    const fb=mk('button','tiny',fMode); fb.type='button'; fb.title='Set melody figure guidance attractor to '+fMode;
+    const isCur = (curFigBrush === fMode);
+    const fb=mk('button','tiny',fMode); fb.type='button';
+    fb.title = (FIGURE_DESCRIPTIONS[fMode] || fMode) + ' (click to select brush; click attractor box in sequencer lane to apply)';
+    if(isCur){
+      fb.style.outline = '2px solid ' + (FIGURE_COLORS[fMode] || '#38bdf8');
+      fb.style.fontWeight = 'bold';
+      fb.style.boxShadow = '0 0 6px ' + (FIGURE_COLORS[fMode] || '#38bdf8');
+    }
+    fb.setAttribute('aria-pressed', String(isCur));
     fb.addEventListener('click', ()=>{
-      const total=STATE.bars*STATE.stepsPerBar;
-      STATE.melodyFigures=new Array(total).fill(fMode);
-      regenerate(); histCommit(); drawSeq();
+      STATE.activeFigureMode = fMode;
+      renderSeqTools();
     });
     host.appendChild(fb);
   }
+  const fFill = mk('button', 'tiny', 'fill all'); fFill.type = 'button';
+  fFill.title = 'Apply current figure brush to all steps in the piece';
+  fFill.addEventListener('click', ()=>{
+    const brush = STATE.activeFigureMode || 'arp_up';
+    const total=STATE.bars*STATE.stepsPerBar;
+    STATE.melodyFigures=new Array(total).fill(brush);
+    applyFigureAttractorToRhythmAndEnvelopes();
+    regenerate(); histCommit(); drawSeq();
+  });
+  host.appendChild(fFill);
+
+  const fBar = mk('button', 'tiny', 'fill bar'); fBar.type = 'button';
+  fBar.title = 'Apply current figure brush to the selected bar';
+  fBar.addEventListener('click', ()=>{
+    const brush = STATE.activeFigureMode || 'arp_up';
+    const b = STATE.selectedBar != null ? STATE.selectedBar : 0;
+    const spb = STATE.stepsPerBar;
+    const total = STATE.bars * spb;
+    if(!STATE.melodyFigures) STATE.melodyFigures = new Array(total).fill('auto');
+    const start = b * spb, end = Math.min(total, (b + 1) * spb);
+    for(let s = start; s < end; s++) STATE.melodyFigures[s] = brush;
+    applyFigureAttractorToRhythmAndEnvelopes();
+    regenerate(); histCommit(); drawSeq();
+  });
+  host.appendChild(fBar);
 
   if(STATE.selectedBar!=null){
     const b=STATE.selectedBar, ov=STATE.barOverrides[b]||{};
@@ -6936,7 +7060,7 @@ function takeFocus(el){
   }catch(e){}
 }
 function bindSeq(){
-  const cv=$('seqCanvas'); let paint=null, tap=null;
+  const cv=$('seqCanvas'); let paint=null, tap=null, figPaint=null;
   cv.addEventListener('pointerdown', e=>{
     const h=seqHit(e); if(!h) return;
     takeFocus(cv);
@@ -6956,11 +7080,16 @@ function bindSeq(){
     }
     if(h.kind==='figure'){
       const cur=(STATE.melodyFigures && STATE.melodyFigures[h.step]) || 'auto';
-      const idx=FIGURE_MODES.indexOf(cur);
-      const nextMode=FIGURE_MODES[(idx+1)%FIGURE_MODES.length];
+      const brush = STATE.activeFigureMode || 'arp_up';
+      const targetMode = (cur === brush) ? 'auto' : brush;
       if(!STATE.melodyFigures) STATE.melodyFigures=new Array(STATE.bars*STATE.stepsPerBar).fill('auto');
-      STATE.melodyFigures[h.step]=nextMode;
-      regenerate(); histCommit(); drawSeq(); return;
+      STATE.melodyFigures[h.step]=targetMode;
+      figPaint = { mode: targetMode };
+      cv.setPointerCapture(e.pointerId);
+      applyFigureAttractorToRhythmAndEnvelopes();
+      scheduleRegenerate(); drawSeq();
+      e.preventDefault();
+      return;
     }
     SEQ.cursor.v=h.v; SEQ.cursor.step=h.step;
     if(e.pointerType==='touch'){ tap={v:h.v, step:h.step, x:e.clientX, y:e.clientY}; return; }      // a drag on a touch screen scrolls
@@ -6968,12 +7097,25 @@ function bindSeq(){
     setOnset(h.v,h.step,paint.value); scheduleRegenerate(); e.preventDefault();
   });
   cv.addEventListener('pointermove', e=>{
+    if(figPaint){
+      const h=seqHit(e);
+      if(h && h.kind==='figure'){
+        if(!STATE.melodyFigures) STATE.melodyFigures=new Array(STATE.bars*STATE.stepsPerBar).fill('auto');
+        if(STATE.melodyFigures[h.step] !== figPaint.mode){
+          STATE.melodyFigures[h.step] = figPaint.mode;
+          applyFigureAttractorToRhythmAndEnvelopes();
+          scheduleRegenerate(); drawSeq();
+        }
+      }
+      return;
+    }
     if(!paint) return;
     const s=seqStepAt(e); if(STATE.onsets[paint.v][s]===paint.value) return;
     setOnset(paint.v,s,paint.value); scheduleRegenerate();
   });
   const end=e=>{
-    if(paint){ paint=null; regenerate(); histCommit(); }
+    if(figPaint){ figPaint=null; regenerate(); histCommit(); drawSeq(); }
+    else if(paint){ paint=null; regenerate(); histCommit(); }
     else if(tap && e.type==='pointerup' && Math.hypot(e.clientX-tap.x,e.clientY-tap.y)<8){
       setOnset(tap.v,tap.step,!STATE.onsets[tap.v][tap.step]); regenerate(); histCommit();
     }
