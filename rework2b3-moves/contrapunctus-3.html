@@ -1767,9 +1767,12 @@ function transmuteRuleSpace(baseTable, spaceType, tracker, voiceIdx, step) {
   const newCosts = new Float32Array(baseTable.costs);
 
   if (spaceType === 'move') {
-    // Movement Space coordinates: [psi (3), mu_m (5), gamma_m (3), sigma_m (3), phi_m (2)] = 270 cells
-    // psi: 0=desc, 1=lateral, 2=asc
-    // mu_m: 0=hold, 1=halfstep, 2=wholestep, 3=skip, 4=leap
+    // Movement Space coordinates: [psi (3), mu_m (5), gamma_m (3), sigma_m (2), phi_m (3)] = 270 cells
+    // psi: departure context (0=avoid/foreign, 1=scale/passing, 2=harmonic target)
+    // mu_m: movement step class (0=hold, 1=step, 2=sm-leap, 3=lg-leap, 4=res/rec)
+    // gamma_m: relative voice motion (0=similar, 1=oblique, 2=contrary)
+    // sigma_m: metric accent (0=structural downbeat, 1=passing subdivision)
+    // phi_m: target fit (0=avoid/foreign, 1=scale/passing, 2=harmonic target)
     const cellCoords = cellList(axisDims(MOVE_AXES));
     for (let f = 0; f < size; f++) {
       const [psi, mu_m, gamma_m, sigma_m, phi_m] = cellCoords[f];
@@ -1777,35 +1780,34 @@ function transmuteRuleSpace(baseTable, spaceType, tracker, voiceIdx, step) {
       let forceAllow = false;
       let forceDeny = false;
 
-      // Rule Transmutation 1: Gap-fill debt obligates stepwise motion in reverse direction
+      // Rule Transmutation 1: Gap-fill debt obligates stepwise recovery / resolution (mu_m === 4 or mu_m === 1)
       if (vState.G && vState.G.pending) {
-        const expectedPsi = vState.G.targetDir > 0 ? 2 : 0;
-        if (psi === expectedPsi && (mu_m === 1 || mu_m === 2)) {
+        if (mu_m === 4 || mu_m === 1) {
           cognitiveFriction -= 1.8;
-          forceAllow = true;
-        } else if (mu_m >= 4 || psi === (expectedPsi === 2 ? 0 : 2)) {
+          if (phi_m >= 1) forceAllow = true;
+        } else if (mu_m >= 2) {
           cognitiveFriction += 2.5;
-          forceDeny = true;
+          if (mu_m === 3) forceDeny = true; // Forbid compounding large leaps while debt is pending
         }
       }
 
-      // Rule Transmutation 2: Directional Expectation (Narmour process vs reversal)
+      // Rule Transmutation 2: Directional Expectation & Step Continuity
       if (Math.abs(vState.E) > 0.3) {
-        const favoredPsi = vState.E > 0 ? 2 : 0;
-        if (psi === favoredPsi && (mu_m === 1 || mu_m === 2)) {
-          cognitiveFriction -= 0.6;
-        } else if (psi === (favoredPsi === 2 ? 0 : 2) && mu_m >= 3) {
-          cognitiveFriction += 0.8;
+        if (mu_m === 1 || mu_m === 4) {
+          cognitiveFriction -= 0.6; // Support continuous melodic flow
+        } else if (mu_m === 3) {
+          cognitiveFriction += 0.8; // Inertial resistance to wild leap oscillation
         }
       }
 
       // Rule Transmutation 3: Trans-step Dissonance Resolution
+      // Non-chord tones and suspensions obligate resolution (mu_m === 4) to harmonic targets (phi_m === 2)
       if (vState.O) {
-        if (mu_m === 1 || mu_m === 2) {
-          cognitiveFriction -= 1.5;
+        if ((mu_m === 4 || mu_m === 1) && phi_m === 2) {
+          cognitiveFriction -= 2.0;
           forceAllow = true;
-        } else if (mu_m === 0 || mu_m >= 3) {
-          cognitiveFriction += 4.0;
+        } else if (mu_m === 0 || mu_m >= 2) {
+          cognitiveFriction += 3.5;
           forceDeny = true;
         }
       }
@@ -2778,8 +2780,8 @@ function computeBoardState(voicesPitches, stepIndex) {
   }
 
   const stepsPerBar = STATE.stepsPerBar || 8;
-  const beatPeriod = Math.max(1, Math.floor(stepsPerBar / 4));
-  const isStructuralBeat = (stepIndex % beatPeriod === 0);
+  const halfBar = Math.max(1, Math.floor(stepsPerBar / 2));
+  const isStructuralBeat = (stepIndex % halfBar === 0);
   const metricPhase = isStructuralBeat ? 0 : 1; // 0 = structural beat, 1 = passing off-beat
 
   return {
@@ -2823,10 +2825,15 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
 
     const prevScalePcs = (options && options.scalePCs) ? options.scalePCs.map(pcOf) : [0,2,4,5,7,9,11];
 
-    if (depChordPcs.length > 0) {
+    if (options && options.prevPhi != null) {
+      // Direct provenance from previously evaluated voice cell fit class
+      if (options.prevPhi >= 3) psi = 2; // Essential chord tone (root/5th/guide tone)
+      else if (options.prevPhi >= 1) psi = 1; // Passing scale / tension connector
+      else psi = 0; // Avoid / outlier
+    } else if (depChordPcs.length > 0) {
       const depFit = fitClass(prevPc, depChordPcs, prevScalePcs, depRootPc, depQuality);
-      if (depFit >= 2) psi = 2;      // Departing from Harmonic Tone (Root, 5th, Guide Tone, or Available Extension)
-      else if (depFit === 1) psi = 1; // Departing from Melodic Scale / Passing Tone
+      if (depFit >= 3) psi = 2;      // Departing from Essential Chord Tone (Root, 5th, Guide Tone)
+      else if (depFit >= 1) psi = 1; // Departing from Melodic Scale / Color Tension
       else psi = 0;                  // Departing from Non-Chord / Avoid / Outlier Tone
     } else {
       psi = 2;
@@ -2857,8 +2864,8 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
     const isPrevLeap = (prevLeapMomentum != null && Math.abs(prevLeapMomentum) >= 3);
     if (isPrevLeap && (prevLeapMomentum * dp < 0)) {
       mu_m = 4; // Stepwise leap recovery
-    } else if (isDepartureVoiceDissonant || psi === 0) {
-      mu_m = 4; // Stepwise resolution of dissonance / NCT
+    } else if (isDepartureVoiceDissonant || psi <= 1) {
+      mu_m = 4; // Stepwise resolution of dissonance / passing NCT
     } else {
       mu_m = 1; // Normal step
     }
@@ -2978,6 +2985,21 @@ function evaluateTangentMovementVector(boardState, moveVector, voiceIdx, prevLea
     kineticInertia += 0.05 * absDp; // Prefer stepwise motion
   } else {
     kineticInertia += absDp * 0.15; // Moderate leap inertia
+  }
+
+  // Constraint F: Cross-Relation & Semitone Clash Barrier against Active Chord Tones
+  if (activeChordPcs.length > 0 && !activeChordPcs.includes(targetPc)) {
+    const clashesChordTone = activeChordPcs.some(pct => {
+      const d = Math.abs(targetPc - pct);
+      return d === 1 || d === 11;
+    });
+    if (clashesChordTone) {
+      if (sigma_m === 0 || absDp > 2) {
+        return { valid: false, cost: 982, coords: [psi, mu_m, gamma_m, sigma_m, phi_m], reason: 'Singularity: Semitone Clash against Active Chord Tone' };
+      }
+      // Passing semitone proximity to chord tones carries friction
+      kineticInertia += 1.5;
+    }
   }
 
   // Energy Release & Dissonance Resolution Gradient
