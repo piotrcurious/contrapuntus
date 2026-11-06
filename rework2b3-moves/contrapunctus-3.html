@@ -720,15 +720,15 @@ details.fold[open] > summary::before{content:"\2013 ";}
     </section>
 
 
-        <!-- Plate: Secondary Composition Toolkit (Tie-Breaking Rules) -->
+        <!-- Plate: Secondary Composition Toolkit (Tie-Breaking Rules & Decision Inspection) -->
     <section class="plate" aria-labelledby="hTie">
       <div class="heading">
-        <h2 id="hTie">Secondary Composition Toolkit (Tie-Breaking Rules)</h2>
-        <div class="tools"><span class="readout" id="tieExprRead">Mode: Weighted Rule Domain</span></div>
+        <h2 id="hTie">Secondary Composition Toolkit (Tie-Breaking &amp; Decision Inspector)</h2>
+        <div class="tools"><span class="readout" id="tieExprRead">Mode: Dynamic Context Hierarchy</span></div>
       </div>
       <div class="split">
-        <div>
-          <div style="display:flex; gap:16px; margin-top:4px; align-items:center; flex-wrap:wrap;">
+        <div style="flex:1">
+          <div style="display:flex; gap:14px; margin-top:4px; align-items:center; flex-wrap:wrap;">
             <label>Mode:
               <select id="selTieMode">
                 <option value="contextual" selected>Dynamic Context Hierarchy</option>
@@ -736,31 +736,65 @@ details.fold[open] > summary::before{content:"\2013 ";}
                 <option value="tiered">Strict Tiered Hardcoded</option>
               </select>
             </label>
-            <label>Motion Penalty Weight:
+            <label>Motion Penalty:
               <input type="range" id="sTieMotion" min="0" max="200" value="100">
               <span id="nTieMotion">1.00</span>
             </label>
-            <label>Voice Leading Weight:
+            <label>Voice Leading:
               <input type="range" id="sTieVoice" min="0" max="200" value="100">
               <span id="nTieVoice">1.00</span>
             </label>
-            <label>Rule Cost Weight:
+            <label>Rule Cost:
               <input type="range" id="sTieCost" min="0" max="200" value="100">
               <span id="nTieCost">1.00</span>
             </label>
-            <label>Circle of 5ths Bonus:
+            <label>Circle of 5ths:
               <input type="range" id="sTieFifths" min="0" max="200" value="50">
               <span id="nTieFifths">0.50</span>
             </label>
-            <label>Cadential Goal Weight:
-              <input type="range" id="sTieGoal" min="0" max="200" value="50">
-              <span id="nTieGoal">0.50</span>
+            <label>Cadence Urgency:
+              <input type="range" id="sTieGoal" min="0" max="300" value="150">
+              <span id="nTieGoal">1.50</span>
+            </label>
+            <label>Cognitive Debt Bias:
+              <input type="range" id="sTieDebt" min="0" max="300" value="180">
+              <span id="nTieDebt">1.80</span>
+            </label>
+            <label>Contrary Motion Affinity:
+              <input type="range" id="sTieContrary" min="0" max="200" value="120">
+              <span id="nTieContrary">1.20</span>
+            </label>
+            <label>Anti-Stagnation Drive:
+              <input type="range" id="sTieStagnation" min="0" max="200" value="140">
+              <span id="nTieStagnation">1.40</span>
             </label>
           </div>
-          <div class="readout" id="tieStat" style="margin-top:12px">Tie-breaking weights dynamically modify candidate move priority in the rule domain.</div>
+          <div class="readout" id="tieStat" style="margin-top:10px">Contextual hierarchy dynamically derives candidate weights from phrase position, gap debt, and voice leading.</div>
         </div>
-        <figcaption>Customize tie-breaking rules and weights to control how candidate transitions are prioritized in the composition engine.</figcaption>
       </div>
+
+      <div class="split" style="margin-top:14px; gap:16px;">
+        <div style="flex:1;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span class="readout" style="font-weight:600">Candidate Decision Inspector (Active Transition)</span>
+            <span class="readout" id="tieInspectorHeader" style="color:var(--ink-dim)">Selected Chord: I△7 &rarr; IV△7</span>
+          </div>
+          <div class="figure" style="margin-top:0">
+            <canvas id="tieDecisionCanvas" style="height:170px; width:100%; border:1px solid var(--rule-soft); border-radius:4px;" role="img" aria-label="Candidate score bar chart showing Pareto rankings, tie-breaker penalties, and selected chord successor"></canvas>
+          </div>
+        </div>
+
+        <div style="flex:1;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span class="readout" style="font-weight:600">Neurocognitive Expectation &amp; Movement Debt</span>
+            <span class="readout" id="cogTrackerHeader" style="color:var(--ink-dim)">Narmour Momentum &amp; Resolution Debt</span>
+          </div>
+          <div class="figure" style="margin-top:0">
+            <canvas id="cogTrackerCanvas" style="height:170px; width:100%; border:1px solid var(--rule-soft); border-radius:4px;" role="img" aria-label="Visual telemetry displaying per-voice Narmour expectation momentum, leap gap-fill debt, dissonance obligations, and Bayesian surprise"></canvas>
+          </div>
+        </div>
+      </div>
+      <figcaption>Interactive visual inspector of candidate arbitration and neurocognitive movement dynamics. Select any chord in the score to inspect its competing candidate scores and active cognitive debt.</figcaption>
     </section>
 
     <!-- Plate: Hierarchical State Space Expansion & Supervisory Macro Governance -->
@@ -1281,7 +1315,7 @@ function defaultVoiceEnv(v){
 }
 
 const STATE = {
-  tieRules: { wMotion: 1.0, wVoice: 1.0, wCost: 1.0, wFifths: 0.5, wGoal: 0.5, mode: 'contextual' },
+  tieRules: { wMotion: 1.0, wVoice: 1.0, wCost: 1.0, wFifths: 0.5, wGoal: 1.5, wDebt: 1.8, wContrary: 1.2, wStagnation: 1.4, mode: 'contextual' },
   root:0, scaleName:'Ionian',
   bars:8, stepsPerBar:8, lastStepsPerBar:8, harmonic:'bar',
   tempo:96, tension:0.30,
@@ -1528,6 +1562,9 @@ function renderExpansionUI() {
 
   drawSupervisoryDashboard();
   drawRingDashboard();
+  drawTieDecisionInspector();
+  drawCognitiveDashboard();
+
   const trackerEl = document.getElementById('phraseTrackerRead');
   if (trackerEl) {
     const totalSegs = (c && c.segments) ? c.segments : K;
@@ -1539,6 +1576,232 @@ function renderExpansionUI() {
       `Phrase Progress: ${(pCtx.progress * 100).toFixed(1)}%<br>` +
       `Harmonic Goal Target: <strong>${pCtx.harmonicGoal.toUpperCase()}</strong>`;
   }
+}
+
+/* =========================================================================
+   CANDIDATE DECISION INSPECTOR & NEUROCOGNITIVE TELEMETRY CANVASES
+   ========================================================================= */
+
+function drawTieDecisionInspector() {
+  const cv = $('tieDecisionCanvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+
+  const rect = cv.getBoundingClientRect();
+  const W = cv.width = (rect.width || 600) * (window.devicePixelRatio || 1);
+  const H = cv.height = (rect.height || 170) * (window.devicePixelRatio || 1);
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+  const w = rect.width || 600, h = rect.height || 170;
+
+  const dark = THEME && THEME.dark;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)';
+  ctx.fillRect(0, 0, w, h);
+
+  const c = STATE.composed;
+  if (!c || !c.walk || !c.walk.length) return;
+
+  const segIdx = Math.min(Math.max(1, STATE.selectedSeg || 1), c.walk.length - 1);
+  const wSeg = c.walk[segIdx];
+  const prevSeg = c.walk[segIdx - 1];
+
+  const headerEl = $('tieInspectorHeader');
+  if (headerEl && prevSeg && wSeg) {
+    headerEl.textContent = `Segment ${segIdx}: ${prevSeg.chord.roman} (${prevSeg.chord.name}) \u2192 ${wSeg.chord.roman} (${wSeg.chord.name})`;
+  }
+
+  // Evaluate candidate successors from prevSeg.chord
+  const vocab = baseVocab();
+  const tbl = chordTable();
+  const target = targetForSeg(segIdx);
+  const pCtx = getPhraseStructure(segIdx, c.walk.length);
+  const stepRes = chordStep(prevSeg.chord, segIdx > 1 ? c.walk[segIdx - 2].chord : null, prevSeg.etaIn || 1, tbl, vocab, target, pCtx);
+  const cands = stepRes.cands || [];
+
+  if (!cands.length) return;
+
+  const padL = 45, padR = 15, padT = 20, padB = 25;
+  const chartW = w - padL - padR, chartH = h - padT - padB;
+
+  const numItems = Math.min(10, cands.length);
+  const displayCands = cands.slice(0, numItems);
+  const colW = chartW / numItems;
+
+  const scores = displayCands.map((item, idx) => {
+    const isChosen = item.c.key === wSeg.chord.key;
+    return { item, isChosen, rank: idx + 1 };
+  });
+
+  const maxScore = Math.max.apply(null, scores.map((s, idx) => 10 - idx * 0.8)) || 10;
+
+  for (let i = 0; i < scores.length; i++) {
+    const s = scores[i];
+    const x = padL + i * colW + colW * 0.1;
+    const barW = colW * 0.8;
+    const normH = Math.max(0.1, (10 - i * 0.85) / maxScore);
+    const barH = normH * (chartH - 25);
+    const y = padT + (chartH - 25) - barH;
+
+    // Draw Pareto Bar
+    if (s.isChosen) {
+      ctx.fillStyle = dark ? 'rgba(74, 222, 128, 0.85)' : 'rgba(34, 197, 94, 0.85)';
+    } else {
+      ctx.fillStyle = dark ? 'rgba(96, 165, 250, 0.45)' : 'rgba(59, 130, 246, 0.45)';
+    }
+    ctx.fillRect(x, y, barW, barH);
+
+    // Border highlight
+    if (s.isChosen) {
+      ctx.strokeStyle = dark ? '#fff' : '#000';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(x, y, barW, barH);
+    }
+
+    // Label chord name below
+    ctx.font = '10px monospace';
+    ctx.fillStyle = dark ? '#e0e0e0' : '#222';
+    ctx.textAlign = 'center';
+    ctx.fillText(s.item.c.roman, x + barW / 2, h - 10);
+
+    // Fall & cost info above
+    ctx.font = '8.5px monospace';
+    ctx.fillStyle = dark ? '#999' : '#666';
+    const fall = (prevSeg.chord.rootPc - s.item.c.rootPc + 12) % 12;
+    ctx.fillText(fall === 7 ? 'V-I' : `d:${fall}`, x + barW / 2, Math.max(12, y - 4));
+  }
+
+  // Draw axis line
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, padT + chartH - 25);
+  ctx.lineTo(w - padR, padT + chartH - 25);
+  ctx.stroke();
+
+  // Y-axis label
+  ctx.save();
+  ctx.translate(14, padT + chartH / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.font = '9.5px sans-serif';
+  ctx.fillStyle = dark ? '#888' : '#777';
+  ctx.fillText('Rank / Pareto Score', 0, 0);
+  ctx.restore();
+}
+
+function drawCognitiveDashboard() {
+  const cv = $('cogTrackerCanvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+
+  const rect = cv.getBoundingClientRect();
+  const W = cv.width = (rect.width || 600) * (window.devicePixelRatio || 1);
+  const H = cv.height = (rect.height || 170) * (window.devicePixelRatio || 1);
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+  const w = rect.width || 600, h = rect.height || 170;
+
+  const dark = THEME && THEME.dark;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)';
+  ctx.fillRect(0, 0, w, h);
+
+  const c = STATE.composed;
+  if (!c || !c.pitches || !c.pitches[0] || !c.pitches[0].length) return;
+
+  const totalSteps = c.total || 64;
+  const padL = 40, padR = 20, padT = 20, padB = 25;
+  const chartW = w - padL - padR, chartH = h - padT - padB;
+
+  // Simulate cognitive tracker progression across the 64 steps
+  const tracker = new CognitiveStateTracker();
+  const momentumSeries = [[], [], []];
+  const debtSeries = [[], [], []];
+  const surpriseSeries = [];
+
+  for (let s = 0; s < totalSteps; s++) {
+    const p0 = c.pitches[0][s], p1 = c.pitches[1][s], p2 = c.pitches[2][s];
+    const prev0 = s > 0 ? c.pitches[0][s - 1] : null;
+    const prev1 = s > 0 ? c.pitches[1][s - 1] : null;
+    const prev2 = s > 0 ? c.pitches[2][s - 1] : null;
+
+    tracker.recordMove(0, prev0, p0, true);
+    tracker.recordMove(1, prev1, p1, true);
+    tracker.recordMove(2, prev2, p2, true);
+
+    for (let v = 0; v < 3; v++) {
+      momentumSeries[v].push(tracker.voices[v].E);
+      debtSeries[v].push(tracker.voices[v].G && tracker.voices[v].G.pending ? tracker.voices[v].G.remainingDist : 0);
+    }
+    surpriseSeries.push(tracker.evaluateExpectationSurprise(p0));
+  }
+
+  // Draw Voice Momentum curves
+  const voiceColors = [
+    dark ? '#38bdf8' : '#0284c7', // Soprano
+    dark ? '#fbbf24' : '#d97706', // Alto
+    dark ? '#f87171' : '#dc2626'  // Bass
+  ];
+
+  // Draw 0 line
+  const midY = padT + chartH * 0.45;
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(padL, midY);
+  ctx.lineTo(w - padR, midY);
+  ctx.stroke();
+
+  // Draw curves for Voice 0 (Soprano) and Voice 2 (Bass)
+  for (let v of [0, 2]) {
+    ctx.strokeStyle = voiceColors[v];
+    ctx.lineWidth = 1.8;
+    ctx.beginPath();
+    for (let s = 0; s < totalSteps; s++) {
+      const x = padL + (s / (totalSteps - 1)) * chartW;
+      const val = momentumSeries[v][s]; // -1 to 1
+      const y = midY - val * (chartH * 0.35);
+      if (s === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+
+  // Draw Gap-fill debt markers
+  for (let s = 0; s < totalSteps; s++) {
+    const x = padL + (s / (totalSteps - 1)) * chartW;
+    if (debtSeries[0][s] > 0) {
+      ctx.fillStyle = 'rgba(239, 68, 68, 0.7)';
+      ctx.beginPath();
+      ctx.arc(x, padT + 8, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Active step marker
+  const curStep = (typeof STATE.step === 'number' && STATE.step >= 0) ? STATE.step : 0;
+  const curX = padL + (curStep / (totalSteps - 1)) * chartW;
+  ctx.strokeStyle = dark ? '#fff' : '#000';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([3, 3]);
+  ctx.beginPath();
+  ctx.moveTo(curX, padT);
+  ctx.lineTo(curX, padT + chartH);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Legend
+  ctx.font = '9.5px monospace';
+  ctx.fillStyle = voiceColors[0];
+  ctx.textAlign = 'left';
+  ctx.fillText('\u2014 Soprano Momentum (E_0)', padL, h - 8);
+
+  ctx.fillStyle = voiceColors[2];
+  ctx.fillText('\u2014 Bass Momentum (E_2)', padL + 180, h - 8);
+
+  ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
+  ctx.fillText('\u25CF Gap-Fill Debt', padL + 340, h - 8);
 }
 
 function renderTieUI() {
@@ -4082,7 +4345,7 @@ function ruleKey(){
   const tr = STATE.tieRules || {};
   const rr = STATE.ruleRing || {};
   return [STATE.root, STATE.scaleName, STATE.extended?1:0, STATE.tension.toFixed(4), STATE.take,
-          STATE.bars, STATE.stepsPerBar, tr.mode, tr.wMotion, tr.wVoice, tr.wCost, tr.wFifths, tr.wGoal,
+          STATE.bars, STATE.stepsPerBar, tr.mode, tr.wMotion, tr.wVoice, tr.wCost, tr.wFifths, tr.wGoal, tr.wDebt, tr.wContrary, tr.wStagnation,
           rr.enabled?1:0, rr.op, rr.ruleA, rr.ruleB,
           profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
 }
@@ -6508,7 +6771,7 @@ function serializeState(opts){
     tempo:STATE.tempo, tension:r4(STATE.tension), lamC:r4(STATE.lamC), lamV:r4(STATE.lamV), lamM:r4(STATE.lamM), lamT:r4(STATE.lamT!=null?STATE.lamT:0.50), take:STATE.take,
     supervisor:STATE.supervisor ? Object.assign({}, STATE.supervisor) : undefined,
     extended:!!STATE.extended, walkingBass:!!STATE.walkingBass, arp:STATE.arp, tuning:STATE.tuning,
-    tieRules:STATE.tieRules ? { mode:STATE.tieRules.mode, wMotion:r4(STATE.tieRules.wMotion), wVoice:r4(STATE.tieRules.wVoice), wCost:r4(STATE.tieRules.wCost), wFifths:r4(STATE.tieRules.wFifths), wGoal:r4(STATE.tieRules.wGoal) } : undefined,
+    tieRules:STATE.tieRules ? { mode:STATE.tieRules.mode, wMotion:r4(STATE.tieRules.wMotion), wVoice:r4(STATE.tieRules.wVoice), wCost:r4(STATE.tieRules.wCost), wFifths:r4(STATE.tieRules.wFifths), wGoal:r4(STATE.tieRules.wGoal), wDebt:r4(STATE.tieRules.wDebt!=null?STATE.tieRules.wDebt:1.8), wContrary:r4(STATE.tieRules.wContrary!=null?STATE.tieRules.wContrary:1.2), wStagnation:r4(STATE.tieRules.wStagnation!=null?STATE.tieRules.wStagnation:1.4) } : undefined,
     ruleRing:STATE.ruleRing ? { enabled:!!STATE.ruleRing.enabled, op:STATE.ruleRing.op, ruleA:STATE.ruleRing.ruleA, ruleB:STATE.ruleRing.ruleB } : undefined,
     profiles:prof,
     cellFlips:{chord:sortedCopy(STATE.cellFlips.chord), voice:sortedCopy(STATE.cellFlips.voice), move:sortedCopy(STATE.cellFlips.move), time:sortedCopy(STATE.cellFlips.time||{})},
@@ -6583,10 +6846,13 @@ function restoreState(o){
       wVoice: vNum(o.tieRules.wVoice, 0, 5, 1.0),
       wCost: vNum(o.tieRules.wCost, 0, 5, 1.0),
       wFifths: vNum(o.tieRules.wFifths, 0, 5, 0.5),
-      wGoal: vNum(o.tieRules.wGoal, 0, 5, 0.5)
+      wGoal: vNum(o.tieRules.wGoal, 0, 5, 1.5),
+      wDebt: vNum(o.tieRules.wDebt, 0, 5, 1.8),
+      wContrary: vNum(o.tieRules.wContrary, 0, 5, 1.2),
+      wStagnation: vNum(o.tieRules.wStagnation, 0, 5, 1.4)
     };
   } else {
-    N.tieRules = { mode:'contextual', wMotion:1.0, wVoice:1.0, wCost:1.0, wFifths:0.5, wGoal:0.5 };
+    N.tieRules = { mode:'contextual', wMotion:1.0, wVoice:1.0, wCost:1.0, wFifths:0.5, wGoal:1.5, wDebt:1.8, wContrary:1.2, wStagnation:1.4 };
   }
   N.arp = vEnum(o.arp, ['none','up','down','updown','downup','scramble'], 'none');
   N.tuning = vEnum(o.tuning, TUNING_ORDER, 'equal');
@@ -7058,8 +7324,11 @@ function syncControls(){
     set('sTieVoice', Math.round(STATE.tieRules.wVoice*100)); if($('nTieVoice')) $('nTieVoice').textContent=fmt2(STATE.tieRules.wVoice);
     set('sTieCost', Math.round(STATE.tieRules.wCost*100)); if($('nTieCost')) $('nTieCost').textContent=fmt2(STATE.tieRules.wCost);
     set('sTieFifths', Math.round(STATE.tieRules.wFifths*100)); if($('nTieFifths')) $('nTieFifths').textContent=fmt2(STATE.tieRules.wFifths);
-    set('sTieGoal', Math.round(STATE.tieRules.wGoal*100)); if($('nTieGoal')) $('nTieGoal').textContent=fmt2(STATE.tieRules.wGoal);
-    if($('tieExprRead')) $('tieExprRead').textContent = 'Mode: ' + (STATE.tieRules.mode === 'weighted' ? 'Weighted Rule Domain' : 'Strict Tiered Hardcoded');
+    set('sTieGoal', Math.round((STATE.tieRules.wGoal!=null?STATE.tieRules.wGoal:1.5)*100)); if($('nTieGoal')) $('nTieGoal').textContent=fmt2(STATE.tieRules.wGoal!=null?STATE.tieRules.wGoal:1.5);
+    set('sTieDebt', Math.round((STATE.tieRules.wDebt!=null?STATE.tieRules.wDebt:1.8)*100)); if($('nTieDebt')) $('nTieDebt').textContent=fmt2(STATE.tieRules.wDebt!=null?STATE.tieRules.wDebt:1.8);
+    set('sTieContrary', Math.round((STATE.tieRules.wContrary!=null?STATE.tieRules.wContrary:1.2)*100)); if($('nTieContrary')) $('nTieContrary').textContent=fmt2(STATE.tieRules.wContrary!=null?STATE.tieRules.wContrary:1.2);
+    set('sTieStagnation', Math.round((STATE.tieRules.wStagnation!=null?STATE.tieRules.wStagnation:1.4)*100)); if($('nTieStagnation')) $('nTieStagnation').textContent=fmt2(STATE.tieRules.wStagnation!=null?STATE.tieRules.wStagnation:1.4);
+    if($('tieExprRead')) $('tieExprRead').textContent = 'Mode: ' + (STATE.tieRules.mode === 'contextual' ? 'Dynamic Context Hierarchy' : (STATE.tieRules.mode === 'weighted' ? 'Weighted Rule Domain' : 'Strict Tiered Hardcoded'));
   }
   document.querySelectorAll('#takeCtl button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.take===STATE.take)));
   set('tempo',STATE.tempo); $('tempoNum').textContent=String(STATE.tempo);
@@ -7231,6 +7500,9 @@ function bindControls(){
   slider('sTieCost','nTieCost', v=>{ STATE.tieRules.wCost=v; });
   slider('sTieFifths','nTieFifths', v=>{ STATE.tieRules.wFifths=v; });
   slider('sTieGoal','nTieGoal', v=>{ STATE.tieRules.wGoal=v; });
+  slider('sTieDebt','nTieDebt', v=>{ STATE.tieRules.wDebt=v; });
+  slider('sTieContrary','nTieContrary', v=>{ STATE.tieRules.wContrary=v; });
+  slider('sTieStagnation','nTieStagnation', v=>{ STATE.tieRules.wStagnation=v; });
 
   slider('sTension','nTension', v=>{ STATE.tension=v; });
   slider('sLamC','nLamC', v=>{ STATE.lamC=v; });
