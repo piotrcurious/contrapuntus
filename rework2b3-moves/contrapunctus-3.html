@@ -1258,10 +1258,10 @@ function defaultProfiles(){
       phi_m:  {w:1.00, aff:[0.05, 0.70, 1.00]},
     },
     time:{
-      m_pos:  {w:1.00, aff:[1.00, 0.80, 0.50, 0.70]},
-      m_sub:  {w:0.75, aff:[1.00, 0.85, 0.50]},
-      d_dur:  {w:0.60, aff:[0.50, 1.00, 0.80]},
-      s_sync: {w:0.75, aff:[1.00, 0.65]},
+      m_pos:  {w:0.85, aff:[1.00, 0.85, 0.80, 0.75]},
+      m_sub:  {w:0.70, aff:[1.00, 0.85, 0.60]},
+      d_dur:  {w:0.60, aff:[0.60, 1.00, 0.85]},
+      s_sync: {w:0.70, aff:[1.00, 0.70]},
     },
   };
 }
@@ -1278,7 +1278,7 @@ const STATE = {
   root:0, scaleName:'Ionian',
   bars:8, stepsPerBar:8, lastStepsPerBar:8, harmonic:'bar',
   tempo:96, tension:0.30,
-  lamC:0.38, lamV:0.46, lamM:0.50, lamT:0.50,
+  lamC:0.38, lamV:0.46, lamM:0.50, lamT:0.65,
   supervisor:{
     enabled: true,
     syntaxMode: 'jazz',       // classical | jazz | hybrid
@@ -2290,6 +2290,7 @@ function marginals(axes, dims, strides, table){
 function chordMarginals(tbl){ return marginals(CHORD_AXES, CHORD_DIMS, CHORD_STR.strides, tbl.t); }
 function voiceMarginals(tbl){ return marginals(VOICE_AXES, VOICE_DIMS, VOICE_STR.strides, tbl.t); }
 function moveMarginals(tbl){ return marginals(MOVE_AXES, MOVE_DIMS, MOVE_STR.strides, tbl.t); }
+function timeMarginals(tbl){ return marginals(TIME_AXES, TIME_DIMS, TIME_STR.strides, tbl.t); }
 
 // Branching statistics of the induced chord graph: how many moves are legal
 // from each (chord, momentum) state, how uneven that is, and how often the
@@ -5108,27 +5109,69 @@ function voiceCellWords(f){
   const c=cellList(VOICE_DIMS)[f];
   return VOICE_AXES.map((a,i)=>VOICE_WORDS[a.key][c[i]]).join(' · ');
 }
+const MOVE_WORDS = {
+  psi:['departed avoid/outlier','departed scale/passing','departed harmonic target'],
+  mu_m:['hold','stepwise','small leap','large leap','resolution/recovery'],
+  gamma_m:['similar motion','oblique motion','contrary motion'],
+  sigma_m:['structural beat','passing subdivision'],
+  phi_m:['target avoid/foreign','target scale/passing','target harmonic foundation'],
+};
+function moveCellWords(mf){
+  const c=cellList(MOVE_DIMS)[mf];
+  return MOVE_AXES.map((a,i)=>MOVE_WORDS[a.key][c[i]]).join(' · ');
+}
+const TIME_WORDS = {
+  m_pos:['downbeat (1)','weak beat (2)','secondary accent (3)','upbeat (4)'],
+  m_sub:['beat pulse','half-beat','micro-division'],
+  d_dur:['staccato (<60%)','standard gate (90%)','tenuto (>110%)'],
+  s_sync:['on-beat','syncopated / off-beat anticipation'],
+};
+function timeCellWords(tf){
+  const c=cellList(TIME_DIMS)[tf];
+  return TIME_AXES.map((a,i)=>TIME_WORDS[a.key][c[i]]).join(' · ');
+}
 function noteReadout(nt){
   const el=$('rollRead'); if(!el) return;
   const c=STATE.composed;
   if(!nt){
-    el.innerHTML='Hover a note to see the voice rule cell that chose it. Click a note to edit its envelope.<br>&nbsp;';
+    el.innerHTML='Hover a note to inspect voice, movement, and temporal rule cells. Click a note to edit its envelope.<br>&nbsp;';
     return;
   }
-  const f=c.vcell[nt.v][nt.step];
+  const vf=c.vcell[nt.v][nt.step];
+  const mf=c.mcell ? c.mcell[nt.v][nt.step] : null;
+  const tf=c.tcell ? c.tcell[nt.v][nt.step] : null;
   const bar=Math.floor(nt.step/STATE.stepsPerBar)+1, st=nt.step%STATE.stepsPerBar+1;
-  el.innerHTML='<b>'+VOICE_NAMES[nt.v]+'</b> · bar '+bar+', step '+st+' · <b>'+midiName(nt.pitch)+'</b>'
-    + (nt.anchored?'   ·   <span class="hand">anchored by you</span>':'')
-    + '<br>'+(f!=null ? voiceCellWords(f)+(nt.fell?'   ·   <b>no legal move: fallback</b>':'') : (nt.anchored?'placed by hand, not chosen by the rule':'figure note, not chosen by the rule'));
+  let lines = '<b>'+VOICE_NAMES[nt.v]+'</b> · bar '+bar+', step '+st+' · <b>'+midiName(nt.pitch)+'</b>'
+    + (nt.anchored?'   ·   <span class="hand">anchored by you</span>':'');
+  if(vf!=null){
+    lines += '<br><span style="color:#2b7f95"><b>Voice:</b> ' + voiceCellWords(vf) + (nt.fell?'   ·   <b>fallback</b>':'') + '</span>';
+  } else if(nt.anchored) {
+    lines += '<br>placed by hand, not chosen by the rule';
+  } else {
+    lines += '<br>figure note, not chosen by the rule';
+  }
+  if(mf!=null){
+    lines += '<br><span style="color:#d97706"><b>Movement:</b> ' + moveCellWords(mf) + '</span>';
+  }
+  if(tf!=null){
+    lines += '<br><span style="color:#059669"><b>Temporal:</b> ' + timeCellWords(tf) + '</span>';
+  }
+  el.innerHTML = lines;
 }
 function rollHover(mx,my){
   const nt=rollNoteAt(mx,my);
   if(nt!==HOVER_NOTE.nt){
     HOVER_NOTE.nt=nt;
     noteReadout(nt);
-    const c=STATE.composed, f=nt?c.vcell[nt.v][nt.step]:null;
-    HOVER.link = (nt && f!=null) ? {set:'voice', f} : null;
-    if(STATE.lattice.set==='voice') drawLattice();
+    const c=STATE.composed;
+    const vf=nt?c.vcell[nt.v][nt.step]:null;
+    const mf=(nt && c.mcell)?c.mcell[nt.v][nt.step]:null;
+    const tf=(nt && c.tcell)?c.tcell[nt.v][nt.step]:null;
+    if(STATE.lattice.set==='voice') HOVER.link = (nt && vf!=null) ? {set:'voice', f:vf} : null;
+    else if(STATE.lattice.set==='move') HOVER.link = (nt && mf!=null) ? {set:'move', f:mf} : null;
+    else if(STATE.lattice.set==='time') HOVER.link = (nt && tf!=null) ? {set:'time', f:tf} : null;
+    else HOVER.link = null;
+    drawLattice();
     drawRoll();
   }
   return nt;
@@ -5825,11 +5868,11 @@ function renderStats(){
   if($('statM')) $('statM').innerHTML='<b>'+tm.legalCount+'</b> of '+tm.size+' cells legal'+(Object.keys(STATE.cellFlips.move).length?' (λ alone admits '+tm.cut+')':'');
   if($('statT')) $('statT').innerHTML='<b>'+tt.legalCount+'</b> of '+tt.size+' cells legal'+(Object.keys(STATE.cellFlips.time||{}).length?' (λ alone admits '+tt.cut+')':'');
 
-  const mc=chordMarginals(tc), mv=voiceMarginals(tv), mm=moveMarginals(tm);
+  const mc=chordMarginals(tc), mv=voiceMarginals(tv), mm=moveMarginals(tm), mt=timeMarginals(tt);
   document.querySelectorAll('.axis').forEach(wrap=>{
     const set=wrap.dataset.set, key=wrap.dataset.key;
     const axes=set==='chord'?CHORD_AXES:set==='voice'?VOICE_AXES:set==='move'?MOVE_AXES:TIME_AXES;
-    const marg=set==='chord'?mc:set==='voice'?mv:mm;
+    const marg=set==='chord'?mc:set==='voice'?mv:set==='move'?mm:mt;
     const ai=axes.findIndex(a=>a.key===key);
     if(ai!==-1 && marg[ai]){
       wrap.querySelectorAll('.marg i u').forEach((u,i)=>{ u.style.height=Math.round(marg[ai][i]*100)+'%'; });
