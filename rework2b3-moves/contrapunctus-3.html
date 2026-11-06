@@ -593,6 +593,7 @@ details.fold[open] > summary::before{content:"\2013 ";}
           <button class="tiny" id="btnShowTails" aria-pressed="true">Release tails</button>
           <button class="tiny" id="btnShowGhost" aria-pressed="true">Roads not taken</button>
           <button class="tiny" id="btnShowSounding" aria-pressed="false">What is sounding</button>
+          <button class="tiny" id="btnShowMovement" aria-pressed="true">Movement Phase</button>
         </div>
       </div>
       <div class="figure">
@@ -794,7 +795,45 @@ details.fold[open] > summary::before{content:"\2013 ";}
           </div>
         </div>
       </div>
-      <figcaption>Interactive visual inspector of candidate arbitration and neurocognitive movement dynamics. Select any chord in the score to inspect its competing candidate scores and active cognitive debt.</figcaption>
+
+      <!-- Live Movement Vector Field Phase Portrait -->
+      <div class="split" style="margin-top:14px; gap:16px;">
+        <div style="flex:1.2;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <span class="readout" style="font-weight:600">2D Contrapuntal Tangent Phase Portrait (&Delta;p<sub>0</sub> &times; &Delta;p<sub>2</sub>)</span>
+            <span class="readout" id="movePhaseHeader" style="color:var(--ink-dim)">Contrary &amp; Oblique Flow Field</span>
+          </div>
+          <div class="figure" style="margin-top:0">
+            <canvas id="movePhaseCanvas" style="height:190px; width:100%; border:1px solid var(--rule-soft); border-radius:4px;" role="img" aria-label="Phase portrait of soprano velocity vs bass velocity showing contrary, oblique, and similar motion quadrants and trajectory"></canvas>
+          </div>
+        </div>
+
+        <div style="flex:0.8;">
+          <div style="margin-bottom:4px;">
+            <span class="readout" style="font-weight:600">Neurocognitive Drive Parameters</span>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:6px;">
+            <label>Momentum Persistence (&tau;<sub>E</sub>):
+              <input type="range" id="sCogMomentum" min="10" max="95" value="70">
+              <span id="nCogMomentum">0.70</span>
+            </label>
+            <label>Reversal Strength (&alpha;<sub>rev</sub>):
+              <input type="range" id="sCogReversal" min="20" max="100" value="80">
+              <span id="nCogReversal">0.80</span>
+            </label>
+            <label>Debt Horizon (steps):
+              <input type="range" id="sCogHorizon" min="1" max="8" value="4">
+              <span id="nCogHorizon">4</span>
+            </label>
+            <label>Surprise Friction (bits):
+              <input type="range" id="sCogSurprise" min="0" max="200" value="100">
+              <span id="nCogSurprise">1.00</span>
+            </label>
+          </div>
+          <p class="aside" style="margin-top:10px">Controls Narmour implication-realization momentum persistence, leap reversal strength, and debt service horizons across voices.</p>
+        </div>
+      </div>
+      <figcaption>Interactive visual inspector of candidate arbitration, neurocognitive movement dynamics, and 2D tangent vector field phase portraits. Select any chord or note in the score to inspect its live movement trajectory.</figcaption>
     </section>
 
     <!-- Plate: Hierarchical State Space Expansion & Supervisory Macro Governance -->
@@ -1316,6 +1355,7 @@ function defaultVoiceEnv(v){
 
 const STATE = {
   tieRules: { wMotion: 1.0, wVoice: 1.0, wCost: 1.0, wFifths: 0.5, wGoal: 1.5, wDebt: 1.8, wContrary: 1.2, wStagnation: 1.4, mode: 'contextual' },
+  cognitive: { momentum: 0.70, reversal: 0.80, horizon: 4, surpriseFriction: 1.00 },
   root:0, scaleName:'Ionian',
   bars:8, stepsPerBar:8, lastStepsPerBar:8, harmonic:'bar',
   tempo:96, tension:0.30,
@@ -1347,7 +1387,7 @@ const STATE = {
   noteEnv:{},                          // "v:step" -> partial env
   selectedNote:null,                   // {v, step}
   selectedSeg:1, selectedBar:null, lane:'all',
-  show:{ tails:true, ghosts:true, sounding:false },
+  show:{ tails:true, ghosts:true, sounding:false, movement:true },
   lattice:{ set:'chord' },
   life:{w:18,h:10,grid:null},
   composed:null,
@@ -1564,6 +1604,7 @@ function renderExpansionUI() {
   drawRingDashboard();
   drawTieDecisionInspector();
   drawCognitiveDashboard();
+  drawMovePhasePortrait();
 
   const trackerEl = document.getElementById('phraseTrackerRead');
   if (trackerEl) {
@@ -1804,6 +1845,135 @@ function drawCognitiveDashboard() {
   ctx.fillText('\u25CF Gap-Fill Debt', padL + 340, h - 8);
 }
 
+/* =========================================================================
+   2D CONTRAPUNTAL TANGENT PHASE PORTRAIT (\Delta p_0 \times \Delta p_2)
+   ========================================================================= */
+
+function drawMovePhasePortrait() {
+  const cv = $('movePhaseCanvas');
+  if (!cv) return;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return;
+
+  const rect = cv.getBoundingClientRect();
+  const W = cv.width = (rect.width || 600) * (window.devicePixelRatio || 1);
+  const H = cv.height = (rect.height || 190) * (window.devicePixelRatio || 1);
+  ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
+  const w = rect.width || 600, h = rect.height || 190;
+
+  const dark = THEME && THEME.dark;
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = dark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)';
+  ctx.fillRect(0, 0, w, h);
+
+  const c = STATE.composed;
+  if (!c || !c.pitches || !c.pitches[0] || !c.pitches[0].length) return;
+
+  const totalSteps = c.total || 64;
+  const cx = w / 2, cy = h / 2;
+  const maxRange = 7.5; // semitones delta velocity range
+  const scaleX = (w * 0.42) / maxRange;
+  const scaleY = (h * 0.40) / maxRange;
+
+  // Quadrant background shading
+  // Quadrant II (dp0 < 0, dp2 > 0) & Quadrant IV (dp0 > 0, dp2 < 0) are CONTRARY MOTION (Optimal)
+  ctx.fillStyle = dark ? 'rgba(74, 222, 128, 0.06)' : 'rgba(34, 197, 94, 0.05)';
+  ctx.fillRect(0, 0, cx, cy); // Q2: dp0 < 0, dp2 > 0 (Contrary)
+  ctx.fillRect(cx, cy, cx, cy); // Q4: dp0 > 0, dp2 < 0 (Contrary)
+
+  // Quadrant I & III are SIMILAR MOTION (Requires parsimony)
+  ctx.fillStyle = dark ? 'rgba(239, 68, 68, 0.04)' : 'rgba(239, 68, 68, 0.03)';
+  ctx.fillRect(cx, 0, cx, cy); // Q1: dp0 > 0, dp2 > 0 (Similar)
+  ctx.fillRect(0, cy, cx, cy); // Q3: dp0 < 0, dp2 < 0 (Similar)
+
+  // Draw Quadrant Axes
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.20)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, cy); ctx.lineTo(w, cy);
+  ctx.moveTo(cx, 0); ctx.lineTo(cx, h);
+  ctx.stroke();
+
+  // Quadrant labels
+  ctx.font = '9px monospace';
+  ctx.fillStyle = dark ? '#86efac' : '#15803d';
+  ctx.textAlign = 'left';
+  ctx.fillText('CONTRARY MOTION (\u03b3=2)', 10, 14);
+  ctx.textAlign = 'right';
+  ctx.fillText('CONTRARY MOTION (\u03b3=2)', w - 10, h - 8);
+
+  ctx.fillStyle = dark ? '#fca5a5' : '#b91c1c';
+  ctx.textAlign = 'right';
+  ctx.fillText('SIMILAR (\u03b3=0)', w - 10, 14);
+  ctx.textAlign = 'left';
+  ctx.fillText('SIMILAR (\u03b3=0)', 10, h - 8);
+
+  // Compute trajectory points (\Delta p_0(t), \Delta p_2(t))
+  const points = [];
+  for (let s = 1; s < totalSteps; s++) {
+    const p0 = c.pitches[0][s], prev0 = c.pitches[0][s - 1];
+    const p2 = c.pitches[2][s], prev2 = c.pitches[2][s - 1];
+    if (p0 != null && prev0 != null && p2 != null && prev2 != null) {
+      const dp0 = p0 - prev0;
+      const dp2 = p2 - prev2;
+      const x = cx + dp0 * scaleX;
+      const y = cy - dp2 * scaleY;
+      points.push({ s, dp0, dp2, x, y });
+    }
+  }
+
+  // Draw Phase Flow Trajectory Lines
+  ctx.strokeStyle = dark ? 'rgba(147, 197, 253, 0.4)' : 'rgba(59, 130, 246, 0.4)';
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  for (let i = 0; i < points.length; i++) {
+    const pt = points[i];
+    if (i === 0) ctx.moveTo(pt.x, pt.y);
+    else ctx.lineTo(pt.x, pt.y);
+  }
+  ctx.stroke();
+
+  // Draw Trajectory Vector Points
+  for (let i = 0; i < points.length; i++) {
+    const pt = points[i];
+    const isContrary = (pt.dp0 * pt.dp2) < 0;
+    const isOblique = (pt.dp0 === 0 || pt.dp2 === 0);
+
+    ctx.fillStyle = isContrary ? (dark ? '#4ade80' : '#16a34a') : (isOblique ? (dark ? '#38bdf8' : '#0284c7') : (dark ? '#f87171' : '#dc2626'));
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Highlight active step
+  const activeStep = (typeof STATE.step === 'number' && STATE.step > 0) ? STATE.step : (STATE.selectedSeg ? STATE.selectedSeg * (STATE.stepsPerBar || 8) : 1);
+  const activePt = points.find(p => p.s === activeStep);
+  if (activePt) {
+    ctx.strokeStyle = dark ? '#fff' : '#000';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(activePt.x, activePt.y, 6, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Text info
+    ctx.font = '10px monospace';
+    ctx.fillStyle = dark ? '#fff' : '#000';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Step ${activePt.s}: (\u0394p\u2080=${activePt.dp0 > 0 ? '+' : ''}${activePt.dp0}, \u0394p\u2082=${activePt.dp2 > 0 ? '+' : ''}${activePt.dp2})`, activePt.x, Math.max(16, activePt.y - 9));
+  }
+
+  // Axis descriptors
+  ctx.font = '9px monospace';
+  ctx.fillStyle = dark ? '#aaa' : '#666';
+  ctx.textAlign = 'center';
+  ctx.fillText('Melody Velocity \u0394p\u2080 (st) \u2192', cx + 110, cy - 5);
+  ctx.save();
+  ctx.translate(cx + 8, cy - 65);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText('Bass Velocity \u0394p\u2082 (st) \u2192', 0, 0);
+  ctx.restore();
+}
+
 function renderTieUI() {
   const el = document.getElementById('tieExprRead');
   if (el) {
@@ -1949,12 +2119,16 @@ class CognitiveStateTracker {
       const absDp = Math.abs(dp);
 
       // 1. Update Directional Expectation Gradient (Narmour Implication-Realization)
+      const mom = (STATE && STATE.cognitive && STATE.cognitive.momentum != null) ? STATE.cognitive.momentum : 0.70;
+      const rev = (STATE && STATE.cognitive && STATE.cognitive.reversal != null) ? STATE.cognitive.reversal : 0.80;
+      const maxHorizon = (STATE && STATE.cognitive && STATE.cognitive.horizon != null) ? STATE.cognitive.horizon : 4;
+
       if (absDp <= 2 && absDp > 0) {
         // Stepwise motion implies continuation in same direction (process)
-        v.E = 0.7 * v.E + 0.3 * Math.sign(dp);
+        v.E = mom * v.E + (1 - mom) * Math.sign(dp);
       } else if (absDp >= 4) {
         // Large leap implies reversal (reversal expectation)
-        v.E = -0.8 * Math.sign(dp);
+        v.E = -rev * Math.sign(dp);
         // Incur gap-fill debt
         v.G = {
           pending: true,
@@ -1964,7 +2138,7 @@ class CognitiveStateTracker {
         };
       } else {
         // Lateral or unison motion dampens directional expectation
-        v.E *= 0.5;
+        v.E *= (1 - mom * 0.5);
       }
 
       // 2. Trans-step Gap-Fill Debt Service
@@ -1972,10 +2146,10 @@ class CognitiveStateTracker {
         v.G.stepsActive++;
         if (Math.sign(dp) === v.G.targetDir && absDp > 0) {
           v.G.remainingDist -= absDp;
-          if (v.G.remainingDist <= 0 || v.G.stepsActive >= 4) {
+          if (v.G.remainingDist <= 0 || v.G.stepsActive >= maxHorizon) {
             v.G.pending = false; // Debt satisfied
           }
-        } else if (v.G.stepsActive >= 4) {
+        } else if (v.G.stepsActive >= maxHorizon) {
           v.G.pending = false; // Decayed obligation
         }
       }
@@ -4344,8 +4518,10 @@ function orbitClass(period, pieceChords){
 function ruleKey(){
   const tr = STATE.tieRules || {};
   const rr = STATE.ruleRing || {};
+  const cog = STATE.cognitive || {};
   return [STATE.root, STATE.scaleName, STATE.extended?1:0, STATE.tension.toFixed(4), STATE.take,
           STATE.bars, STATE.stepsPerBar, tr.mode, tr.wMotion, tr.wVoice, tr.wCost, tr.wFifths, tr.wGoal, tr.wDebt, tr.wContrary, tr.wStagnation,
+          cog.momentum, cog.reversal, cog.horizon, cog.surpriseFriction,
           rr.enabled?1:0, rr.op, rr.ruleA, rr.ruleB,
           profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
 }
@@ -5591,6 +5767,17 @@ function drawRoll(){
       if(nt.anchored) P.disc(x+1.5, y, 5, rgba(THEME.hand,0.96), 0.55);
       if((sel && sel.v===nt.v && sel.step===nt.step)) outlineRect(P, x-1, y-6, w+3, 12, rgba(THEME.ink,0.95), 1.4);
       else if(hov===nt) outlineRect(P, x-1, y-6, w+3, 12, rgba(THEME.ink,0.55), 1);
+
+      // Live Movement Phase vector badge on note onset when toggled on
+      if(STATE.show.movement && c.mcell && c.mcell[v] && c.mcell[v][nt.step] != null){
+        const mf = c.mcell[v][nt.step];
+        const mCoords = cellList(MOVE_DIMS)[mf];
+        if(mCoords){
+          const mu_m = mCoords[1], gamma_m = mCoords[2];
+          const badgeColor = gamma_m === 2 ? THEME.permit : (gamma_m === 0 ? THEME.forbid : THEME.dim);
+          P.rect(x+0.5, y+3.5, Math.min(w, 8), 2.5, rgba(badgeColor, 0.9));
+        }
+      }
     }
   }
   if(STATE.show.sounding){
@@ -5633,6 +5820,11 @@ function syncRollLabels(c,g){
   if(STATE.show.sounding){
     const d=mk('div','note','what is ringing at the start of each step'); d.style.top=(g.rollH+3)+'px'; d.style.left='4px'; d.style.background='transparent';
     d.style.color=THEME.str.dim; host.appendChild(d);
+  }
+  if(STATE.show.movement){
+    const d2=mk('div','note','movement badges: green = contrary motion (γ=2), red = similar (γ=0), gray = oblique (γ=1)');
+    d2.style.top=(g.rollH + (STATE.show.sounding?16:3))+'px'; d2.style.left='4px'; d2.style.background='transparent';
+    d2.style.color=THEME.str.dim; host.appendChild(d2);
   }
 }
 function renderRollGutter(){
@@ -6772,6 +6964,7 @@ function serializeState(opts){
     supervisor:STATE.supervisor ? Object.assign({}, STATE.supervisor) : undefined,
     extended:!!STATE.extended, walkingBass:!!STATE.walkingBass, arp:STATE.arp, tuning:STATE.tuning,
     tieRules:STATE.tieRules ? { mode:STATE.tieRules.mode, wMotion:r4(STATE.tieRules.wMotion), wVoice:r4(STATE.tieRules.wVoice), wCost:r4(STATE.tieRules.wCost), wFifths:r4(STATE.tieRules.wFifths), wGoal:r4(STATE.tieRules.wGoal), wDebt:r4(STATE.tieRules.wDebt!=null?STATE.tieRules.wDebt:1.8), wContrary:r4(STATE.tieRules.wContrary!=null?STATE.tieRules.wContrary:1.2), wStagnation:r4(STATE.tieRules.wStagnation!=null?STATE.tieRules.wStagnation:1.4) } : undefined,
+    cognitive:STATE.cognitive ? { momentum:r4(STATE.cognitive.momentum), reversal:r4(STATE.cognitive.reversal), horizon:Math.round(STATE.cognitive.horizon), surpriseFriction:r4(STATE.cognitive.surpriseFriction) } : undefined,
     ruleRing:STATE.ruleRing ? { enabled:!!STATE.ruleRing.enabled, op:STATE.ruleRing.op, ruleA:STATE.ruleRing.ruleA, ruleB:STATE.ruleRing.ruleB } : undefined,
     profiles:prof,
     cellFlips:{chord:sortedCopy(STATE.cellFlips.chord), voice:sortedCopy(STATE.cellFlips.voice), move:sortedCopy(STATE.cellFlips.move), time:sortedCopy(STATE.cellFlips.time||{})},
@@ -6853,6 +7046,16 @@ function restoreState(o){
     };
   } else {
     N.tieRules = { mode:'contextual', wMotion:1.0, wVoice:1.0, wCost:1.0, wFifths:0.5, wGoal:1.5, wDebt:1.8, wContrary:1.2, wStagnation:1.4 };
+  }
+  if(isPlain(o.cognitive)){
+    N.cognitive = {
+      momentum: vNum(o.cognitive.momentum, 0.1, 0.95, 0.70),
+      reversal: vNum(o.cognitive.reversal, 0.2, 1.00, 0.80),
+      horizon: vInt(o.cognitive.horizon, 1, 8, 4),
+      surpriseFriction: vNum(o.cognitive.surpriseFriction, 0, 3, 1.00)
+    };
+  } else {
+    N.cognitive = { momentum: 0.70, reversal: 0.80, horizon: 4, surpriseFriction: 1.00 };
   }
   N.arp = vEnum(o.arp, ['none','up','down','updown','downup','scramble'], 'none');
   N.tuning = vEnum(o.tuning, TUNING_ORDER, 'equal');
@@ -7300,7 +7503,7 @@ function afterRestore(){
 }
 
 /* ---- controls reflect the state ------------------------------------------------------- */
-const SHOW_TOGGLES=[['btnShowTails','tails'],['btnShowGhost','ghosts'],['btnShowSounding','sounding']];
+const SHOW_TOGGLES=[['btnShowTails','tails'],['btnShowGhost','ghosts'],['btnShowSounding','sounding'],['btnShowMovement','movement']];
 function syncControls(){
   const set=(id,v)=>{ const e=$(id); if(e) e.value=String(v); };
   set('selRoot',STATE.root); set('selScale',STATE.scaleName); set('selBars',STATE.bars); set('selGrid',STATE.stepsPerBar);
@@ -7329,6 +7532,12 @@ function syncControls(){
     set('sTieContrary', Math.round((STATE.tieRules.wContrary!=null?STATE.tieRules.wContrary:1.2)*100)); if($('nTieContrary')) $('nTieContrary').textContent=fmt2(STATE.tieRules.wContrary!=null?STATE.tieRules.wContrary:1.2);
     set('sTieStagnation', Math.round((STATE.tieRules.wStagnation!=null?STATE.tieRules.wStagnation:1.4)*100)); if($('nTieStagnation')) $('nTieStagnation').textContent=fmt2(STATE.tieRules.wStagnation!=null?STATE.tieRules.wStagnation:1.4);
     if($('tieExprRead')) $('tieExprRead').textContent = 'Mode: ' + (STATE.tieRules.mode === 'contextual' ? 'Dynamic Context Hierarchy' : (STATE.tieRules.mode === 'weighted' ? 'Weighted Rule Domain' : 'Strict Tiered Hardcoded'));
+  }
+  if(STATE.cognitive){
+    set('sCogMomentum', Math.round((STATE.cognitive.momentum!=null?STATE.cognitive.momentum:0.70)*100)); if($('nCogMomentum')) $('nCogMomentum').textContent=fmt2(STATE.cognitive.momentum!=null?STATE.cognitive.momentum:0.70);
+    set('sCogReversal', Math.round((STATE.cognitive.reversal!=null?STATE.cognitive.reversal:0.80)*100)); if($('nCogReversal')) $('nCogReversal').textContent=fmt2(STATE.cognitive.reversal!=null?STATE.cognitive.reversal:0.80);
+    set('sCogHorizon', Math.round(STATE.cognitive.horizon!=null?STATE.cognitive.horizon:4)); if($('nCogHorizon')) $('nCogHorizon').textContent=String(STATE.cognitive.horizon!=null?STATE.cognitive.horizon:4);
+    set('sCogSurprise', Math.round((STATE.cognitive.surpriseFriction!=null?STATE.cognitive.surpriseFriction:1.00)*100)); if($('nCogSurprise')) $('nCogSurprise').textContent=fmt2(STATE.cognitive.surpriseFriction!=null?STATE.cognitive.surpriseFriction:1.00);
   }
   document.querySelectorAll('#takeCtl button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.take===STATE.take)));
   set('tempo',STATE.tempo); $('tempoNum').textContent=String(STATE.tempo);
@@ -7503,6 +7712,11 @@ function bindControls(){
   slider('sTieDebt','nTieDebt', v=>{ STATE.tieRules.wDebt=v; });
   slider('sTieContrary','nTieContrary', v=>{ STATE.tieRules.wContrary=v; });
   slider('sTieStagnation','nTieStagnation', v=>{ STATE.tieRules.wStagnation=v; });
+
+  slider('sCogMomentum','nCogMomentum', v=>{ STATE.cognitive.momentum=v; });
+  slider('sCogReversal','nCogReversal', v=>{ STATE.cognitive.reversal=v; });
+  if($('sCogHorizon')) on('sCogHorizon','input', e=>{ STATE.cognitive.horizon=+e.target.value; if($('nCogHorizon')) $('nCogHorizon').textContent=e.target.value; scheduleRegenerate(); });
+  slider('sCogSurprise','nCogSurprise', v=>{ STATE.cognitive.surpriseFriction=v; });
 
   slider('sTension','nTension', v=>{ STATE.tension=v; });
   slider('sLamC','nLamC', v=>{ STATE.lamC=v; });
