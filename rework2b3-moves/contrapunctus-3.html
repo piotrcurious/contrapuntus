@@ -1356,6 +1356,13 @@ function defaultVoiceEnv(v){
 const STATE = {
   tieRules: { wMotion: 1.0, wVoice: 1.0, wCost: 1.0, wFifths: 0.5, wGoal: 1.5, wDebt: 1.8, wContrary: 1.2, wStagnation: 1.4, mode: 'contextual' },
   cognitive: { momentum: 0.70, reversal: 0.80, horizon: 4, surpriseFriction: 1.00 },
+  melodySpline: [
+    { step: 0, pitch: 72, weight: 0.50 },
+    { step: 16, pitch: 76, weight: 0.75 },
+    { step: 36, pitch: 81, weight: 0.90 },
+    { step: 52, pitch: 74, weight: 0.80 },
+    { step: 63, pitch: 72, weight: 1.00 }
+  ],
   root:0, scaleName:'Ionian',
   bars:8, stepsPerBar:8, lastStepsPerBar:8, harmonic:'bar',
   tempo:96, tension:0.30,
@@ -1430,6 +1437,7 @@ window.vIdx = vIdx;
 window.mIdx = mIdx;
 window.selectSeg = selectSeg;
 window.selectNote = selectNote;
+window.evaluateMelodySpline = evaluateMelodySpline;
 window.evaluateEndogenousRule = evaluateEndogenousRule;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
@@ -4031,6 +4039,53 @@ function evaluateLookaheadMove(candPitch, voiceIdx, stepIndex, totalSteps, chord
   };
 }
 
+/**
+ * Evaluates the Melody Figure Attractor Spline Profile at a given step.
+ * Returns { targetPitch, targetVelocity, weight, active }
+ */
+function evaluateMelodySpline(step, totalSteps) {
+  const pts = STATE.melodySpline;
+  if (!pts || !pts.length) return { active: false, targetPitch: 72, targetVelocity: 0, weight: 0 };
+  if (pts.length === 1) return { active: true, targetPitch: pts[0].pitch, targetVelocity: 0, weight: pts[0].weight };
+
+  const sorted = pts.slice().sort((a, b) => a.step - b.step);
+  if (step <= sorted[0].step) return { active: true, targetPitch: sorted[0].pitch, targetVelocity: 0, weight: sorted[0].weight };
+  if (step >= sorted[sorted.length - 1].step) {
+    const last = sorted[sorted.length - 1];
+    return { active: true, targetPitch: last.pitch, targetVelocity: 0, weight: last.weight };
+  }
+
+  let i = 0;
+  while (i < sorted.length - 1 && sorted[i + 1].step < step) i++;
+
+  const p0 = sorted[Math.max(0, i - 1)];
+  const p1 = sorted[i];
+  const p2 = sorted[i + 1];
+  const p3 = sorted[Math.min(sorted.length - 1, i + 2)];
+
+  const t = (step - p1.step) / Math.max(1, (p2.step - p1.step));
+  const t2 = t * t, t3 = t2 * t;
+
+  // Catmull-Rom cubic interpolation
+  const pitch = 0.5 * (
+    (2 * p1.pitch) +
+    (-p0.pitch + p2.pitch) * t +
+    (2 * p0.pitch - 5 * p1.pitch + 4 * p2.pitch - p3.pitch) * t2 +
+    (-p0.pitch + 3 * p1.pitch - 3 * p2.pitch + p3.pitch) * t3
+  );
+
+  const dt = Math.max(1, (p2.step - p1.step));
+  const targetVelocity = 0.5 * (
+    (-p0.pitch + p2.pitch) +
+    2 * (2 * p0.pitch - 5 * p1.pitch + 4 * p2.pitch - p3.pitch) * t +
+    3 * (-p0.pitch + 3 * p1.pitch - 3 * p2.pitch + p3.pitch) * t2
+  ) / dt;
+
+  const weight = (1 - t) * p1.weight + t * p2.weight;
+
+  return { active: true, targetPitch: pitch, targetVelocity, weight };
+}
+
 function pickNote(cands, ctx){
   if(ctx && ctx.motionMode) cands = applyMotionConstraint(cands, ctx.prevPitch, ctx.motionMode, ctx.others);
   if(!cands || !cands.length) return { pitch: ctx.prevPitch || 60, cls: {kappa:1,mu:2,phi:4,sigma:0,gamma:1}, moveCls:{psi:2,mu_m:0,gamma_m:1,sigma_m:0,phi_m:2,mCell:0}, fellBack: true };
@@ -4047,11 +4102,30 @@ function pickNote(cands, ctx){
   const tV_trans = (ctx && ctx.tblVoice) ? transmuteRuleSpace(ctx.tblVoice, 'voice', cogTracker, vIdx, stepIdx) : null;
   const evalCtx = Object.assign({}, ctx, { transmutedMoveTbl: tM_trans, transmutedVoiceTbl: tV_trans });
 
+  const splineEval = (vIdx === 0 && ctx.totalSteps) ? evaluateMelodySpline(stepIdx, ctx.totalSteps) : { active: false, weight: 0 };
+
   const evaluated = cands.map(m => {
     const base = evalCandidateMove(prevP != null ? prevP : m, m, vIdx, stepIdx, otherP, prev2P, prev3P, evalCtx);
     const look = (ctx.chords && ctx.totalSteps) ? evaluateLookaheadMove(m, vIdx, stepIdx, ctx.totalSteps, ctx.chords, prevP, prev2P, otherP) : { isDeadEnd: false, penalty: 0.0, lookaheadCost: 0.0 };
     base.lookahead = look;
-    base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost;
+
+    // Spline attractor guidance cost for melody voice
+    let splineCost = 0.0;
+    if (splineEval.active && splineEval.weight > 0.01) {
+      const dist = Math.abs(m - splineEval.targetPitch);
+      // High weight strictly attracts note to exact destination; low weight gently shapes contour
+      splineCost += dist * 1.6 * splineEval.weight;
+
+      if (prevP != null && Math.abs(splineEval.targetVelocity) > 0.05) {
+        const vel = m - prevP;
+        if (vel * splineEval.targetVelocity < 0) {
+          splineCost += 2.2 * splineEval.weight; // Penalty for moving counter to spline target velocity
+        }
+      }
+    }
+
+    base.splineCost = splineCost;
+    base.totalPathCost = base.combinedCost + look.penalty + 0.5 * look.lookaheadCost + splineCost;
     return base;
   });
 
@@ -4709,9 +4783,10 @@ function ruleKey(){
   const tr = STATE.tieRules || {};
   const rr = STATE.ruleRing || {};
   const cog = STATE.cognitive || {};
+  const splineSig = (STATE.melodySpline || []).map(p => `${p.step}:${p.pitch}:${p.weight.toFixed(2)}`).join(',');
   return [STATE.root, STATE.scaleName, STATE.extended?1:0, STATE.tension.toFixed(4), STATE.take,
           STATE.bars, STATE.stepsPerBar, tr.mode, tr.wMotion, tr.wVoice, tr.wCost, tr.wFifths, tr.wGoal, tr.wDebt, tr.wContrary, tr.wStagnation,
-          cog.momentum, cog.reversal, cog.horizon, cog.surpriseFriction,
+          cog.momentum, cog.reversal, cog.horizon, cog.surpriseFriction, splineSig,
           rr.enabled?1:0, rr.op, rr.ruleA, rr.ruleB,
           profileSig(CHORD_AXES,STATE.profiles.chord), flipSig(STATE.cellFlips.chord)].join('|');
 }
@@ -6168,7 +6243,7 @@ function rollClickAt(mx,my){
    Where the bar runs past the next onset the gate is longer than the space to
    the next note, which is how a held voice rubs against the next harmony.
    ===================================================================== */
-const SEQ={ruler:22, lane:60, figLane:22, onset:26, env:16, motion:18, minStep:7, cursor:{v:0, step:0}};
+const SEQ={ruler:22, lane:60, figLane:22, splineLane:64, onset:26, env:16, motion:18, minStep:7, cursor:{v:0, step:0}};
 const MOTION_MODES = ['auto', 'step', 'leap', 'hold', 'contrary', 'oblique'];
 const MOTION_LABELS = { auto:'A', step:'S', leap:'L', hold:'H', contrary:'C', oblique:'O' };
 const MOTION_COLORS = { auto:'#64748b', step:'#3b82f6', leap:'#8b5cf6', hold:'#10b981', contrary:'#f59e0b', oblique:'#ec4899' };
@@ -6189,7 +6264,7 @@ const FIGURE_DESCRIPTIONS = {
 function seqLayout(){
   const sc=$('seqScroll'), total=STATE.bars*STATE.stepsPerBar;
   const avail=(sc&&sc.clientWidth)||600, w=Math.max(avail, total*SEQ.minStep);
-  return {w, total, stepW:w/total, h:SEQ.ruler+3*SEQ.lane+SEQ.figLane, scrolls:w>avail+1};
+  return {w, total, stepW:w/total, h:SEQ.ruler+3*SEQ.lane+SEQ.figLane+SEQ.splineLane, scrolls:w>avail+1};
 }
 function sizeSeq(){
   const L=seqLayout();
@@ -6217,7 +6292,8 @@ function renderSeqGutter(){
   b.addEventListener('click', ()=>{ STATE.lane='all'; renderSeqGutter(); drawSeq(); });
   host.appendChild(b);
   for(let v=0;v<3;v++) mkBtn(VOICE_NAMES[v], SEQ.ruler+v*SEQ.lane, SEQ.lane-2, v, THEME.str.voice[v]);
-  mkBtn('fig attractor', SEQ.ruler+3*SEQ.lane, SEQ.figLane-2, 'fig', '#0284c7');
+  mkBtn('figure', SEQ.ruler+3*SEQ.lane, SEQ.figLane-2, 'fig', '#0284c7');
+  mkBtn('spline target', SEQ.ruler+3*SEQ.lane+SEQ.figLane, SEQ.splineLane-2, 'spline', '#a855f7');
 }
 
 function drawSeq(){
@@ -6297,6 +6373,75 @@ function drawSeq(){
   }
   g.strokeStyle = css(THEME.grid, 0.4); g.lineWidth = 1;
   g.beginPath(); g.moveTo(0, figTop + 0.5); g.lineTo(w, figTop + 0.5); g.stroke();
+
+  // Melody Figure Attractor Spline Target Lane at bottom
+  const spTop = figTop + SEQ.figLane;
+  g.fillStyle = css(THEME.grid, 0.12);
+  g.fillRect(0, spTop, w, SEQ.splineLane);
+
+  // Background register pitch grid lines (C4=60, G4=67, C5=72, E5=76, G5=79, C6=84)
+  const regLo = REGISTERS[0].lo - 2, regHi = REGISTERS[0].hi + 2; // e.g., 58 to 86
+  const yOfSplinePitch = (p) => spTop + (1 - (p - regLo) / (regHi - regLo)) * (SEQ.splineLane - 10) + 5;
+  const pitchOfSplineY = (y) => regLo + (1 - (y - spTop - 5) / (SEQ.splineLane - 10)) * (regHi - regLo);
+
+  for (const m of [60, 67, 72, 79, 84]) {
+    const yGrid = yOfSplinePitch(m);
+    g.strokeStyle = css(THEME.grid, m === 72 ? 0.35 : 0.18);
+    g.lineWidth = 1;
+    g.beginPath(); g.moveTo(0, yGrid); g.lineTo(w, yGrid); g.stroke();
+    g.fillStyle = S.faint;
+    g.font = '8px ' + THEME.font.mono;
+    g.textAlign = 'left';
+    g.fillText(midiName(m), 4, yGrid - 2);
+  }
+
+  // Draw continuous Catmull-Rom target spline curve with velocity gradient
+  if (STATE.melodySpline && STATE.melodySpline.length >= 2) {
+    g.lineWidth = 2.4;
+    for (let s = 0; s < total - 1; s++) {
+      const e1 = evaluateMelodySpline(s, total);
+      const e2 = evaluateMelodySpline(s + 1, total);
+      const x1 = s * stepW + stepW / 2, y1 = yOfSplinePitch(e1.targetPitch);
+      const x2 = (s + 1) * stepW + stepW / 2, y2 = yOfSplinePitch(e2.targetPitch);
+
+      const alpha = Math.min(1.0, Math.max(0.25, e1.weight));
+      g.strokeStyle = e1.targetVelocity > 0.05 ? `rgba(56, 189, 248, ${alpha})` : (e1.targetVelocity < -0.05 ? `rgba(244, 63, 94, ${alpha})` : `rgba(168, 85, 247, ${alpha})`);
+
+      g.beginPath();
+      g.moveTo(x1, y1);
+      g.lineTo(x2, y2);
+      g.stroke();
+    }
+
+    // Draw control point handles
+    for (const pt of STATE.melodySpline) {
+      const hx = pt.step * stepW + stepW / 2;
+      const hy = yOfSplinePitch(pt.pitch);
+      const rad = 3.5 + pt.weight * 3.5;
+
+      // Glow circle
+      g.fillStyle = `rgba(168, 85, 247, ${0.4 + pt.weight * 0.5})`;
+      g.beginPath();
+      g.arc(hx, hy, rad, 0, Math.PI * 2);
+      g.fill();
+
+      // Core anchor
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.arc(hx, hy, 2.5, 0, Math.PI * 2);
+      g.fill();
+
+      // Text label: pitch & weight
+      g.font = '8.5px ' + THEME.font.mono;
+      g.fillStyle = S.ink;
+      g.textAlign = 'center';
+      g.fillText(`${midiName(pt.pitch)} (w:${pt.weight.toFixed(2)})`, hx, Math.max(spTop + 9, hy - rad - 2));
+    }
+  }
+
+  g.strokeStyle = css(THEME.grid, 0.4); g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, spTop + 0.5); g.lineTo(w, spTop + 0.5); g.stroke();
+
   for(let b=0;b<=STATE.bars;b++){
     const x=b*spb*stepW;
     g.strokeStyle=css(THEME.grid, b%4===0?0.5:0.3); g.lineWidth=1;
@@ -6316,6 +6461,12 @@ function seqHit(e){
   if(s<0||s>=total) return null;
   if(y<SEQ.ruler) return {kind:'bar', bar:Math.floor(s/STATE.stepsPerBar), step:s};
   const relY = y - SEQ.ruler;
+  if(relY >= 3 * SEQ.lane + SEQ.figLane) {
+    const regLo = REGISTERS[0].lo - 2, regHi = REGISTERS[0].hi + 2;
+    const spTop = SEQ.ruler + 3 * SEQ.lane + SEQ.figLane;
+    const pitch = regLo + (1 - (y - spTop - 5) / (SEQ.splineLane - 10)) * (regHi - regLo);
+    return {kind:'spline', step:s, pitch:Math.min(regHi, Math.max(regLo, Math.round(pitch))), rawY:y};
+  }
   if(relY >= 3 * SEQ.lane) return {kind:'figure', step:s};
   const v = Math.floor(relY / SEQ.lane);
   if(v<0||v>2) return null;
@@ -6933,6 +7084,45 @@ function renderSeqTools(){
   });
   host.appendChild(fBar);
 
+  const spLab = mk('span', 'aside', 'spline preset:'); spLab.style.margin = '0 2px 0 8px'; host.appendChild(spLab);
+  const btnArch = mk('button', 'tiny', 'arch'); btnArch.type = 'button';
+  btnArch.title = 'Set melody attractor spline to classic arch contour';
+  btnArch.addEventListener('click', ()=>{
+    const total = STATE.bars * STATE.stepsPerBar;
+    STATE.melodySpline = [
+      { step: 0, pitch: 72, weight: 0.60 },
+      { step: Math.round(total * 0.25), pitch: 76, weight: 0.75 },
+      { step: Math.round(total * 0.60), pitch: 81, weight: 0.95 },
+      { step: Math.round(total * 0.85), pitch: 74, weight: 0.80 },
+      { step: total - 1, pitch: 72, weight: 1.00 }
+    ];
+    regenerate(); histCommit(); drawSeq();
+  });
+  host.appendChild(btnArch);
+
+  const btnWave = mk('button', 'tiny', 'wave'); btnWave.type = 'button';
+  btnWave.title = 'Set melody attractor spline to dual wave contour';
+  btnWave.addEventListener('click', ()=>{
+    const total = STATE.bars * STATE.stepsPerBar;
+    STATE.melodySpline = [
+      { step: 0, pitch: 67, weight: 0.50 },
+      { step: Math.round(total * 0.25), pitch: 77, weight: 0.85 },
+      { step: Math.round(total * 0.50), pitch: 71, weight: 0.70 },
+      { step: Math.round(total * 0.75), pitch: 83, weight: 0.95 },
+      { step: total - 1, pitch: 72, weight: 1.00 }
+    ];
+    regenerate(); histCommit(); drawSeq();
+  });
+  host.appendChild(btnWave);
+
+  const btnClearSp = mk('button', 'tiny', 'clear spline'); btnClearSp.type = 'button';
+  btnClearSp.title = 'Clear all spline attractor points';
+  btnClearSp.addEventListener('click', ()=>{
+    STATE.melodySpline = [];
+    regenerate(); histCommit(); drawSeq();
+  });
+  host.appendChild(btnClearSp);
+
   if(STATE.selectedBar!=null){
     const b=STATE.selectedBar, ov=STATE.barOverrides[b]||{};
     const box=mk('span'); box.style.display='inline-flex'; box.style.gap='6px'; box.style.alignItems='center'; box.style.flexWrap='wrap';
@@ -7173,6 +7363,7 @@ function serializeState(opts){
     onsets:STATE.touched.map((t,v)=> t && STATE.onsets ? STATE.onsets[v].map(b=>b?1:0).join('') : null),
     motionConstraints: STATE.motionConstraints ? STATE.motionConstraints.map(arr => arr ? arr.slice() : []) : [[],[],[]],
     melodyFigures: STATE.melodyFigures ? STATE.melodyFigures.slice() : [],
+    melodySpline: STATE.melodySpline ? STATE.melodySpline.map(p => ({ step: p.step, pitch: r4(p.pitch), weight: r4(p.weight) })) : [],
     voiceEnv:STATE.voiceEnv.map(e=>({a:r4(e.a), d:r4(e.d), s:r4(e.s), r:r4(e.r), gateRatio:r4(e.gateRatio)})),
     noteEnv:canonNoteEnv(STATE.noteEnv),
   };
@@ -7254,6 +7445,22 @@ function restoreState(o){
     };
   } else {
     N.cognitive = { momentum: 0.70, reversal: 0.80, horizon: 4, surpriseFriction: 1.00 };
+  }
+  if(Array.isArray(o.melodySpline)){
+    N.melodySpline = o.melodySpline.filter(p => isPlain(p) && typeof p.step === 'number' && typeof p.pitch === 'number')
+      .map(p => ({
+        step: vInt(p.step, 0, 512, 0),
+        pitch: vNum(p.pitch, REGISTERS[0].lo - 4, REGISTERS[0].hi + 4, 72),
+        weight: vNum(p.weight, 0, 1, 0.5)
+      })).sort((a,b) => a.step - b.step);
+  } else {
+    N.melodySpline = [
+      { step: 0, pitch: 72, weight: 0.50 },
+      { step: 16, pitch: 76, weight: 0.75 },
+      { step: 36, pitch: 81, weight: 0.90 },
+      { step: 52, pitch: 74, weight: 0.80 },
+      { step: 63, pitch: 72, weight: 1.00 }
+    ];
   }
   N.arp = vEnum(o.arp, ['none','up','down','updown','downup','scramble'], 'none');
   N.tuning = vEnum(o.tuning, TUNING_ORDER, 'equal');
@@ -8134,6 +8341,41 @@ function bindSeq(){
       applyFigureAttractorToRhythmAndEnvelopes();
       scheduleRegenerate(); drawSeq();
       e.preventDefault();
+      return;
+    }
+    if(h.kind==='spline'){
+      if(!STATE.melodySpline) STATE.melodySpline = [];
+      const existingIdx = STATE.melodySpline.findIndex(p => p.step === h.step);
+
+      if(e.altKey || e.button === 2){
+        // Alt-click or Right-click to delete spline control point
+        if(existingIdx >= 0){
+          STATE.melodySpline.splice(existingIdx, 1);
+          regenerate(); histCommit(); drawSeq();
+        }
+        return;
+      }
+
+      if(existingIdx >= 0){
+        // Existing point: cycle weight or update pitch
+        if(e.shiftKey){
+          // Cycle weight: 0.25 -> 0.50 -> 0.75 -> 1.00 -> 0.25
+          const curW = STATE.melodySpline[existingIdx].weight;
+          const nextW = curW >= 0.95 ? 0.25 : Math.round((curW + 0.25) * 100) / 100;
+          STATE.melodySpline[existingIdx].weight = nextW;
+        } else {
+          STATE.melodySpline[existingIdx].pitch = h.pitch;
+        }
+      } else {
+        // Add new spline control point with default weight 0.80
+        STATE.melodySpline.push({
+          step: h.step,
+          pitch: h.pitch,
+          weight: e.shiftKey ? 1.00 : 0.80
+        });
+        STATE.melodySpline.sort((a, b) => a.step - b.step);
+      }
+      regenerate(); histCommit(); drawSeq();
       return;
     }
     SEQ.cursor.v=h.v; SEQ.cursor.step=h.step;
