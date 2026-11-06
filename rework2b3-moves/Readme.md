@@ -66,7 +66,56 @@ Candidate moves in `pickNote` and `pickEnhancedBassNote` evaluate a step $t+1$ l
 
 ---
 
+## 7. Secondary Composition Toolkit: Dynamic Context Hierarchy (`mode: 'contextual'`)
+Rather than relying on static scalar weights or rigid lexicographical cascades, the composition engine features a **3-Tier Contextual Dynamic Hierarchy**:
+- **Macro-Harmonic Arbitration (`chordNext` & `tieBreak`):**
+  Dynamically scales motion penalties, voice leading parsimony, fifths bonuses, and cadential goal attraction based on the active phrase stage (exposition vs development vs resolution) and cadential proximity.
+  $$S(c) = -w_\text{motion} \cdot P_\text{motion} - w_\text{voice} \cdot D_\text{vl} + w_\text{voice} \cdot B_\text{common} + w_\text{fifths} \cdot B_\text{fall} + w_\text{goal} \cdot B_\text{goal} \pm w_\text{cost} \cdot C_\text{rule}$$
+- **Micro-Contrapuntal Arbitration (`pickNote` & `pickEnhancedBassNote`):**
+  Integrates lookahead dead-end safety, cadence attraction, cognitive debt recovery (`\mu_m = 4`), anti-stagnation, and relative contrary motion over raw pitch proximity.
+- **Interactive Control Sliders:** Dedicated sliders for Motion Penalty, Voice Leading, Rule Cost, Circle of 5ths, Cadence Urgency (`wGoal`), Cognitive Debt Bias (`wDebt`), Contrary Motion Affinity (`wContrary`), and Anti-Stagnation Drive (`wStagnation`).
+
+---
+
+## 8. Real-Time Telemetry & Visual Inspection Dashboards
+The Secondary Composition Toolkit integrates three dedicated interactive canvas visualizers with real-time bidirectional synchronization:
+
+1. **Candidate Decision Inspector (`#tieDecisionCanvas`, `drawTieDecisionInspector`):**
+   - Renders a multi-colored stacked score breakdown bar chart for all candidate chord transitions at the active segment.
+   - Shows exact positive components (Cadential Goal, Fifths/Resolution, Common Tones, Rule Cost) vs negative penalties (Repetition, Voice Leading Distance).
+   - Interactive mouse hover tooltips display exact mathematical terms; clicking any candidate pins/unpins that transition.
+2. **Neurocognitive Movement Telemetry Dashboard (`#cogTrackerCanvas`, `drawCognitiveDashboard`):**
+   - Plots filled continuous momentum curves for Soprano ($E_0$) and Bass ($E_2$) alongside leap gap-fill debt gauges ($G_v$) and dissonance obligations ($O_v$).
+   - Displays a background histogram of Bayesian information surprise in bits ($- \log_2 P(pc)$).
+   - Clicking anywhere along the canvas seeks the active step.
+3. **2D Contrapuntal Tangent Phase Portrait (`#movePhaseCanvas`, `drawMovePhasePortrait`):**
+   - Visualizes melodic velocity $\Delta p_0$ versus bass velocity $\Delta p_2$ across the 4 phase quadrants:
+     - Quadrants II & IV: **Contrary Motion ($\gamma = 2$)** with green flow styling.
+     - Quadrants I & III: **Similar Motion ($\gamma = 0$)** with red cautionary styling.
+     - Axes: **Oblique Motion ($\gamma = 1$)** with cyan styling.
+   - Features directional velocity arrows and interactive scrubbing to inspect any step's vector in the score.
+
+---
+
+## 9. Melody Figure Attractor Spline Target Lane (`SEQ.splineLane`, `STATE.melodySpline`)
+The sequencer includes a dedicated **Spline Target Lane** allowing composers to paint continuous target pitch contours and velocity profiles:
+- **Catmull-Rom Cubic Interpolation (`evaluateMelodySpline`):**
+  Derives continuous target pitch $p^*(s)$, instantaneous velocity $v^*(s) = \frac{d p^*}{d s}$, and interpolated guidance weight $w^*(s)$ across all steps.
+- **Adjustable Control Point Weights ($0.25$ to $1.00$):**
+  - **Low Weight ($w \approx 0.25$):** Functions as gentle melodic contour guidance.
+  - **High Weight ($w \to 1.00$):** Strictly commands note destination, pulling candidates to exact target pitches.
+- **Velocity Alignment Guidance:**
+  Candidate notes moving counter to the spline target velocity ($\Delta p \cdot v^* < 0$) receive weighted kinetic friction penalties in `pickNote`.
+- **Interactive Painting & Presets:**
+  - Click to add or move control points.
+  - Shift-click to cycle weights ($0.25 \to 0.50 \to 0.75 \to 1.00$).
+  - Alt-click / Right-click to delete points.
+  - Sequencer toolbar presets: `arch`, `wave`, and `clear spline`.
+
+---
+
 ## Interactive Controls & UI
-- **4-Space Selector (`#selSpace`):** Toggle active editing across `CHORD`, `VOICE`, `MOVE`, and `TIME` spaces.
+- **4-Space Selector (`#btnSetChord`, `#btnSetVoice`, `#btnSetMove`, `#btnSetTime`):** Toggle active editing across `CHORD`, `VOICE`, `MOVE`, and `TIME` spaces.
+- **Movement Phase Badges (`#btnShowMovement`):** Toggle live $(\psi, \mu_m, \gamma_m, \sigma_m, \phi_m)$ movement vector badges on note onsets in the piano-roll score.
 - **Density & Profile Sliders (`#sLamM`, `#sLamT`, `#profM`, `#profT`):** Adjust rule space threshold densities and preset profile weightings in real-time.
-- **Live 3D & 2D Lattice Projections:** Real-time visual feedback of active rule space cells, multi-space trajectory paths, and dynamic rule-space transmutations.
+- **Full State Serialization (`serializeState` / `restoreState`):** Persists all 4 rule spaces, tie-breaking rules, cognitive tracker parameters, supervisory settings, and melody spline profiles with complete validation.
