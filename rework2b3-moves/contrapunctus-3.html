@@ -1428,6 +1428,8 @@ window.tensionBucket = tensionBucket;
 window.cIdx = cIdx;
 window.vIdx = vIdx;
 window.mIdx = mIdx;
+window.selectSeg = selectSeg;
+window.selectNote = selectNote;
 window.evaluateEndogenousRule = evaluateEndogenousRule;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
@@ -1623,6 +1625,66 @@ function renderExpansionUI() {
    CANDIDATE DECISION INSPECTOR & NEUROCOGNITIVE TELEMETRY CANVASES
    ========================================================================= */
 
+let TIE_INSPECTOR_GEO = null;
+
+function decomposeCandidateScore(current, prev2, candItem, phraseCtx) {
+  const tr = (STATE && STATE.tieRules) || { wMotion:1, wVoice:1, wCost:1, wFifths:0.5, wGoal:1.5, mode:'contextual' };
+  const mode = STATE.take || 'bold';
+  const c = candItem.c;
+
+  const stage = (phraseCtx && phraseCtx.phraseStage) || 'exposition';
+  const isCadence = (phraseCtx && (phraseCtx.cadenceApproaching || stage === 'resolution'));
+  const goal = (phraseCtx && phraseCtx.harmonicGoal) || 'open';
+  const urgency = isCadence ? 2.5 : (stage === 'climax' ? 1.8 : (stage === 'development' ? 1.4 : 1.0));
+
+  const dynMotion = tr.wMotion * (isCadence ? 2.5 : 1.0);
+  const dynVoice = tr.wVoice * (stage === 'exposition' ? 1.4 : 1.0);
+  const dynFifths = tr.wFifths * (isCadence ? 2.2 : (stage === 'development' ? 1.3 : 1.0));
+  const dynGoal = (tr.wGoal != null ? tr.wGoal : 1.5) * urgency;
+
+  let termRepetition = 0;
+  if (c.rootPc === current.rootPc && c.quality === current.quality) termRepetition = -12.0 * dynMotion;
+  else if (prev2 && c.rootPc === prev2.rootPc && c.quality === prev2.quality) termRepetition = -4.5 * dynMotion;
+
+  const vl = voiceLeadingDistance(current.tones, c.tones);
+  const termVoiceLeading = -(vl / 12.0) * dynVoice;
+
+  const currentPcs = new Set((current.tones || []).map(pcOf));
+  let commonCount = 0;
+  if (c.tones) {
+    for (const t of c.tones) if (currentPcs.has(pcOf(t))) commonCount++;
+  }
+  const termCommonTones = commonCount * 0.45 * dynVoice;
+
+  const cCost = candItem.cost || 0;
+  const termRuleCost = (mode === 'bold') ? (cCost * tr.wCost * (stage === 'development' ? 1.5 : 1.0)) : (-cCost * tr.wCost);
+
+  const fall = (current.rootPc - c.rootPc + 12) % 12;
+  let termFifths = 0;
+  if (fall === 7) termFifths += 1.8 * dynFifths;
+  else if (fall === 5) termFifths += 0.9 * dynFifths;
+  if (current.ring > 0 && (fall === 7 || fall === 1)) termFifths += 1.5 * dynFifths;
+
+  let termGoal = 0;
+  if (goal === 'dominant' && (fall === 7 || c.rootPc === 7 || c.degree === 4)) termGoal = 3.0 * dynGoal;
+  else if (goal === 'tonic' && (c.rootPc === 0 || c.degree === 0)) termGoal = 4.5 * dynGoal;
+
+  const totalScore = termRepetition + termVoiceLeading + termCommonTones + termRuleCost + termFifths + termGoal;
+
+  return {
+    totalScore,
+    termRepetition,
+    termVoiceLeading,
+    termCommonTones,
+    termRuleCost,
+    termFifths,
+    termGoal,
+    fall,
+    vl,
+    cost: cCost
+  };
+}
+
 function drawTieDecisionInspector() {
   const cv = $('tieDecisionCanvas');
   if (!cv) return;
@@ -1646,10 +1708,12 @@ function drawTieDecisionInspector() {
   const segIdx = Math.min(Math.max(1, STATE.selectedSeg || 1), c.walk.length - 1);
   const wSeg = c.walk[segIdx];
   const prevSeg = c.walk[segIdx - 1];
+  const prev2Seg = segIdx > 1 ? c.walk[segIdx - 2] : null;
 
+  const chordDesc = (ch) => ch ? `${NOTE_NAMES[ch.rootPc]}${ch.quality || ''}` : '';
   const headerEl = $('tieInspectorHeader');
   if (headerEl && prevSeg && wSeg) {
-    headerEl.textContent = `Segment ${segIdx}: ${prevSeg.chord.roman} (${prevSeg.chord.name}) \u2192 ${wSeg.chord.roman} (${wSeg.chord.name})`;
+    headerEl.textContent = `Segment ${segIdx}: ${prevSeg.chord.roman} (${chordDesc(prevSeg.chord)}) \u2192 ${wSeg.chord.roman} (${chordDesc(wSeg.chord)})`;
   }
 
   // Evaluate candidate successors from prevSeg.chord
@@ -1657,68 +1721,107 @@ function drawTieDecisionInspector() {
   const tbl = chordTable();
   const target = targetForSeg(segIdx);
   const pCtx = getPhraseStructure(segIdx, c.walk.length);
-  const stepRes = chordStep(prevSeg.chord, segIdx > 1 ? c.walk[segIdx - 2].chord : null, prevSeg.etaIn || 1, tbl, vocab, target, pCtx);
+  const stepRes = chordStep(prevSeg.chord, prev2Seg ? prev2Seg.chord : null, prevSeg.etaIn || 1, tbl, vocab, target, pCtx);
   const cands = stepRes.cands || [];
 
   if (!cands.length) return;
 
-  const padL = 45, padR = 15, padT = 20, padB = 25;
+  const padL = 48, padR = 20, padT = 24, padB = 26;
   const chartW = w - padL - padR, chartH = h - padT - padB;
 
-  const numItems = Math.min(10, cands.length);
+  const numItems = Math.min(9, cands.length);
   const displayCands = cands.slice(0, numItems);
   const colW = chartW / numItems;
 
-  const scores = displayCands.map((item, idx) => {
+  const decompList = displayCands.map((item, idx) => {
+    const decomp = decomposeCandidateScore(prevSeg.chord, prev2Seg ? prev2Seg.chord : null, item, pCtx);
     const isChosen = item.c.key === wSeg.chord.key;
-    return { item, isChosen, rank: idx + 1 };
+    const isPin = STATE.pins && STATE.pins[segIdx] === item.c.key;
+    return { item, decomp, isChosen, isPin, rank: idx + 1 };
   });
 
-  const maxScore = Math.max.apply(null, scores.map((s, idx) => 10 - idx * 0.8)) || 10;
+  const scores = decompList.map(d => d.decomp.totalScore);
+  const minScore = Math.min.apply(null, scores.concat([-5]));
+  const maxScore = Math.max.apply(null, scores.concat([10]));
+  const scoreSpan = Math.max(1, maxScore - minScore);
 
-  for (let i = 0; i < scores.length; i++) {
-    const s = scores[i];
-    const x = padL + i * colW + colW * 0.1;
-    const barW = colW * 0.8;
-    const normH = Math.max(0.1, (10 - i * 0.85) / maxScore);
-    const barH = normH * (chartH - 25);
-    const y = padT + (chartH - 25) - barH;
+  const zeroY = padT + ((maxScore - 0) / scoreSpan) * chartH;
 
-    // Draw Pareto Bar
-    if (s.isChosen) {
-      ctx.fillStyle = dark ? 'rgba(74, 222, 128, 0.85)' : 'rgba(34, 197, 94, 0.85)';
-    } else {
-      ctx.fillStyle = dark ? 'rgba(96, 165, 250, 0.45)' : 'rgba(59, 130, 246, 0.45)';
-    }
-    ctx.fillRect(x, y, barW, barH);
-
-    // Border highlight
-    if (s.isChosen) {
-      ctx.strokeStyle = dark ? '#fff' : '#000';
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(x, y, barW, barH);
-    }
-
-    // Label chord name below
-    ctx.font = '10px monospace';
-    ctx.fillStyle = dark ? '#e0e0e0' : '#222';
-    ctx.textAlign = 'center';
-    ctx.fillText(s.item.c.roman, x + barW / 2, h - 10);
-
-    // Fall & cost info above
-    ctx.font = '8.5px monospace';
-    ctx.fillStyle = dark ? '#999' : '#666';
-    const fall = (prevSeg.chord.rootPc - s.item.c.rootPc + 12) % 12;
-    ctx.fillText(fall === 7 ? 'V-I' : `d:${fall}`, x + barW / 2, Math.max(12, y - 4));
-  }
-
-  // Draw axis line
-  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
+  // Draw zero reference line
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)';
   ctx.lineWidth = 1;
+  ctx.setLineDash([2, 2]);
   ctx.beginPath();
-  ctx.moveTo(padL, padT + chartH - 25);
-  ctx.lineTo(w - padR, padT + chartH - 25);
+  ctx.moveTo(padL, zeroY); ctx.lineTo(w - padR, zeroY);
   ctx.stroke();
+  ctx.setLineDash([]);
+
+  TIE_INSPECTOR_GEO = { padL, padT, colW, numItems, decompList, segIdx };
+
+  for (let i = 0; i < decompList.length; i++) {
+    const d = decompList[i];
+    const x = padL + i * colW + colW * 0.12;
+    const barW = colW * 0.76;
+    const scoreVal = d.decomp.totalScore;
+    const barH = (Math.abs(scoreVal) / scoreSpan) * chartH;
+    const y = scoreVal >= 0 ? (zeroY - barH) : zeroY;
+
+    // Stacked component visualization:
+    // Positive components (Fifths, Goal, Common, Cost if bold) vs Negative (Repetition, VoiceLeading)
+    const posSum = Math.max(0.1, Math.max(0, d.decomp.termFifths) + Math.max(0, d.decomp.termGoal) + Math.max(0, d.decomp.termCommonTones) + Math.max(0, d.decomp.termRuleCost));
+
+    if (scoreVal >= 0) {
+      // Draw positive stacked bar
+      let stackY = zeroY;
+      // 1. Goal bonus (Gold)
+      if (d.decomp.termGoal > 0) {
+        const hPart = (d.decomp.termGoal / scoreSpan) * chartH;
+        ctx.fillStyle = dark ? '#fbbf24' : '#d97706';
+        ctx.fillRect(x, stackY - hPart, barW, hPart);
+        stackY -= hPart;
+      }
+      // 2. Fifths / Resolution bonus (Green)
+      if (d.decomp.termFifths > 0) {
+        const hPart = (d.decomp.termFifths / scoreSpan) * chartH;
+        ctx.fillStyle = dark ? '#4ade80' : '#16a34a';
+        ctx.fillRect(x, stackY - hPart, barW, hPart);
+        stackY -= hPart;
+      }
+      // 3. Common Tone bonus (Cyan)
+      if (d.decomp.termCommonTones > 0) {
+        const hPart = (d.decomp.termCommonTones / scoreSpan) * chartH;
+        ctx.fillStyle = dark ? '#38bdf8' : '#0284c7';
+        ctx.fillRect(x, stackY - hPart, barW, hPart);
+        stackY -= hPart;
+      }
+    } else {
+      // Draw negative penalty bar (Repetition & Voice leading)
+      ctx.fillStyle = dark ? 'rgba(239, 68, 68, 0.7)' : 'rgba(220, 38, 38, 0.7)';
+      ctx.fillRect(x, zeroY, barW, barH);
+    }
+
+    // Border highlight for selected or pinned chord
+    if (d.isChosen) {
+      ctx.strokeStyle = dark ? '#fff' : '#000';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x - 1, y - 1, barW + 2, barH + 2);
+    } else if (d.isPin) {
+      ctx.strokeStyle = THEME.str.hand || '#f59e0b';
+      ctx.lineWidth = 1.8;
+      ctx.strokeRect(x - 1, y - 1, barW + 2, barH + 2);
+    }
+
+    // Chord Roman numeral below
+    ctx.font = '10px monospace';
+    ctx.fillStyle = d.isChosen ? (dark ? '#4ade80' : '#15803d') : (dark ? '#e0e0e0' : '#222');
+    ctx.textAlign = 'center';
+    ctx.fillText(d.item.c.roman + (d.isPin ? '◆' : ''), x + barW / 2, h - 8);
+
+    // Score value above
+    ctx.font = '8.5px monospace';
+    ctx.fillStyle = dark ? '#aaa' : '#666';
+    ctx.fillText((scoreVal > 0 ? '+' : '') + scoreVal.toFixed(1), x + barW / 2, Math.max(12, y - 4));
+  }
 
   // Y-axis label
   ctx.save();
@@ -1727,9 +1830,11 @@ function drawTieDecisionInspector() {
   ctx.textAlign = 'center';
   ctx.font = '9.5px sans-serif';
   ctx.fillStyle = dark ? '#888' : '#777';
-  ctx.fillText('Rank / Pareto Score', 0, 0);
+  ctx.fillText('Contextual Fitness Score', 0, 0);
   ctx.restore();
 }
+
+let COG_TRACKER_GEO = null;
 
 function drawCognitiveDashboard() {
   const cv = $('cogTrackerCanvas');
@@ -1752,14 +1857,17 @@ function drawCognitiveDashboard() {
   if (!c || !c.pitches || !c.pitches[0] || !c.pitches[0].length) return;
 
   const totalSteps = c.total || 64;
-  const padL = 40, padR = 20, padT = 20, padB = 25;
+  const padL = 42, padR = 20, padT = 20, padB = 25;
   const chartW = w - padL - padR, chartH = h - padT - padB;
+
+  COG_TRACKER_GEO = { padL, padR, padT, padB, chartW, chartH, totalSteps };
 
   // Simulate cognitive tracker progression across the 64 steps
   const tracker = new CognitiveStateTracker();
   const momentumSeries = [[], [], []];
   const debtSeries = [[], [], []];
   const surpriseSeries = [];
+  const obligationSeries = [];
 
   for (let s = 0; s < totalSteps; s++) {
     const p0 = c.pitches[0][s], p1 = c.pitches[1][s], p2 = c.pitches[2][s];
@@ -1776,9 +1884,21 @@ function drawCognitiveDashboard() {
       debtSeries[v].push(tracker.voices[v].G && tracker.voices[v].G.pending ? tracker.voices[v].G.remainingDist : 0);
     }
     surpriseSeries.push(tracker.evaluateExpectationSurprise(p0));
+    obligationSeries.push(tracker.voices[0].O ? 1 : 0);
   }
 
-  // Draw Voice Momentum curves
+  // Draw Bayesian Surprise background histogram bars
+  const maxSurprise = Math.max.apply(null, surpriseSeries.concat([4])) || 4;
+  const stepColW = chartW / totalSteps;
+  for (let s = 0; s < totalSteps; s++) {
+    const x = padL + s * stepColW;
+    const surpNorm = Math.min(1.0, surpriseSeries[s] / maxSurprise);
+    const surpH = surpNorm * (chartH * 0.45);
+    ctx.fillStyle = dark ? 'rgba(168, 85, 247, 0.16)' : 'rgba(147, 51, 234, 0.12)';
+    ctx.fillRect(x, padT + chartH - surpH, Math.max(1, stepColW - 1), surpH);
+  }
+
+  // Draw Voice Momentum curves with smooth gradient fills
   const voiceColors = [
     dark ? '#38bdf8' : '#0284c7', // Soprano
     dark ? '#fbbf24' : '#d97706', // Alto
@@ -1786,45 +1906,62 @@ function drawCognitiveDashboard() {
   ];
 
   // Draw 0 line
-  const midY = padT + chartH * 0.45;
-  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+  const midY = padT + chartH * 0.42;
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(padL, midY);
   ctx.lineTo(w - padR, midY);
   ctx.stroke();
 
-  // Draw curves for Voice 0 (Soprano) and Voice 2 (Bass)
+  // Draw filled area and curve for Soprano (Voice 0)
+  ctx.fillStyle = dark ? 'rgba(56, 189, 248, 0.12)' : 'rgba(2, 132, 199, 0.08)';
+  ctx.beginPath();
+  ctx.moveTo(padL, midY);
+  for (let s = 0; s < totalSteps; s++) {
+    const x = padL + (s / (totalSteps - 1)) * chartW;
+    const val = momentumSeries[0][s];
+    const y = midY - val * (chartH * 0.36);
+    ctx.lineTo(x, y);
+  }
+  ctx.lineTo(padL + chartW, midY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Curve lines for Soprano (v=0) and Bass (v=2)
   for (let v of [0, 2]) {
     ctx.strokeStyle = voiceColors[v];
     ctx.lineWidth = 1.8;
     ctx.beginPath();
     for (let s = 0; s < totalSteps; s++) {
       const x = padL + (s / (totalSteps - 1)) * chartW;
-      const val = momentumSeries[v][s]; // -1 to 1
-      const y = midY - val * (chartH * 0.35);
+      const val = momentumSeries[v][s];
+      const y = midY - val * (chartH * 0.36);
       if (s === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
   }
 
-  // Draw Gap-fill debt markers
+  // Draw Gap-Fill Debt service indicators (orange/red debt meters)
   for (let s = 0; s < totalSteps; s++) {
     const x = padL + (s / (totalSteps - 1)) * chartW;
-    if (debtSeries[0][s] > 0) {
-      ctx.fillStyle = 'rgba(239, 68, 68, 0.7)';
+    const d0 = debtSeries[0][s];
+    const d2 = debtSeries[2][s];
+    if (d0 > 0 || d2 > 0) {
+      const debtVal = Math.max(d0, d2);
+      ctx.fillStyle = d0 > 0 ? '#ef4444' : '#f97316';
       ctx.beginPath();
-      ctx.arc(x, padT + 8, 3, 0, Math.PI * 2);
+      ctx.arc(x, padT + 8, Math.min(5, 2.5 + debtVal * 0.5), 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  // Active step marker
-  const curStep = (typeof STATE.step === 'number' && STATE.step >= 0) ? STATE.step : 0;
+  // Active step playhead / selection marker
+  const curStep = (typeof STATE.step === 'number' && STATE.step >= 0) ? STATE.step : (STATE.selectedSeg ? STATE.selectedSeg * (STATE.stepsPerBar || 8) : 0);
   const curX = padL + (curStep / (totalSteps - 1)) * chartW;
   ctx.strokeStyle = dark ? '#fff' : '#000';
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.6;
   ctx.setLineDash([3, 3]);
   ctx.beginPath();
   ctx.moveTo(curX, padT);
@@ -1832,22 +1969,37 @@ function drawCognitiveDashboard() {
   ctx.stroke();
   ctx.setLineDash([]);
 
+  // Telemetry header info
+  const hInfo = $('cogTrackerHeader');
+  if (hInfo) {
+    const e0 = momentumSeries[0][curStep] || 0;
+    const e2 = momentumSeries[2][curStep] || 0;
+    const surp = surpriseSeries[curStep] || 0;
+    const d0 = debtSeries[0][curStep] || 0;
+    hInfo.textContent = `Step ${curStep + 1}: E₀=${e0 > 0 ? '+' : ''}${e0.toFixed(2)}, E₂=${e2 > 0 ? '+' : ''}${e2.toFixed(2)}, Surprise=${surp.toFixed(1)}b${d0 > 0 ? `, Debt=${d0}st` : ''}`;
+  }
+
   // Legend
   ctx.font = '9.5px monospace';
   ctx.fillStyle = voiceColors[0];
   ctx.textAlign = 'left';
-  ctx.fillText('\u2014 Soprano Momentum (E_0)', padL, h - 8);
+  ctx.fillText('\u2014 Soprano Momentum', padL, h - 8);
 
   ctx.fillStyle = voiceColors[2];
-  ctx.fillText('\u2014 Bass Momentum (E_2)', padL + 180, h - 8);
+  ctx.fillText('\u2014 Bass Momentum', padL + 160, h - 8);
 
-  ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
-  ctx.fillText('\u25CF Gap-Fill Debt', padL + 340, h - 8);
+  ctx.fillStyle = '#ef4444';
+  ctx.fillText('\u25CF Gap Debt', padL + 300, h - 8);
+
+  ctx.fillStyle = dark ? '#c084fc' : '#9333ea';
+  ctx.fillText('\u2588 Surprise', padL + 400, h - 8);
 }
 
 /* =========================================================================
    2D CONTRAPUNTAL TANGENT PHASE PORTRAIT (\Delta p_0 \times \Delta p_2)
    ========================================================================= */
+
+let MOVE_PHASE_GEO = null;
 
 function drawMovePhasePortrait() {
   const cv = $('movePhaseCanvas');
@@ -1871,23 +2023,32 @@ function drawMovePhasePortrait() {
 
   const totalSteps = c.total || 64;
   const cx = w / 2, cy = h / 2;
-  const maxRange = 7.5; // semitones delta velocity range
+  const maxRange = 7.5;
   const scaleX = (w * 0.42) / maxRange;
   const scaleY = (h * 0.40) / maxRange;
 
   // Quadrant background shading
-  // Quadrant II (dp0 < 0, dp2 > 0) & Quadrant IV (dp0 > 0, dp2 < 0) are CONTRARY MOTION (Optimal)
-  ctx.fillStyle = dark ? 'rgba(74, 222, 128, 0.06)' : 'rgba(34, 197, 94, 0.05)';
-  ctx.fillRect(0, 0, cx, cy); // Q2: dp0 < 0, dp2 > 0 (Contrary)
-  ctx.fillRect(cx, cy, cx, cy); // Q4: dp0 > 0, dp2 < 0 (Contrary)
+  // Contrary Motion Quadrants (Optimal Counterpoint)
+  ctx.fillStyle = dark ? 'rgba(74, 222, 128, 0.08)' : 'rgba(34, 197, 94, 0.06)';
+  ctx.fillRect(0, 0, cx, cy); // Q2: dp0 < 0, dp2 > 0
+  ctx.fillRect(cx, cy, cx, cy); // Q4: dp0 > 0, dp2 < 0
 
-  // Quadrant I & III are SIMILAR MOTION (Requires parsimony)
-  ctx.fillStyle = dark ? 'rgba(239, 68, 68, 0.04)' : 'rgba(239, 68, 68, 0.03)';
-  ctx.fillRect(cx, 0, cx, cy); // Q1: dp0 > 0, dp2 > 0 (Similar)
-  ctx.fillRect(0, cy, cx, cy); // Q3: dp0 < 0, dp2 < 0 (Similar)
+  // Similar Motion Quadrants
+  ctx.fillStyle = dark ? 'rgba(239, 68, 68, 0.05)' : 'rgba(239, 68, 68, 0.04)';
+  ctx.fillRect(cx, 0, cx, cy); // Q1: dp0 > 0, dp2 > 0
+  ctx.fillRect(0, cy, cx, cy); // Q3: dp0 < 0, dp2 < 0
+
+  // Draw background vector streamlines indicating contrary motion flow
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.04)';
+  ctx.lineWidth = 1;
+  for (let r = 2; r <= 6; r += 2) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * scaleX, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
   // Draw Quadrant Axes
-  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.20)' : 'rgba(0,0,0,0.20)';
+  ctx.strokeStyle = dark ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.25)';
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(0, cy); ctx.lineTo(w, cy);
@@ -1898,9 +2059,9 @@ function drawMovePhasePortrait() {
   ctx.font = '9px monospace';
   ctx.fillStyle = dark ? '#86efac' : '#15803d';
   ctx.textAlign = 'left';
-  ctx.fillText('CONTRARY MOTION (\u03b3=2)', 10, 14);
+  ctx.fillText('CONTRARY (\u03b3=2)', 10, 14);
   ctx.textAlign = 'right';
-  ctx.fillText('CONTRARY MOTION (\u03b3=2)', w - 10, h - 8);
+  ctx.fillText('CONTRARY (\u03b3=2)', w - 10, h - 8);
 
   ctx.fillStyle = dark ? '#fca5a5' : '#b91c1c';
   ctx.textAlign = 'right';
@@ -1922,16 +2083,39 @@ function drawMovePhasePortrait() {
     }
   }
 
-  // Draw Phase Flow Trajectory Lines
-  ctx.strokeStyle = dark ? 'rgba(147, 197, 253, 0.4)' : 'rgba(59, 130, 246, 0.4)';
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  for (let i = 0; i < points.length; i++) {
+  MOVE_PHASE_GEO = { cx, cy, scaleX, scaleY, points };
+
+  // Draw Segmented Trajectory Lines with motion-based styling
+  for (let i = 1; i < points.length; i++) {
+    const pPrev = points[i - 1];
     const pt = points[i];
-    if (i === 0) ctx.moveTo(pt.x, pt.y);
-    else ctx.lineTo(pt.x, pt.y);
+    const isContrary = (pt.dp0 * pt.dp2) < 0;
+    const isOblique = (pt.dp0 === 0 || pt.dp2 === 0);
+
+    ctx.strokeStyle = isContrary ? (dark ? 'rgba(74, 222, 128, 0.7)' : 'rgba(22, 163, 74, 0.7)') :
+                      (isOblique ? (dark ? 'rgba(56, 189, 248, 0.6)' : 'rgba(2, 132, 199, 0.6)') :
+                                   (dark ? 'rgba(248, 113, 113, 0.6)' : 'rgba(220, 38, 38, 0.6)'));
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(pPrev.x, pPrev.y);
+    ctx.lineTo(pt.x, pt.y);
+    ctx.stroke();
+
+    // Directional vector arrows
+    if (i % 2 === 0) {
+      const angle = Math.atan2(pt.y - pPrev.y, pt.x - pPrev.x);
+      const midX = (pPrev.x + pt.x) / 2;
+      const midY = (pPrev.y + pt.y) / 2;
+      const arrLen = 4;
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.beginPath();
+      ctx.moveTo(midX + arrLen * Math.cos(angle), midY + arrLen * Math.sin(angle));
+      ctx.lineTo(midX - arrLen * Math.cos(angle - 0.5), midY - arrLen * Math.sin(angle - 0.5));
+      ctx.lineTo(midX - arrLen * Math.cos(angle + 0.5), midY - arrLen * Math.sin(angle + 0.5));
+      ctx.closePath();
+      ctx.fill();
+    }
   }
-  ctx.stroke();
 
   // Draw Trajectory Vector Points
   for (let i = 0; i < points.length; i++) {
@@ -1950,16 +2134,22 @@ function drawMovePhasePortrait() {
   const activePt = points.find(p => p.s === activeStep);
   if (activePt) {
     ctx.strokeStyle = dark ? '#fff' : '#000';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.arc(activePt.x, activePt.y, 6, 0, Math.PI * 2);
+    ctx.arc(activePt.x, activePt.y, 7, 0, Math.PI * 2);
     ctx.stroke();
 
     // Text info
     ctx.font = '10px monospace';
     ctx.fillStyle = dark ? '#fff' : '#000';
     ctx.textAlign = 'center';
-    ctx.fillText(`Step ${activePt.s}: (\u0394p\u2080=${activePt.dp0 > 0 ? '+' : ''}${activePt.dp0}, \u0394p\u2082=${activePt.dp2 > 0 ? '+' : ''}${activePt.dp2})`, activePt.x, Math.max(16, activePt.y - 9));
+    ctx.fillText(`Step ${activePt.s}: (\u0394p\u2080=${activePt.dp0 > 0 ? '+' : ''}${activePt.dp0}, \u0394p\u2082=${activePt.dp2 > 0 ? '+' : ''}${activePt.dp2})`, activePt.x, Math.max(16, activePt.y - 10));
+
+    const headEl = $('movePhaseHeader');
+    if (headEl) {
+      const motionType = (activePt.dp0 * activePt.dp2 < 0) ? 'Contrary Motion (\u03b3=2)' : ((activePt.dp0 === 0 || activePt.dp2 === 0) ? 'Oblique Motion (\u03b3=1)' : 'Similar Motion (\u03b3=0)');
+      headEl.textContent = `Active Step ${activePt.s}: ${motionType}`;
+    }
   }
 
   // Axis descriptors
@@ -6425,7 +6615,10 @@ function ensureSelectedNote(){
 }
 function selectNote(v, step, reveal){
   STATE.selectedNote={v,step};
+  STATE.step = step;
   drawRoll(); drawSeq(); drawEnv();
+  drawCognitiveDashboard();
+  drawMovePhasePortrait();
   if(reveal){
     const el=$('envCanvas');
     if(el && el.scrollIntoView) try{ el.scrollIntoView({block:'nearest', behavior:REDUCED_MOTION()?'auto':'smooth'}); }catch(e){}
@@ -6434,7 +6627,12 @@ function selectNote(v, step, reveal){
 function selectSeg(s){
   const c=STATE.composed; if(!c) return;
   STATE.selectedSeg=Math.max(0,Math.min(c.segments-1,s)); HOVER.branch=null;
+  STATE.step = s * (c.L || STATE.stepsPerBar || 8);
   renderBranches(); drawRoll(); drawLattice();
+  drawTieDecisionInspector();
+  drawCognitiveDashboard();
+  drawMovePhasePortrait();
+  renderExpansionUI();
 }
 
 /* ---- status line -------------------------------------------------------------------- */
@@ -8030,6 +8228,129 @@ function bindBasin(){
     STATE.seed.chordIdx=s.chordIdx; STATE.seed.eta=s.eta; STATE.seed.prev2Idx=s.prev2Idx;
     refreshSeedSelects(); regenerate(); histCommit();
   });
+
+  // Bind interactive handlers for Candidate Decision Inspector
+  const cvDecision = $('tieDecisionCanvas');
+  if (cvDecision) {
+    cvDecision.addEventListener('pointermove', e => {
+      const G = TIE_INSPECTOR_GEO;
+      if (!G) return;
+      const r = cvDecision.getBoundingClientRect();
+      const mx = e.clientX - r.left - G.padL;
+      const col = Math.floor(mx / G.colW);
+      if (col >= 0 && col < G.decompList.length) {
+        cvDecision.style.cursor = 'pointer';
+        const d = G.decompList[col];
+        const decomp = d.decomp;
+        const tipLines = [
+          `<b>${d.item.c.roman} (${d.item.c.name})</b> · Rank #${d.rank}`,
+          `Total Fitness: <b>${decomp.totalScore > 0 ? '+' : ''}${decomp.totalScore.toFixed(2)}</b>`,
+          `Fifths/Res: +${decomp.termFifths.toFixed(2)} | Goal: +${decomp.termGoal.toFixed(2)} | Common: +${decomp.termCommonTones.toFixed(2)}`,
+          `Repetition: ${decomp.termRepetition.toFixed(2)} | Voice-Leading: ${decomp.termVoiceLeading.toFixed(2)} | Rule Cost: ${decomp.termRuleCost.toFixed(2)}`,
+          d.isChosen ? '<b>Currently selected successor</b>' : (d.isPin ? '<b>Pinned by you</b>' : 'Click to pin this transition')
+        ];
+        showTip(e.clientX, e.clientY, tipLines);
+      } else {
+        cvDecision.style.cursor = 'default';
+        hideTip();
+      }
+    });
+    cvDecision.addEventListener('pointerleave', hideTip);
+    cvDecision.addEventListener('click', e => {
+      const G = TIE_INSPECTOR_GEO;
+      if (!G) return;
+      const r = cvDecision.getBoundingClientRect();
+      const mx = e.clientX - r.left - G.padL;
+      const col = Math.floor(mx / G.colW);
+      if (col >= 0 && col < G.decompList.length) {
+        const d = G.decompList[col];
+        if (STATE.pins[G.segIdx] === d.item.c.key) delete STATE.pins[G.segIdx];
+        else STATE.pins[G.segIdx] = d.item.c.key;
+        regenerate(); histCommit();
+      }
+    });
+  }
+
+  // Bind interactive scrubbing for Neurocognitive Movement Telemetry
+  const cvCog = $('cogTrackerCanvas');
+  if (cvCog) {
+    cvCog.addEventListener('pointermove', e => {
+      const G = COG_TRACKER_GEO;
+      if (!G) return;
+      const r = cvCog.getBoundingClientRect();
+      const mx = e.clientX - r.left - G.padL;
+      const step = Math.min(G.totalSteps - 1, Math.max(0, Math.floor((mx / G.chartW) * G.totalSteps)));
+      cvCog.style.cursor = 'pointer';
+      const c = STATE.composed;
+      if (c && c.pitches) {
+        const p0 = c.pitches[0][step], p2 = c.pitches[2][step];
+        showTip(e.clientX, e.clientY, [
+          `<b>Step ${step + 1} of ${G.totalSteps}</b> (Bar ${Math.floor(step / (STATE.stepsPerBar || 8)) + 1})`,
+          `Soprano: <b>${midiName(p0)}</b> | Bass: <b>${midiName(p2)}</b>`,
+          'Click to jump focus to this step'
+        ]);
+      }
+    });
+    cvCog.addEventListener('pointerleave', hideTip);
+    cvCog.addEventListener('click', e => {
+      const G = COG_TRACKER_GEO;
+      if (!G) return;
+      const r = cvCog.getBoundingClientRect();
+      const mx = e.clientX - r.left - G.padL;
+      const step = Math.min(G.totalSteps - 1, Math.max(0, Math.floor((mx / G.chartW) * G.totalSteps)));
+      STATE.step = step;
+      selectNote(0, step, false);
+      drawCognitiveDashboard();
+      drawMovePhasePortrait();
+    });
+  }
+
+  // Bind interactive scrubbing for 2D Phase Portrait
+  const cvPhase = $('movePhaseCanvas');
+  if (cvPhase) {
+    cvPhase.addEventListener('pointermove', e => {
+      const G = MOVE_PHASE_GEO;
+      if (!G || !G.points.length) return;
+      const r = cvPhase.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      let best = null, bd = 1e9;
+      for (const pt of G.points) {
+        const d = Math.hypot(mx - pt.x, my - pt.y);
+        if (d < bd) { bd = d; best = pt; }
+      }
+      if (best && bd < 20) {
+        cvPhase.style.cursor = 'pointer';
+        const motionType = (best.dp0 * best.dp2 < 0) ? 'Contrary Motion (\u03b3=2)' : ((best.dp0 === 0 || best.dp2 === 0) ? 'Oblique Motion (\u03b3=1)' : 'Similar Motion (\u03b3=0)');
+        showTip(e.clientX, e.clientY, [
+          `<b>Step ${best.s} Velocity Vector:</b>`,
+          `Melody \u0394p\u2080: <b>${best.dp0 > 0 ? '+' : ''}${best.dp0}st</b> | Bass \u0394p\u2082: <b>${best.dp2 > 0 ? '+' : ''}${best.dp2}st</b>`,
+          `Contrapuntal Motion: <b>${motionType}</b>`,
+          'Click to inspect this step in score'
+        ]);
+      } else {
+        cvPhase.style.cursor = 'default';
+        hideTip();
+      }
+    });
+    cvPhase.addEventListener('pointerleave', hideTip);
+    cvPhase.addEventListener('click', e => {
+      const G = MOVE_PHASE_GEO;
+      if (!G || !G.points.length) return;
+      const r = cvPhase.getBoundingClientRect();
+      const mx = e.clientX - r.left, my = e.clientY - r.top;
+      let best = null, bd = 1e9;
+      for (const pt of G.points) {
+        const d = Math.hypot(mx - pt.x, my - pt.y);
+        if (d < bd) { bd = d; best = pt; }
+      }
+      if (best && bd < 25) {
+        STATE.step = best.s;
+        selectNote(0, best.s, false);
+        drawMovePhasePortrait();
+        drawCognitiveDashboard();
+      }
+    });
+  }
 }
 
 /* ---- keeping ------------------------------------------------------------------------------------------- */
