@@ -731,7 +731,8 @@ details.fold[open] > summary::before{content:"\2013 ";}
           <div style="display:flex; gap:16px; margin-top:4px; align-items:center; flex-wrap:wrap;">
             <label>Mode:
               <select id="selTieMode">
-                <option value="weighted" selected>Weighted Rule Domain</option>
+                <option value="contextual" selected>Dynamic Context Hierarchy</option>
+                <option value="weighted">Weighted Rule Domain</option>
                 <option value="tiered">Strict Tiered Hardcoded</option>
               </select>
             </label>
@@ -1280,7 +1281,7 @@ function defaultVoiceEnv(v){
 }
 
 const STATE = {
-  tieRules: { wMotion: 1.0, wVoice: 1.0, wCost: 1.0, wFifths: 0.5, wGoal: 0.5, mode: 'weighted' },
+  tieRules: { wMotion: 1.0, wVoice: 1.0, wCost: 1.0, wFifths: 0.5, wGoal: 0.5, mode: 'contextual' },
   root:0, scaleName:'Ionian',
   bars:8, stepsPerBar:8, lastStepsPerBar:8, harmonic:'bar',
   tempo:96, tension:0.30,
@@ -1543,8 +1544,9 @@ function renderExpansionUI() {
 function renderTieUI() {
   const el = document.getElementById('tieExprRead');
   if (el) {
-    const mode = STATE.tieRules ? STATE.tieRules.mode : 'weighted';
-    el.textContent = `Mode: ${mode === 'weighted' ? 'Weighted Rule Domain' : 'Strict Tiered Hardcoded'}`;
+    const mode = STATE.tieRules ? STATE.tieRules.mode : 'contextual';
+    const modeName = mode === 'contextual' ? 'Dynamic Context Hierarchy' : (mode === 'weighted' ? 'Weighted Rule Domain' : 'Strict Tiered Hardcoded');
+    el.textContent = `Mode: ${modeName}`;
   }
   renderExpansionUI();
 }
@@ -2402,7 +2404,8 @@ function targetForSeg(g){
 }
 
 function tieBreak(current, prev2, phraseCtx){
-  const tr = (STATE && STATE.tieRules) || { wMotion:1, wVoice:1, wCost:1, wFifths:0.5, wGoal:0.5, mode:'weighted' };
+  const tr = (STATE && STATE.tieRules) || { wMotion:1, wVoice:1, wCost:1, wFifths:0.5, wGoal:0.5, mode:'contextual' };
+  const mode = STATE.take;
 
   if(tr.mode === 'tiered'){
     const tier = (c)=>{
@@ -2410,7 +2413,6 @@ function tieBreak(current, prev2, phraseCtx){
       if(prev2 && c.rootPc===prev2.rootPc && c.quality===prev2.quality) return 1;
       return 0;
     };
-    const mode = STATE.take;
     return (a,b)=>{
       const ta=tier(a.c), tb=tier(b.c);
       if(ta!==tb) return ta-tb;
@@ -2423,45 +2425,104 @@ function tieBreak(current, prev2, phraseCtx){
     };
   }
 
-  // Weighted Rule Domain Evaluation
   const currentPcs = new Set((current.tones || []).map(pcOf));
+
+  if(tr.mode === 'contextual'){
+    // Dynamic Context-Aware Pareto Hierarchy:
+    // Derives weights & priorities dynamically from macro-phrase stage, cadence proximity, and harmonic momentum
+    const stage = (phraseCtx && phraseCtx.phraseStage) || 'exposition';
+    const isCadence = (phraseCtx && (phraseCtx.cadenceApproaching || stage === 'resolution'));
+    const goal = (phraseCtx && phraseCtx.harmonicGoal) || 'open';
+    const urgency = isCadence ? 2.5 : (stage === 'climax' ? 1.8 : (stage === 'development' ? 1.4 : 1.0));
+
+    const dynMotion = tr.wMotion * (isCadence ? 2.5 : 1.0); // Stricter repetition avoidance near cadences
+    const dynVoice = tr.wVoice * (stage === 'exposition' ? 1.4 : 1.0); // Maximum smooth voice-leading in exposition
+    const dynFifths = tr.wFifths * (isCadence ? 2.2 : (stage === 'development' ? 1.3 : 1.0));
+    const dynGoal = tr.wGoal * urgency;
+
+    const scoreCandidateContextual = (item)=>{
+      const c = item.c;
+      let score = 0;
+
+      // Tier A: Harmonic motion & repetition avoidance
+      let tierPenalty = 0;
+      if(c.rootPc===current.rootPc && c.quality===current.quality) tierPenalty = 12.0;
+      else if(prev2 && c.rootPc===prev2.rootPc && c.quality===prev2.quality) tierPenalty = 4.5;
+      score -= tierPenalty * dynMotion;
+
+      // Tier B: Voice Leading & Acoustic Parsimony
+      const vl = voiceLeadingDistance(current.tones, c.tones);
+      score -= (vl / 12.0) * dynVoice;
+
+      let commonCount = 0;
+      if(c.tones) {
+        for(const t of c.tones) if(currentPcs.has(pcOf(t))) commonCount++;
+      }
+      score += (commonCount * 0.45) * dynVoice;
+
+      // Tier C: Rule Cost Surface modulated by Take Policy
+      let cCost = item.cost;
+      if(mode === 'bold') score += cCost * tr.wCost * (stage === 'development' ? 1.5 : 1.0);
+      else score -= cCost * tr.wCost;
+
+      // Tier D: Functional Circle of 5ths & Secondary Resolution
+      const fall = (current.rootPc - c.rootPc + 12) % 12;
+      if(fall === 7) score += 1.8 * dynFifths;
+      else if(fall === 5) score += 0.9 * dynFifths;
+
+      if(current.ring > 0 && (fall === 7 || fall === 1)) {
+        score += 1.5 * dynFifths; // Secondary dominant / tritone sub resolution
+      }
+
+      // Tier E: Macro-Phrase Goal Alignment
+      if(goal === 'dominant' && (fall === 7 || c.rootPc === 7 || c.degree === 4)){
+        score += 3.0 * dynGoal;
+      } else if(goal === 'tonic' && (c.rootPc === 0 || c.degree === 0)){
+        score += 4.5 * dynGoal;
+      }
+
+      return score;
+    };
+
+    return (a,b)=>{
+      const sa = scoreCandidateContextual(a);
+      const sb = scoreCandidateContextual(b);
+      if(Math.abs(sa - sb) > 1e-4) return sb - sa;
+      return a.c.rootPc - b.c.rootPc;
+    };
+  }
+
+  // Weighted Rule Domain Evaluation (Static Weights)
   const scoreCandidate = (item)=>{
     const c = item.c;
     let score = 0;
 
-    // 1. Motion penalty / bonus
     let tierPenalty = 0;
     if(c.rootPc===current.rootPc && c.quality===current.quality) tierPenalty = 10.0;
     else if(prev2 && c.rootPc===prev2.rootPc && c.quality===prev2.quality) tierPenalty = 4.0;
     score -= tierPenalty * tr.wMotion;
 
-    // 2. Voice leading distance penalty
     const vl = voiceLeadingDistance(current.tones, c.tones);
     score -= (vl / 12.0) * tr.wVoice;
 
-    // 3. Rule cost & take mode
-    const mode = STATE.take;
     let cCost = item.cost;
     if(mode==='bold') score += cCost * tr.wCost;
     else score -= cCost * tr.wCost;
 
-    // 4. Circle of 5ths root fall & applied secondary resolution bonus
     const fall = (current.rootPc - c.rootPc + 12) % 12;
-    if(fall === 7) score += 1.5 * tr.wFifths; // perfect 5th down
+    if(fall === 7) score += 1.5 * tr.wFifths;
     else if(fall === 5) score += 0.8 * tr.wFifths;
 
     if(current.ring > 0 && fall === 7) {
-      score += 1.2 * tr.wFifths; // applied secondary dominant / leading tone resolution
+      score += 1.2 * tr.wFifths;
     }
 
-    // 5. Common Tone Smoothness Bonus
     let commonCount = 0;
     if(c.tones) {
       for(const t of c.tones) if(currentPcs.has(pcOf(t))) commonCount++;
     }
     score += (commonCount * 0.4) * tr.wVoice;
 
-    // 6. Cadential Phrase Goal alignment
     if(phraseCtx && phraseCtx.harmonicGoal === 'dominant' && (c.degree === 4 || fall === 7)){
       score += 2.0 * tr.wGoal;
     } else if(phraseCtx && phraseCtx.harmonicGoal === 'tonic' && c.degree === 0){
@@ -2474,7 +2535,7 @@ function tieBreak(current, prev2, phraseCtx){
   return (a,b)=>{
     const sa = scoreCandidate(a);
     const sb = scoreCandidate(b);
-    if(Math.abs(sa - sb) > 1e-5) return sb - sa; // Higher score comes first
+    if(Math.abs(sa - sb) > 1e-5) return sb - sa;
     return a.c.rootPc - b.c.rootPc;
   };
 }
@@ -2544,7 +2605,7 @@ function vocabKit(vocab, target){
 function chordNext(cur, prev2, eta, tbl, kit, mode, phraseCtx, tieRules){
   const V=kit.V, vl=kit.vl, same=kit.same, common=kit.common, fidx=kit.fidx, root=kit.root, ring=kit.ring, fall=kit.fall, tt=tbl.t, cs=tbl.costs;
   const eo=eta*CS[3], row=cur*V, prow=prev2>=0 ? prev2*V : -1;
-  tieRules = tieRules || STATE.tieRules || { mode:'weighted', wMotion:1, wVoice:1, wCost:1, wFifths:0.5, wGoal:0.5 };
+  tieRules = tieRules || STATE.tieRules || { mode:'contextual', wMotion:1, wVoice:1, wCost:1, wFifths:0.5, wGoal:0.5 };
   mode = mode || STATE.take || 'bold';
 
   let best=-1, bestScore=-Infinity;
@@ -2554,7 +2615,46 @@ function chordNext(cur, prev2, eta, tbl, kit, mode, phraseCtx, tieRules){
       if(pass===0 && !tt[f]) continue;
 
       let score = 0;
-      if(tieRules.mode === 'weighted'){
+      if(tieRules.mode === 'contextual'){
+        const stage = (phraseCtx && phraseCtx.phraseStage) || 'exposition';
+        const isCadence = (phraseCtx && (phraseCtx.cadenceApproaching || stage === 'resolution'));
+        const goal = (phraseCtx && phraseCtx.harmonicGoal) || 'open';
+        const urgency = isCadence ? 2.5 : (stage === 'climax' ? 1.8 : (stage === 'development' ? 1.4 : 1.0));
+
+        const dynMotion = tieRules.wMotion * (isCadence ? 2.5 : 1.0);
+        const dynVoice = tieRules.wVoice * (stage === 'exposition' ? 1.4 : 1.0);
+        const dynFifths = tieRules.wFifths * (isCadence ? 2.2 : (stage === 'development' ? 1.3 : 1.0));
+        const dynGoal = tieRules.wGoal * urgency;
+
+        let tierPenalty = 0;
+        if(same[row+j]) tierPenalty = 12.0;
+        else if(prow>=0 && same[prow+j]) tierPenalty = 4.5;
+        score -= tierPenalty * dynMotion;
+
+        const vDist = vl[row+j];
+        score -= (vDist / 12.0) * dynVoice;
+
+        const ct = common ? common[row+j] : 0;
+        score += (ct * 0.45) * dynVoice;
+
+        const cCost = cs[f];
+        if(mode === 'bold') score += cCost * tieRules.wCost * (stage === 'development' ? 1.5 : 1.0);
+        else score -= cCost * tieRules.wCost;
+
+        const rf = fall[row+j];
+        if(rf === 7) score += 1.8 * dynFifths;
+        else if(rf === 5) score += 0.9 * dynFifths;
+
+        if(ring[cur] > 0 && (rf === 7 || rf === 1)) {
+          score += 1.5 * dynFifths;
+        }
+
+        if(goal === 'dominant' && (rf === 7 || root[j] === 7)){
+          score += 3.0 * dynGoal;
+        } else if(goal === 'tonic' && root[j] === 0){
+          score += 4.5 * dynGoal;
+        }
+      } else if(tieRules.mode === 'weighted'){
         let tierPenalty = 0;
         if(same[row+j]) tierPenalty = 10.0;
         else if(prow>=0 && same[prow+j]) tierPenalty = 4.0;
@@ -3366,31 +3466,78 @@ function pickNote(cands, ctx){
   }
 
   const mode = STATE.take;
+  const tr = (STATE && STATE.tieRules) || { mode: 'contextual' };
+  const supCtx = ctx.supCtx || {};
+  const isCadence = supCtx.phraseStage === 'resolution' || supCtx.cadenceApproaching;
+
   legal.sort((a, b) => {
+    // Tier 1: Lookahead safety & cognitive feasibility
     if (a.lookahead.isDeadEnd !== b.lookahead.isDeadEnd) {
       return a.lookahead.isDeadEnd ? 1 : -1;
     }
 
-    if (ctx.preferRoot != null) {
-      const ra = pcOf(a.m) === ctx.preferRoot ? 0 : 1;
-      const rb = pcOf(b.m) === ctx.preferRoot ? 0 : 1;
-      if (ra !== rb) return ra - rb;
-    }
+    // Tier 2: Contextual Dynamic Hierarchy Tie-Breaker
+    if (tr.mode === 'contextual') {
+      // 2A. Cadential & Harmonic Goal Attraction
+      if (ctx.preferRoot != null) {
+        const ra = pcOf(a.m) === ctx.preferRoot ? 0 : 1;
+        const rb = pcOf(b.m) === ctx.preferRoot ? 0 : 1;
+        if (ra !== rb) return ra - rb;
+      }
 
-    if (mode === 'bold' && prevP != null) {
-      const isZeroA = (a.m === prevP) ? 1 : 0;
-      const isZeroB = (b.m === prevP) ? 1 : 0;
-      if (isZeroA !== isZeroB) return isZeroA - isZeroB;
-    }
+      // 2B. Resolution / Recovery priority when cognitive debt is active
+      const isRecA = a.moveCls && a.moveCls.mu_m === 4 ? 0 : 1;
+      const isRecB = b.moveCls && b.moveCls.mu_m === 4 ? 0 : 1;
+      if (isRecA !== isRecB) return isRecA - isRecB;
 
-    if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.01) {
-      return a.totalPathCost - b.totalPathCost;
-    }
+      // 2C. Stagnation avoidance on bold take or during climax/development
+      if (prevP != null && (mode === 'bold' || supCtx.phraseStage === 'development' || supCtx.phraseStage === 'climax')) {
+        const isZeroA = (a.m === prevP) ? 1 : 0;
+        const isZeroB = (b.m === prevP) ? 1 : 0;
+        if (isZeroA !== isZeroB) return isZeroA - isZeroB;
+      }
 
-    if (prevP != null) {
-      const da = Math.abs(a.m - prevP);
-      const db = Math.abs(b.m - prevP);
-      if (da !== db) return da - db;
+      // 2D. Relative Motion preference (favor contrary motion over similar)
+      const gammaA = a.cls ? a.cls.gamma : 1;
+      const gammaB = b.cls ? b.cls.gamma : 1;
+      if (gammaA !== gammaB) {
+        // Contrary (2) > Oblique (1) > Similar (0)
+        return gammaB - gammaA;
+      }
+
+      // 2E. Continuous Tensor Path Cost
+      if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.05) {
+        return a.totalPathCost - b.totalPathCost;
+      }
+
+      // 2F. Proximity & Singing Voice-Leading
+      if (prevP != null) {
+        const da = Math.abs(a.m - prevP);
+        const db = Math.abs(b.m - prevP);
+        if (da !== db) return da - db;
+      }
+    } else {
+      if (ctx.preferRoot != null) {
+        const ra = pcOf(a.m) === ctx.preferRoot ? 0 : 1;
+        const rb = pcOf(b.m) === ctx.preferRoot ? 0 : 1;
+        if (ra !== rb) return ra - rb;
+      }
+
+      if (mode === 'bold' && prevP != null) {
+        const isZeroA = (a.m === prevP) ? 1 : 0;
+        const isZeroB = (b.m === prevP) ? 1 : 0;
+        if (isZeroA !== isZeroB) return isZeroA - isZeroB;
+      }
+
+      if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.01) {
+        return a.totalPathCost - b.totalPathCost;
+      }
+
+      if (prevP != null) {
+        const da = Math.abs(a.m - prevP);
+        const db = Math.abs(b.m - prevP);
+        if (da !== db) return da - db;
+      }
     }
 
     return a.m - b.m;
@@ -3466,45 +3613,99 @@ function pickEnhancedBassNote(cands, ctx) {
     }
   }
 
+  const tr = (STATE && STATE.tieRules) || { mode: 'contextual' };
+  const supCtx = ctx.supCtx || {};
+
   legal.sort((a, b) => {
     if (a.lookahead.isDeadEnd !== b.lookahead.isDeadEnd) {
       return a.lookahead.isDeadEnd ? 1 : -1;
     }
 
-    const isOscA = (prev2P != null && a.m === prev2P && a.m !== prevP) ? 1 : 0;
-    const isOscB = (prev2P != null && b.m === prev2P && b.m !== prevP) ? 1 : 0;
-    if (isOscA !== isOscB) return isOscA - isOscB;
+    // Contextual Dynamic Tie-Breaker for Bass
+    if (tr.mode === 'contextual') {
+      // 1. Oscillation check
+      const isOscA = (prev2P != null && a.m === prev2P && a.m !== prevP) ? 1 : 0;
+      const isOscB = (prev2P != null && b.m === prev2P && b.m !== prevP) ? 1 : 0;
+      if (isOscA !== isOscB) return isOscA - isOscB;
 
-    if (ctx.structural && ctx.rootPc != null) {
-      const isRootA = pcOf(a.m) === ctx.rootPc ? 0 : 1;
-      const isRootB = pcOf(b.m) === ctx.rootPc ? 0 : 1;
-      if (isRootA !== isRootB) return isRootA - isRootB;
-    }
-
-    if (preferredPcs && preferredPcs.length) {
-      const rankA = preferredPcs.indexOf(pcOf(a.m));
-      const rankB = preferredPcs.indexOf(pcOf(b.m));
-      if (rankA !== -1 || rankB !== -1) {
-        if (rankA === -1) return 1;
-        if (rankB === -1) return -1;
-        if (rankA !== rankB) return rankA - rankB;
+      // 2. Harmonic anchor on structural beat / cadence
+      if ((ctx.structural || supCtx.cadenceApproaching) && ctx.rootPc != null) {
+        const isRootA = pcOf(a.m) === ctx.rootPc ? 0 : 1;
+        const isRootB = pcOf(b.m) === ctx.rootPc ? 0 : 1;
+        if (isRootA !== isRootB) return isRootA - isRootB;
       }
-    }
 
-    if (approachPc != null) {
-      const distA = pcDist(pcOf(a.m), approachPc);
-      const distB = pcDist(pcOf(b.m), approachPc);
-      if (isEnclosure) {
-        const encA = distA === 1 ? 0 : 1;
-        const encB = distB === 1 ? 0 : 1;
-        if (encA !== encB) return encA - encB;
-      } else {
-        if (distA !== distB) return distA - distB;
+      // 3. Preferred chord PCs
+      if (preferredPcs && preferredPcs.length) {
+        const rankA = preferredPcs.indexOf(pcOf(a.m));
+        const rankB = preferredPcs.indexOf(pcOf(b.m));
+        if (rankA !== -1 || rankB !== -1) {
+          if (rankA === -1) return 1;
+          if (rankB === -1) return -1;
+          if (rankA !== rankB) return rankA - rankB;
+        }
       }
-    }
 
-    if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.01) {
-      return a.totalPathCost - b.totalPathCost;
+      // 4. Linear Approach / Enclosure targeting
+      if (approachPc != null) {
+        const distA = pcDist(pcOf(a.m), approachPc);
+        const distB = pcDist(pcOf(b.m), approachPc);
+        if (isEnclosure) {
+          const encA = distA === 1 ? 0 : 1;
+          const encB = distB === 1 ? 0 : 1;
+          if (encA !== encB) return encA - encB;
+        } else {
+          if (distA !== distB) return distA - distB;
+        }
+      }
+
+      // 5. Relative Motion (prefer contrary motion against melody)
+      const gammaA = a.cls ? a.cls.gamma : 1;
+      const gammaB = b.cls ? b.cls.gamma : 1;
+      if (gammaA !== gammaB) {
+        return gammaB - gammaA;
+      }
+
+      // 6. Path cost
+      if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.05) {
+        return a.totalPathCost - b.totalPathCost;
+      }
+    } else {
+      const isOscA = (prev2P != null && a.m === prev2P && a.m !== prevP) ? 1 : 0;
+      const isOscB = (prev2P != null && b.m === prev2P && b.m !== prevP) ? 1 : 0;
+      if (isOscA !== isOscB) return isOscA - isOscB;
+
+      if (ctx.structural && ctx.rootPc != null) {
+        const isRootA = pcOf(a.m) === ctx.rootPc ? 0 : 1;
+        const isRootB = pcOf(b.m) === ctx.rootPc ? 0 : 1;
+        if (isRootA !== isRootB) return isRootA - isRootB;
+      }
+
+      if (preferredPcs && preferredPcs.length) {
+        const rankA = preferredPcs.indexOf(pcOf(a.m));
+        const rankB = preferredPcs.indexOf(pcOf(b.m));
+        if (rankA !== -1 || rankB !== -1) {
+          if (rankA === -1) return 1;
+          if (rankB === -1) return -1;
+          if (rankA !== rankB) return rankA - rankB;
+        }
+      }
+
+      if (approachPc != null) {
+        const distA = pcDist(pcOf(a.m), approachPc);
+        const distB = pcDist(pcOf(b.m), approachPc);
+        if (isEnclosure) {
+          const encA = distA === 1 ? 0 : 1;
+          const encB = distB === 1 ? 0 : 1;
+          if (encA !== encB) return encA - encB;
+        } else {
+          if (distA !== distB) return distA - distB;
+        }
+      }
+
+      if (Math.abs(a.totalPathCost - b.totalPathCost) > 0.01) {
+        return a.totalPathCost - b.totalPathCost;
+      }
     }
 
     return a.m - b.m;
@@ -6377,7 +6578,7 @@ function restoreState(o){
   N.extended = vBool(o.extended,false); N.walkingBass = vBool(o.walkingBass,false);
   if(isPlain(o.tieRules)){
     N.tieRules = {
-      mode: vEnum(o.tieRules.mode, ['weighted','tiered'], 'weighted'),
+      mode: vEnum(o.tieRules.mode, ['contextual','weighted','tiered'], 'contextual'),
       wMotion: vNum(o.tieRules.wMotion, 0, 5, 1.0),
       wVoice: vNum(o.tieRules.wVoice, 0, 5, 1.0),
       wCost: vNum(o.tieRules.wCost, 0, 5, 1.0),
@@ -6385,7 +6586,7 @@ function restoreState(o){
       wGoal: vNum(o.tieRules.wGoal, 0, 5, 0.5)
     };
   } else {
-    N.tieRules = { mode:'weighted', wMotion:1.0, wVoice:1.0, wCost:1.0, wFifths:0.5, wGoal:0.5 };
+    N.tieRules = { mode:'contextual', wMotion:1.0, wVoice:1.0, wCost:1.0, wFifths:0.5, wGoal:0.5 };
   }
   N.arp = vEnum(o.arp, ['none','up','down','updown','downup','scramble'], 'none');
   N.tuning = vEnum(o.tuning, TUNING_ORDER, 'equal');
