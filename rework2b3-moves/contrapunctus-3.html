@@ -1345,6 +1345,8 @@ window.etaOf = etaOf;
 window.rootFall = rootFall;
 window.tensionBucket = tensionBucket;
 window.cIdx = cIdx;
+window.vIdx = vIdx;
+window.mIdx = mIdx;
 window.evaluateEndogenousRule = evaluateEndogenousRule;
 
 // How the rule table is laid out on screen. 'grid' and 'hyper' are linear: every axis owns a
@@ -3923,12 +3925,41 @@ function compose(){
   for(const r of voices){
     for(let v=0;v<3;v++){
       pitches[v][r.step]=r.pitches[v]; deco[v][r.step]=r.deco[v]; fell[v][r.step]=r.fellBack[v];
-      const c=r.cells[v];
-      if(c){ const f=vIdx(c.kappa,c.mu,c.phi,c.sigma,c.gamma); voiceCells.add(f); voiceCellSeq.push(f); vcell[v][r.step]=f; }
       const mc=r.moveCells?r.moveCells[v]:null;
       if(mc && mc.mCell!=null){ moveCells.add(mc.mCell); moveCellSeq.push(mc.mCell); mcell[v][r.step]=mc.mCell; }
       const tc=r.timeCells?r.timeCells[v]:null;
       if(tc && tc.tCell!=null){ timeCells.add(tc.tCell); timeCellSeq.push(tc.tCell); tcell[v][r.step]=tc.tCell; }
+    }
+  }
+
+  // Simultaneous Voice Agreement Reconciliation:
+  // Re-evaluate true three-voice vertical agreement (kappa) for all sounding voices at step s
+  for(const r of voices){
+    const s = r.step;
+    const sounding = [null, null, null];
+    for (let u = 0; u < 3; u++) {
+      for (let k = s; k >= 0; k--) {
+        if (pitches[u][k] != null) { sounding[u] = pitches[u][k]; break; }
+      }
+    }
+
+    for(let v=0;v<3;v++){
+      const c=r.cells[v];
+      if(c && pitches[v][s] != null){
+        let trueKappa = 0;
+        const p = pitches[v][s];
+        for (let u = 0; u < 3; u++) {
+          if (u === v || sounding[u] == null) continue;
+          const ic = ((Math.abs(p - sounding[u])) % 12 + 12) % 12;
+          const isUpperFourth = (ic === 5 && v !== 2 && u !== 2);
+          if (ic === 3 || ic === 4 || ic === 7 || ic === 8 || ic === 9 || ic === 0 || isUpperFourth) {
+            trueKappa++;
+          }
+        }
+        trueKappa = Math.min(2, trueKappa);
+        const f = vIdx(trueKappa, c.mu, c.phi, c.sigma, c.gamma);
+        voiceCells.add(f); voiceCellSeq.push(f); vcell[v][s] = f;
+      }
     }
   }
   const chordCells=new Set(), chordCellSeq=[];
