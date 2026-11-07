@@ -20,3 +20,4 @@ A deterministic counterpoint automaton, cellular composition engine, and multi-d
   - *2D Contrapuntal Tangent Phase Portrait (`movePhaseCanvas`):* Velocity vector flow plane ($\Delta p_0 \times \Delta p_2$) mapping contrary, oblique, and similar motion with live scrubbing.
   - *Score Movement Phase Badges (`#btnShowMovement`):* Displays live $(\psi, \mu_m, \gamma_m, \sigma_m, \phi_m)$ movement vector badges on notes.
 - **Visual Dashboards:** Complete suite of 10 interactive canvas visualizers including 3D Rule Hypercubes, Fiber Bundle Closures, 2D Phase Space Trajectories, Decision Inspectors, Cognitive Telemetry, Piano Roll Scores, Multi-Voice Sequencer Lanes, Envelope Editors, and Basin Maps.
+- **Zero External Dependencies & Bundling:** All fonts, stylesheets, scripts, audio synthesis engines, and WebGL painters are 100% self-contained with no external network requests. Run `python3 scripts/bundle.py` to package or verify standalone offline bundles.
